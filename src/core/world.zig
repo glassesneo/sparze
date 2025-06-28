@@ -1,6 +1,8 @@
 const std = @import("std");
 
-const Entity = @import("entity.zig").Entity;
+const entityModule = @import("entity.zig");
+const Entity = entityModule.Entity;
+const EntityManager = entityModule.EntityManager;
 
 const sparse_set = @import("sparse_set.zig");
 const SparseSet = sparse_set.SparseSet;
@@ -9,18 +11,38 @@ const AbstractSparseSet = sparse_set.AbstractSparseSet;
 const SparseSetStorage = @import("storage.zig").SparseSetStorage;
 
 pub const World = struct {
+    entityManager: EntityManager,
     sparseSetStorage: SparseSetStorage,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) World {
         return World{
+            .entityManager = EntityManager.init(allocator),
             .sparseSetStorage = SparseSetStorage.init(allocator),
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *World) void {
+        self.entityManager.deinit();
         self.sparseSetStorage.deinit();
+    }
+
+    pub fn createEntity(self: *World) Entity {
+        return self.entityManager.create();
+    }
+
+    pub fn destroyEntity(self: *World, entity: Entity) void {
+        self.entityManager.destroy(entity);
+        self.sparseSetStorage.removeAllComponents(entity);
+    }
+
+    pub fn containsEntity(self: *const World, entity: Entity) bool {
+        return self.entityManager.exists(entity);
+    }
+
+    pub fn getAllEntities(self: *const World) []const Entity {
+        return self.entityManager.getAllEntities();
     }
 
     /// Attaches a component to an entity.
@@ -47,64 +69,121 @@ pub const World = struct {
     }
 };
 
-test "World basic operations" {
-    // Test component types
-    const Position = struct { x: f32, y: f32 };
-    const Velocity = struct { dx: f32, dy: f32 };
-    const Health = struct { value: i32 };
-
-    // Initialize world
+test "World entity operations" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = World.init(arena.allocator());
     defer world.deinit();
 
-    // Create entities
-    const entity1 = Entity.init(1);
-    const entity2 = Entity.init(2);
+    // Test entity creation
+    const e1 = world.createEntity();
+    const e2 = world.createEntity();
 
-    // Test single component attachment
-    try world.attachComponent(entity1, Position, .{ .x = 10, .y = 20 });
-    try std.testing.expect(world.hasComponent(entity1, Position));
-    try std.testing.expect(!world.hasComponent(entity1, Velocity));
+    // Test entity existence
+    try std.testing.expect(world.containsEntity(e1));
+    try std.testing.expect(world.containsEntity(e2));
+    try std.testing.expect(!world.containsEntity(Entity{ .id = 999 }));
 
-    // Test component retrieval
-    const pos = world.getComponent(entity1, Position) orelse unreachable;
-    try std.testing.expectEqual(@as(f32, 10), pos.x);
-    try std.testing.expectEqual(@as(f32, 20), pos.y);
+    // Test getAllEntities
+    const entities = world.getAllEntities();
+    try std.testing.expectEqual(@as(usize, 2), entities.len);
+    try std.testing.expectEqual(e1.id, entities[0].id);
+    try std.testing.expectEqual(e2.id, entities[1].id);
 
-    // Test multi-component attachment
-    try world.attachComponents(entity2, .{
-        Position{ .x = 5, .y = 15 },
-        Velocity{ .dx = 1, .dy = 2 },
-        Health{ .value = 100 },
+    // Test entity destruction
+    world.destroyEntity(e1);
+    try std.testing.expect(!world.containsEntity(e1));
+    try std.testing.expect(world.containsEntity(e2));
+}
+
+test "World component operations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var world = World.init(arena.allocator());
+    defer world.deinit();
+
+    const e1 = world.createEntity();
+
+    const Position = struct {
+        x: f32 = 0,
+        y: f32 = 0,
+    };
+
+    const Velocity = struct {
+        x: f32 = 0,
+        y: f32 = 0,
+    };
+
+    // Test initial state
+    try std.testing.expect(!world.hasComponent(e1, Position));
+    try std.testing.expect(world.getComponent(e1, Position) == null);
+
+    // Test attaching a single component
+    try world.attachComponent(e1, Position, .{ .x = 10, .y = 20 });
+    try std.testing.expect(world.hasComponent(e1, Position));
+
+    if (world.getComponent(e1, Position)) |pos| {
+        try std.testing.expectEqual(@as(f32, 10), pos.x);
+        try std.testing.expectEqual(@as(f32, 20), pos.y);
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
+    // Test attaching multiple components
+    try world.attachComponents(e1, .{
+        Velocity{ .x = 1, .y = 2 },
     });
 
-    try std.testing.expect(world.hasComponent(entity2, Position));
-    try std.testing.expect(world.hasComponent(entity2, Velocity));
-    try std.testing.expect(world.hasComponent(entity2, Health));
+    try std.testing.expect(world.hasComponent(e1, Velocity));
+
+    if (world.getComponent(e1, Velocity)) |vel| {
+        try std.testing.expectEqual(@as(f32, 1), vel.x);
+        try std.testing.expectEqual(@as(f32, 2), vel.y);
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
+    // Test entity destruction removes components
+    world.destroyEntity(e1);
+    try std.testing.expect(!world.hasComponent(e1, Position));
+    try std.testing.expect(!world.hasComponent(e1, Velocity));
+}
+
+test "World multiple entities with components" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var world = World.init(arena.allocator());
+    defer world.deinit();
+
+    const Tag = struct {};
+    const Health = struct { value: i32 };
+
+    const e1 = world.createEntity();
+    const e2 = world.createEntity();
+    const e3 = world.createEntity();
+
+    // Create different component configurations
+    try world.attachComponent(e1, Tag, .{});
+    try world.attachComponent(e1, Health, .{ .value = 100 });
+
+    try world.attachComponent(e2, Health, .{ .value = 50 });
+
+    try world.attachComponent(e3, Tag, .{});
+
+    // Verify component configurations
+    try std.testing.expect(world.hasComponent(e1, Tag));
+    try std.testing.expect(world.hasComponent(e1, Health));
+
+    try std.testing.expect(!world.hasComponent(e2, Tag));
+    try std.testing.expect(world.hasComponent(e2, Health));
+
+    try std.testing.expect(world.hasComponent(e3, Tag));
+    try std.testing.expect(!world.hasComponent(e3, Health));
 
     // Test component values
-    const pos2 = world.getComponent(entity2, Position) orelse unreachable;
-    try std.testing.expectEqual(@as(f32, 5), pos2.x);
-    try std.testing.expectEqual(@as(f32, 15), pos2.y);
-
-    const vel2 = world.getComponent(entity2, Velocity) orelse unreachable;
-    try std.testing.expectEqual(@as(f32, 1), vel2.dx);
-    try std.testing.expectEqual(@as(f32, 2), vel2.dy);
-
-    const health2 = world.getComponent(entity2, Health) orelse unreachable;
-    try std.testing.expectEqual(@as(i32, 100), health2.value);
-
-    // Test component updates
-    try world.attachComponent(entity1, Position, .{ .x = 30, .y = 40 });
-    const updatedPos = world.getComponent(entity1, Position) orelse unreachable;
-    try std.testing.expectEqual(@as(f32, 30), updatedPos.x);
-    try std.testing.expectEqual(@as(f32, 40), updatedPos.y);
-
-    // Test non-existent component
-    try std.testing.expect(!world.hasComponent(entity1, Health));
-    try std.testing.expect(world.getComponent(entity1, Health) == null);
+    try std.testing.expectEqual(@as(i32, 100), world.getComponent(e1, Health).?.value);
+    try std.testing.expectEqual(@as(i32, 50), world.getComponent(e2, Health).?.value);
 }

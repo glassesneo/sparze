@@ -15,6 +15,7 @@ pub const SparseSetStorage = struct {
         ptr: *anyopaque,
         destroyFn: *const fn (*anyopaque, std.mem.Allocator) void,
     };
+    const Self = SparseSetStorage;
 
     pub fn destroyTypedStorage(comptime T: type) *const fn (*anyopaque, std.mem.Allocator) void {
         return struct {
@@ -32,7 +33,7 @@ pub const SparseSetStorage = struct {
             .allocator = allocator,
         };
     }
-    pub fn deinit(self: *SparseSetStorage) void {
+    pub fn deinit(self: *Self) void {
         var iter = self.componentStorage.iterator();
         while (iter.next()) |entry| {
             const typeName = entry.key_ptr.*;
@@ -49,7 +50,7 @@ pub const SparseSetStorage = struct {
         self.componentStorage.deinit();
     }
 
-    pub fn attachComponent(self: *SparseSetStorage, entity: Entity, comptime C: type, component: C) !void {
+    pub fn attachComponent(self: *Self, entity: Entity, comptime C: type, component: C) !void {
         const typeName = @typeName(C);
         if (!self.sparseSets.contains(typeName)) {
             var sparseSet = try self.allocator.create(SparseSet(C));
@@ -69,7 +70,7 @@ pub const SparseSetStorage = struct {
         try self.sparseSets.get(typeName).?.insert(entity, &componentCopy);
     }
 
-    pub fn hasComponent(self: SparseSetStorage, entity: Entity, comptime C: type) bool {
+    pub fn hasComponent(self: Self, entity: Entity, comptime C: type) bool {
         const typeName = @typeName(C);
         if (!self.sparseSets.contains(typeName))
             return false;
@@ -79,141 +80,126 @@ pub const SparseSetStorage = struct {
         return false;
     }
 
-    pub fn getComponent(self: SparseSetStorage, entity: Entity, comptime C: type) ?C {
+    pub fn getComponent(self: Self, entity: Entity, comptime C: type) ?C {
         const typeName = @typeName(C);
         if (self.sparseSets.get(typeName)) |sparseSet|
             return sparseSet.get(entity, C);
         return null;
     }
+
+    pub fn removeComponent(self: *Self, entity: Entity, comptime C: type) void {
+        const typeName = @typeName(C);
+        if (self.sparseSets.get(typeName)) |sparseSet| {
+            sparseSet.remove(entity);
+        }
+    }
+
+    pub fn removeAllComponents(self: *Self, entity: Entity) void {
+        var iter = self.sparseSets.iterator();
+        while (iter.next()) |entry| {
+            const sparseSet = entry.value_ptr.*;
+            sparseSet.remove(entity);
+        }
+    }
 };
 
-test "SparseSetStorage basic operations" {
-    // Define test component types
-    const Position = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const Velocity = struct {
-        dx: f32,
-        dy: f32,
-    };
-
-    // Initialize storage
+test "SparseSetStorage component operations" {
+    // Setup test environment
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const allocator = arena.allocator();
 
-    var storage = SparseSetStorage.init(allocator);
+    var storage = SparseSetStorage.init(arena.allocator());
     defer storage.deinit();
 
-    // Create entities
-    const entity1 = Entity{ .id = 1 };
-    const entity2 = Entity{ .id = 2 };
+    const e1 = Entity{ .id = 1 };
+    const e2 = Entity{ .id = 2 };
 
-    // Test empty storage
-    try std.testing.expect(!storage.hasComponent(entity1, Position));
-    try std.testing.expect(storage.getComponent(entity1, Position) == null);
+    // Test component types
+    const Position = struct {
+        x: f32 = 0,
+        y: f32 = 0,
+    };
 
-    // Attach components
-    try storage.attachComponent(entity1, Position, .{ .x = 10.0, .y = 20.0 });
-    try storage.attachComponent(entity1, Velocity, .{ .dx = 1.0, .dy = 2.0 });
-    try storage.attachComponent(entity2, Position, .{ .x = 30.0, .y = 40.0 });
+    const Health = struct {
+        value: i32 = 100,
+    };
+
+    // Test initial state
+    try std.testing.expect(!storage.hasComponent(e1, Position));
+    try std.testing.expect(!storage.hasComponent(e1, Health));
+    try std.testing.expect(storage.getComponent(e1, Position) == null);
+
+    // Test attaching components
+    try storage.attachComponent(e1, Position, .{ .x = 10, .y = 20 });
+    try storage.attachComponent(e1, Health, .{ .value = 50 });
+    try storage.attachComponent(e2, Position, .{ .x = 30, .y = 40 });
 
     // Test has component
-    try std.testing.expect(storage.hasComponent(entity1, Position));
-    try std.testing.expect(storage.hasComponent(entity1, Velocity));
-    try std.testing.expect(storage.hasComponent(entity2, Position));
-    try std.testing.expect(!storage.hasComponent(entity2, Velocity));
+    try std.testing.expect(storage.hasComponent(e1, Position));
+    try std.testing.expect(storage.hasComponent(e1, Health));
+    try std.testing.expect(storage.hasComponent(e2, Position));
+    try std.testing.expect(!storage.hasComponent(e2, Health));
 
     // Test get component
-    if (storage.getComponent(entity1, Position)) |pos| {
-        try std.testing.expectEqual(@as(f32, 10.0), pos.x);
-        try std.testing.expectEqual(@as(f32, 20.0), pos.y);
+    if (storage.getComponent(e1, Position)) |pos| {
+        try std.testing.expectEqual(@as(f32, 10), pos.x);
+        try std.testing.expectEqual(@as(f32, 20), pos.y);
     } else {
         try std.testing.expect(false); // Should not reach here
     }
 
-    if (storage.getComponent(entity2, Position)) |pos| {
-        try std.testing.expectEqual(@as(f32, 30.0), pos.x);
-        try std.testing.expectEqual(@as(f32, 40.0), pos.y);
+    if (storage.getComponent(e1, Health)) |health| {
+        try std.testing.expectEqual(@as(i32, 50), health.value);
     } else {
         try std.testing.expect(false); // Should not reach here
     }
 
-    // Test component absence
-    try std.testing.expect(storage.getComponent(entity2, Velocity) == null);
-}
-
-test "SparseSetStorage component update" {
-    const HealthComponent = struct {
-        value: i32,
-    };
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var storage = SparseSetStorage.init(allocator);
-    defer storage.deinit();
-
-    const entity = Entity{ .id = 1 };
-
-    // Attach initial component
-    try storage.attachComponent(entity, HealthComponent, .{ .value = 100 });
-
-    // Verify initial value
-    if (storage.getComponent(entity, HealthComponent)) |health| {
-        try std.testing.expectEqual(@as(i32, 100), health.value);
-    } else {
-        try std.testing.expect(false); // Should not reach here
-    }
-
-    // Update component
-    try storage.attachComponent(entity, HealthComponent, .{ .value = 75 });
-
-    // Verify updated value
-    if (storage.getComponent(entity, HealthComponent)) |health| {
+    // Test updating component
+    try storage.attachComponent(e1, Health, .{ .value = 75 });
+    if (storage.getComponent(e1, Health)) |health| {
         try std.testing.expectEqual(@as(i32, 75), health.value);
     } else {
         try std.testing.expect(false); // Should not reach here
     }
+
+    // Test remove single component
+    storage.removeComponent(e1, Health);
+    try std.testing.expect(!storage.hasComponent(e1, Health));
+    try std.testing.expect(storage.hasComponent(e1, Position)); // Position should remain
+
+    // Test remove all components
+    storage.removeAllComponents(e1);
+    try std.testing.expect(!storage.hasComponent(e1, Position));
+    try std.testing.expect(!storage.hasComponent(e1, Health));
+
+    // e2 should be unaffected
+    try std.testing.expect(storage.hasComponent(e2, Position));
 }
 
-test "SparseSetStorage multiple component types" {
-    const Tag = struct {
-        name: []const u8,
-    };
-
-    const Counter = struct {
-        count: usize,
-    };
-
-    const Flag = struct {
-        active: bool,
-    };
-
+test "SparseSetStorage edge cases" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const allocator = arena.allocator();
 
-    var storage = SparseSetStorage.init(allocator);
+    var storage = SparseSetStorage.init(arena.allocator());
     defer storage.deinit();
 
-    const entity = Entity{ .id = 42 };
+    const e1 = Entity{ .id = 1 };
+    const nonExistentEntity = Entity{ .id = 999 };
 
-    // Attach different component types
-    try storage.attachComponent(entity, Tag, .{ .name = "player" });
-    try storage.attachComponent(entity, Counter, .{ .count = 0 });
-    try storage.attachComponent(entity, Flag, .{ .active = true });
+    const TestComponent = struct {
+        value: i32 = 0,
+    };
 
-    // Test that all components exist
-    try std.testing.expect(storage.hasComponent(entity, Tag));
-    try std.testing.expect(storage.hasComponent(entity, Counter));
-    try std.testing.expect(storage.hasComponent(entity, Flag));
+    // Removing component from entity that doesn't have it (shouldn't crash)
+    storage.removeComponent(e1, TestComponent);
 
-    // Test retrieving multiple components
-    try std.testing.expectEqualStrings("player", storage.getComponent(entity, Tag).?.name);
-    try std.testing.expectEqual(@as(usize, 0), storage.getComponent(entity, Counter).?.count);
-    try std.testing.expect(storage.getComponent(entity, Flag).?.active);
+    // Removing all components from entity without components (shouldn't crash)
+    storage.removeAllComponents(nonExistentEntity);
+
+    // Attaching then retrieving component
+    try storage.attachComponent(e1, TestComponent, .{ .value = 42 });
+    try std.testing.expect(storage.hasComponent(e1, TestComponent));
+
+    // Get non-existent component
+    try std.testing.expect(storage.getComponent(nonExistentEntity, TestComponent) == null);
 }
