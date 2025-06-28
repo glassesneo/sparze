@@ -7,6 +7,7 @@ pub const AbstractSparseSet = struct {
     const VTable = struct {
         insertFn: *const fn (*anyopaque, Entity, *anyopaque) anyerror!void,
         getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
+        containsFn: *const fn (*anyopaque, Entity) bool,
         deinitFn: *const fn (*anyopaque) void,
     };
 
@@ -20,6 +21,10 @@ pub const AbstractSparseSet = struct {
             return typedPtr.*;
         }
         return null;
+    }
+
+    pub fn contains(self: *const AbstractSparseSet, entity: Entity) bool {
+        return self.vtable.containsFn(self.instance, entity);
     }
 
     pub fn deinit(self: *const AbstractSparseSet) void {
@@ -48,6 +53,12 @@ pub const AbstractSparseSet = struct {
                     return null;
                 }
             }.get,
+            .containsFn = struct {
+                fn contains(ptr: *anyopaque, entity: Entity) bool {
+                    const self = castTo(T, ptr);
+                    return self.contains(entity);
+                }
+            }.contains,
             .deinitFn = struct {
                 fn deinit(ptr: *anyopaque) void {
                     const self = castTo(T, ptr);
