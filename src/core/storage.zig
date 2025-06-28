@@ -86,3 +86,134 @@ pub const SparseSetStorage = struct {
         return null;
     }
 };
+
+test "SparseSetStorage basic operations" {
+    // Define test component types
+    const Position = struct {
+        x: f32,
+        y: f32,
+    };
+
+    const Velocity = struct {
+        dx: f32,
+        dy: f32,
+    };
+
+    // Initialize storage
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var storage = SparseSetStorage.init(allocator);
+    defer storage.deinit();
+
+    // Create entities
+    const entity1 = Entity{ .id = 1 };
+    const entity2 = Entity{ .id = 2 };
+
+    // Test empty storage
+    try std.testing.expect(!storage.hasComponent(entity1, Position));
+    try std.testing.expect(storage.getComponent(entity1, Position) == null);
+
+    // Attach components
+    try storage.attachComponent(entity1, Position, .{ .x = 10.0, .y = 20.0 });
+    try storage.attachComponent(entity1, Velocity, .{ .dx = 1.0, .dy = 2.0 });
+    try storage.attachComponent(entity2, Position, .{ .x = 30.0, .y = 40.0 });
+
+    // Test has component
+    try std.testing.expect(storage.hasComponent(entity1, Position));
+    try std.testing.expect(storage.hasComponent(entity1, Velocity));
+    try std.testing.expect(storage.hasComponent(entity2, Position));
+    try std.testing.expect(!storage.hasComponent(entity2, Velocity));
+
+    // Test get component
+    if (storage.getComponent(entity1, Position)) |pos| {
+        try std.testing.expectEqual(@as(f32, 10.0), pos.x);
+        try std.testing.expectEqual(@as(f32, 20.0), pos.y);
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
+    if (storage.getComponent(entity2, Position)) |pos| {
+        try std.testing.expectEqual(@as(f32, 30.0), pos.x);
+        try std.testing.expectEqual(@as(f32, 40.0), pos.y);
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
+    // Test component absence
+    try std.testing.expect(storage.getComponent(entity2, Velocity) == null);
+}
+
+test "SparseSetStorage component update" {
+    const HealthComponent = struct {
+        value: i32,
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var storage = SparseSetStorage.init(allocator);
+    defer storage.deinit();
+
+    const entity = Entity{ .id = 1 };
+
+    // Attach initial component
+    try storage.attachComponent(entity, HealthComponent, .{ .value = 100 });
+
+    // Verify initial value
+    if (storage.getComponent(entity, HealthComponent)) |health| {
+        try std.testing.expectEqual(@as(i32, 100), health.value);
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
+    // Update component
+    try storage.attachComponent(entity, HealthComponent, .{ .value = 75 });
+
+    // Verify updated value
+    if (storage.getComponent(entity, HealthComponent)) |health| {
+        try std.testing.expectEqual(@as(i32, 75), health.value);
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+}
+
+test "SparseSetStorage multiple component types" {
+    const Tag = struct {
+        name: []const u8,
+    };
+
+    const Counter = struct {
+        count: usize,
+    };
+
+    const Flag = struct {
+        active: bool,
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var storage = SparseSetStorage.init(allocator);
+    defer storage.deinit();
+
+    const entity = Entity{ .id = 42 };
+
+    // Attach different component types
+    try storage.attachComponent(entity, Tag, .{ .name = "player" });
+    try storage.attachComponent(entity, Counter, .{ .count = 0 });
+    try storage.attachComponent(entity, Flag, .{ .active = true });
+
+    // Test that all components exist
+    try std.testing.expect(storage.hasComponent(entity, Tag));
+    try std.testing.expect(storage.hasComponent(entity, Counter));
+    try std.testing.expect(storage.hasComponent(entity, Flag));
+
+    // Test retrieving multiple components
+    try std.testing.expectEqualStrings("player", storage.getComponent(entity, Tag).?.name);
+    try std.testing.expectEqual(@as(usize, 0), storage.getComponent(entity, Counter).?.count);
+    try std.testing.expect(storage.getComponent(entity, Flag).?.active);
+}

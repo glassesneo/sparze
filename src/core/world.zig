@@ -47,37 +47,64 @@ pub const World = struct {
     }
 };
 
-test "ECS running test" {
-    const testing = std.testing;
+test "World basic operations" {
+    // Test component types
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+    const Health = struct { value: i32 };
 
-    const Position = struct { x: i32, y: i32 };
-    const Size = struct { h: i16, w: i16 };
-    const Player = struct { hp: i32, mp: i16 };
-
-    const allocator = testing.allocator;
-    const entity1 = Entity.init(0);
-    const entity2 = Entity.init(1);
+    // Initialize world
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var world = World.init(allocator);
     defer world.deinit();
 
-    try world.attachComponent(entity1, Position, Position{ .x = 10, .y = 20 });
+    // Create entities
+    const entity1 = Entity.init(1);
+    const entity2 = Entity.init(2);
 
+    // Test single component attachment
+    try world.attachComponent(entity1, Position, .{ .x = 10, .y = 20 });
+    try std.testing.expect(world.hasComponent(entity1, Position));
+    try std.testing.expect(!world.hasComponent(entity1, Velocity));
+
+    // Test component retrieval
+    const pos = world.getComponent(entity1, Position) orelse unreachable;
+    try std.testing.expectEqual(@as(f32, 10), pos.x);
+    try std.testing.expectEqual(@as(f32, 20), pos.y);
+
+    // Test multi-component attachment
     try world.attachComponents(entity2, .{
         Position{ .x = 5, .y = 15 },
-        Size{ .h = 10, .w = 10 },
-        Player{ .hp = 100, .mp = 50 },
+        Velocity{ .dx = 1, .dy = 2 },
+        Health{ .value = 100 },
     });
 
-    if (world.getComponent(entity1, Position)) |c| {
-        std.debug.print("Position: {any}\n", .{c});
-    } else {
-        std.debug.print("None!\n", .{});
-    }
+    try std.testing.expect(world.hasComponent(entity2, Position));
+    try std.testing.expect(world.hasComponent(entity2, Velocity));
+    try std.testing.expect(world.hasComponent(entity2, Health));
 
-    if (world.getComponent(entity2, Player)) |c| {
-        std.debug.print("Size: {any}\n", .{c});
-    } else {
-        std.debug.print("None!\n", .{});
-    }
+    // Test component values
+    const pos2 = world.getComponent(entity2, Position) orelse unreachable;
+    try std.testing.expectEqual(@as(f32, 5), pos2.x);
+    try std.testing.expectEqual(@as(f32, 15), pos2.y);
+
+    const vel2 = world.getComponent(entity2, Velocity) orelse unreachable;
+    try std.testing.expectEqual(@as(f32, 1), vel2.dx);
+    try std.testing.expectEqual(@as(f32, 2), vel2.dy);
+
+    const health2 = world.getComponent(entity2, Health) orelse unreachable;
+    try std.testing.expectEqual(@as(i32, 100), health2.value);
+
+    // Test component updates
+    try world.attachComponent(entity1, Position, .{ .x = 30, .y = 40 });
+    const updatedPos = world.getComponent(entity1, Position) orelse unreachable;
+    try std.testing.expectEqual(@as(f32, 30), updatedPos.x);
+    try std.testing.expectEqual(@as(f32, 40), updatedPos.y);
+
+    // Test non-existent component
+    try std.testing.expect(!world.hasComponent(entity1, Health));
+    try std.testing.expect(world.getComponent(entity1, Health) == null);
 }

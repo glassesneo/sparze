@@ -112,3 +112,52 @@ pub fn SparseSet(comptime C: type) type {
         }
     };
 }
+
+test "SparseSet operations" {
+    const TestComponent = struct {
+        value: i32,
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var sparse_set = SparseSet(TestComponent).init(allocator);
+
+    const entity1 = Entity{ .id = 1 };
+    const entity2 = Entity{ .id = 2 };
+
+    try sparse_set.insert(entity1, .{ .value = 42 });
+    try sparse_set.insert(entity2, .{ .value = 84 });
+
+    try std.testing.expect(sparse_set.contains(entity1));
+    try std.testing.expect(!sparse_set.contains(Entity{ .id = 99 }));
+
+    // Update component
+    try sparse_set.insert(entity1, .{ .value = 100 });
+    const index1 = sparse_set.indexTable.get(entity1.id).?;
+    try std.testing.expectEqual(@as(i32, 100), sparse_set.components.items[index1].value);
+}
+
+test "AbstractSparseSet interface" {
+    const TestComponent = struct {
+        value: i32,
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var sparse_set = SparseSet(TestComponent).init(allocator);
+    var abstract = sparse_set.abstract();
+
+    const entity = Entity{ .id = 1 };
+    var component = TestComponent{ .value = 42 };
+
+    try abstract.insert(entity, &component);
+
+    const retrieved = abstract.get(entity, TestComponent);
+    try std.testing.expect(retrieved != null);
+    try std.testing.expectEqual(@as(i32, 42), retrieved.?.value);
+    try std.testing.expect(abstract.get(Entity{ .id = 99 }, TestComponent) == null);
+}
