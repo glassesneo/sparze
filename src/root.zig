@@ -10,32 +10,30 @@ const Entity = struct {
 
 const EntityList = std.ArrayList(Entity);
 
-const IndexTable = std.AutoArrayHashMap(usize, u32);
+const IndexTable = std.AutoHashMap(usize, u32);
 
 pub const AbstractSparseSet = struct {
-    // entities: EntityList,
-    // components: std.ArrayList(anyopaque),
     vtable: *const VTable,
     instance: *anyopaque,
-    entities: EntityList,
     const VTable = struct {
         insertFn: *const fn (*anyopaque, Entity, *anyopaque) anyerror!void,
         getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
     };
 
-    pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: anytype) !void {
-        return self.vtable.insertFn(self.instance, entity, @constCast(@ptrCast(@alignCast(&component))));
+    pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) !void {
+        return self.vtable.insertFn(self.instance, entity, component);
     }
 
     pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?T {
         if (self.vtable.getFn(self.instance, entity)) |component| {
-            return AbstractSparseSet.castTo(T, component).*;
+            const typedPtr = AbstractSparseSet.castTo(T, component);
+            return typedPtr.*;
         }
         return null;
     }
 
     fn castTo(comptime T: type, ptr: *anyopaque) *T {
-        return @as(*T, @ptrCast(@alignCast(ptr)));
+        return @ptrCast(@alignCast(ptr));
     }
 
     pub fn init(comptime T: type, instance: *T) AbstractSparseSet {
@@ -53,9 +51,6 @@ pub const AbstractSparseSet = struct {
                     if (self.indexTable.get(entity.id)) |index| {
                         return @ptrCast(&self.components.items[index]);
                     }
-                    // if (self.get(entity)) |component| {
-                    // return @constCast(@ptrCast(@alignCast(&component)));
-                    // }
                     return null;
                 }
             }.get,
@@ -63,7 +58,6 @@ pub const AbstractSparseSet = struct {
         return .{
             .vtable = &vtable,
             .instance = instance,
-            .entities = instance.entities,
         };
     }
 };
@@ -85,7 +79,11 @@ pub fn SparseSet(comptime C: type) type {
             };
         }
 
-        pub fn insert(self: *Self, entity: Entity, component: C) !void {
+        fn contains(self: Self, entity: Entity) bool {
+            return self.indexTable.contains(entity.id);
+        }
+
+        fn insert(self: *Self, entity: Entity, component: C) !void {
             if (self.indexTable.get(entity.id)) |index| {
                 self.components.items[index] = component;
             } else {
@@ -95,6 +93,7 @@ pub fn SparseSet(comptime C: type) type {
                 const newIndex: u32 = @intCast(self.entities.items.len - 1);
                 try self.indexTable.put(entity.id, newIndex);
             }
+            // std.debug.print("Current index table: {any}\n", .{self.indexTable.count()});
         }
 
         pub fn abstract(self: *Self) AbstractSparseSet {
@@ -104,46 +103,106 @@ pub fn SparseSet(comptime C: type) type {
 }
 
 pub const World = struct {
-    const SparseSetContainer = std.StringHashMap(AbstractSparseSet);
-    sparseSetContainer: SparseSetContainer,
+    const SparseSetStorage = std.StringHashMap(AbstractSparseSet);
+    const ComponentStorage = std.StringHashMap(*anyopaque);
+
+    sparseSetStorage: SparseSetStorage,
+    componentStorage: ComponentStorage,
+
+    allocator: std.mem.Allocator,
     pub fn init(allocator: std.mem.Allocator) World {
-        return World{ .sparseSetContainer = SparseSetContainer.init(allocator) };
+        return World{
+            .sparseSetStorage = SparseSetStorage.init(allocator),
+            .componentStorage = ComponentStorage.init(allocator),
+            .allocator = allocator,
+        };
     }
-    pub fn put(self: *World, typeName: []const u8, sparseSet: AbstractSparseSet) !void {
-        try self.sparseSetContainer.put(typeName, sparseSet);
+
+    pub fn deinit(self: *World) void {
+        // var iter = self.componentStorage.iterator();
+        // while (iter.next()) |entry| {
+        // self.allocator.destroy(@ptrCast(entry.value_ptr.*));
+        // }
+
+        self.sparseSetStorage.deinit();
+        self.componentStorage.deinit();
+    }
+
+    /// Attaches a component to an entity.
+    /// Note: The component is copied into the ECS storage.
+    pub fn attachComponent(self: *World, entity: Entity, comptime Component: type, component: Component) !void {
+        const typeName = @typeName(Component);
+        if (!self.sparseSetStorage.contains(typeName)) {
+            var sparseSet = try self.allocator.create(SparseSet(Component));
+            sparseSet.* = SparseSet(Component).init(self.allocator);
+            try self.componentStorage.put(typeName, @ptrCast(sparseSet));
+
+            const abstractSparseSet = sparseSet.abstract();
+            try self.sparseSetStorage.put(typeName, abstractSparseSet);
+        }
+
+        var componentCopy = component;
+        try self.sparseSetStorage.get(typeName).?.insert(entity, &componentCopy);
+    }
+
+    /// Attaches multiple component to an entity
+    /// Note: The components must be compiletime-known.
+    pub fn attachComponents(self: *World, entity: Entity, comptime types: anytype) !void {
+        inline for (types) |component| {
+            const C = @TypeOf(component);
+            try self.attachComponent(entity, C, component);
+        }
+    }
+
+    pub fn hasComponent(self: World, entity: Entity, comptime Component: type) bool {
+        const typeName = @typeName(Component);
+        if (!self.sparseSetStorage.contains(typeName))
+            return false;
+
+        if (self.sparseSetStorage.get(typeName)) |sparseSet|
+            return sparseSet.contains(entity);
+        return false;
+    }
+
+    pub fn getComponent(self: World, entity: Entity, comptime Component: type) ?Component {
+        const typeName = @typeName(Component);
+        if (self.sparseSetStorage.get(typeName)) |sparseSet|
+            return sparseSet.get(entity, Component);
+        return null;
     }
 };
 
-const Position = struct { x: i32, y: i32 };
-const Size = struct { x: i16, y: i16 };
+test "ECS running test" {
+    const Position = struct { x: i32, y: i32 };
+    const Size = struct { h: i16, w: i16 };
+    const Player = struct { hp: i32, mp: i16 };
 
-const PositionList = SparseSet(Position);
-const SizeList = SparseSet(Size);
-
-pub fn run() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
     const entity1 = Entity.init(0);
-    var positionList = PositionList.init(allocator);
-    try positionList.insert(entity1, Position{ .x = 5, .y = 100 });
+    const entity2 = Entity.init(1);
 
-    // std.debug.print("{any}\n", .{positionList.get(entity1)});
+    var world = World.init(allocator);
+    defer world.deinit();
 
-    const abstractPositionList = positionList.abstract();
-    try abstractPositionList.insert(entity1, Position{ .x = 5, .y = 105 });
-    std.debug.print("{any}\n", .{abstractPositionList.get(entity1, Position)});
+    try world.attachComponent(entity1, Position, Position{ .x = 10, .y = 20 });
 
-    // var sizeList = SizeList.init(allocator);
-    // const abstractSizeList = sizeList.abstract();
+    try world.attachComponents(entity2, .{
+        Size{ .h = 10, .w = 10 },
+        Player{ .hp = 100, .mp = 50 },
+    });
 
-    // var world = World.init(allocator);
-    // try world.put("Position", abstractPositionList);
-    // try world.put("Size", abstractSizeList);
-    // std.debug.print("{any}\n", .{world});
-}
-
-test "ECS running test" {
-    try run();
+    std.debug.print("{any}\n", .{world});
+    if (world.getComponent(entity1, Position)) |component| {
+        std.debug.print("Position: {any}\n", .{component});
+    } else {
+        std.debug.print("None!\n", .{});
+    }
+    if (world.getComponent(entity2, Size)) |component| {
+        std.debug.print("Size: {any}\n", .{component});
+    } else {
+        std.debug.print("None!\n", .{});
+    }
 }
