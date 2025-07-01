@@ -8,7 +8,7 @@ pub const AbstractSparseSet = struct {
         insertFn: *const fn (*anyopaque, Entity, *anyopaque) anyerror!void,
         getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
         containsFn: *const fn (*anyopaque, Entity) bool,
-        removeFn: *const fn (*anyopaque, Entity) void,
+        removeFn: *const fn (*anyopaque, Entity) anyerror!void,
         deinitFn: *const fn (*anyopaque) void,
     };
 
@@ -28,8 +28,8 @@ pub const AbstractSparseSet = struct {
         return self.vtable.containsFn(self.instance, entity);
     }
 
-    pub fn remove(self: *const AbstractSparseSet, entity: Entity) void {
-        return self.vtable.removeFn(self.instance, entity);
+    pub fn remove(self: *const AbstractSparseSet, entity: Entity) !void {
+        return try self.vtable.removeFn(self.instance, entity);
     }
 
     pub fn deinit(self: *const AbstractSparseSet) void {
@@ -65,9 +65,9 @@ pub const AbstractSparseSet = struct {
                 }
             }.contains,
             .removeFn = struct {
-                fn remove(ptr: *anyopaque, entity: Entity) void {
+                fn remove(ptr: *anyopaque, entity: Entity) !void {
                     const self = castTo(T, ptr);
-                    self.remove(entity);
+                    try self.remove(entity);
                 }
             }.remove,
             .deinitFn = struct {
@@ -88,6 +88,7 @@ pub fn SparseSet(comptime C: type) type {
     return struct {
         components: std.ArrayList(C),
         indexTable: std.AutoHashMap(usize, u32),
+        freeIndex: std.ArrayList(u32),
         const Self = @This();
         pub const Component = C;
 
@@ -95,6 +96,7 @@ pub fn SparseSet(comptime C: type) type {
             return Self{
                 .components = .init(allocator),
                 .indexTable = .init(allocator),
+                .freeIndex = .init(allocator),
             };
         }
 
@@ -110,18 +112,24 @@ pub fn SparseSet(comptime C: type) type {
         fn insert(self: *Self, entity: Entity, component: C) !void {
             if (self.indexTable.get(entity.id)) |index| {
                 self.components.items[index] = component;
-            } else {
-                try self.components.append(component);
+                return;
+            }
 
-                const newIndex: u32 = self.indexTable.count();
-                try self.indexTable.put(entity.id, newIndex);
+            if (self.freeIndex.pop()) |index| {
+                try self.indexTable.put(entity.id, index);
+                self.components.items[index] = component;
+            } else {
+                const index = self.indexTable.count();
+                try self.indexTable.put(entity.id, index);
+                try self.components.append(component);
             }
         }
 
-        fn remove(self: *Self, entity: Entity) void {
+        fn remove(self: *Self, entity: Entity) !void {
             if (self.indexTable.get(entity.id)) |index| {
+                // _ = self.components.orderedRemove(index);
+                try self.freeIndex.append(index);
                 _ = self.indexTable.remove(entity.id);
-                _ = self.components.orderedRemove(index);
             }
         }
 
@@ -173,12 +181,12 @@ test "SparseSet basic operations" {
     }
 
     // Test removal
-    sparseSet.remove(e1);
+    try sparseSet.remove(e1);
     try std.testing.expect(!sparseSet.contains(e1));
     try std.testing.expect(sparseSet.contains(e2));
 
     // Test removing non-existent entity (should not crash)
-    sparseSet.remove(e3);
+    try sparseSet.remove(e3);
 }
 
 test "AbstractSparseSet interface" {
@@ -216,6 +224,33 @@ test "AbstractSparseSet interface" {
     try std.testing.expect(abstract.get(e2, TestComponent) == null);
 
     // Test remove through abstract interface
-    abstract.remove(e1);
+    try abstract.remove(e1);
     try std.testing.expect(!abstract.contains(e1));
+}
+
+test "SparseSet edge cases" {
+    const TestComponent = struct {
+        value: i32,
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var set = SparseSet(TestComponent).init(arena.allocator());
+    defer set.deinit();
+
+    const e1 = Entity{ .id = 1 };
+    const e2 = Entity{ .id = 2 };
+
+    // Remove non-existent entity (no crash)
+    try set.remove(e1);
+
+    // Insert, remove, reuse index
+    try set.insert(e1, .{ .value = 10 });
+    try set.remove(e1);
+    try set.insert(e2, .{ .value = 20 });
+    try std.testing.expect(set.contains(e2));
+    try std.testing.expect(!set.contains(e1));
+
+    // Remove again, freeIndex should have one entry
+    try set.remove(e2);
+    try std.testing.expect(set.freeIndex.items.len == 1);
 }

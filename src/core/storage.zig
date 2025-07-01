@@ -87,18 +87,18 @@ pub const SparseSetStorage = struct {
         return null;
     }
 
-    pub fn removeComponent(self: *Self, entity: Entity, comptime C: type) void {
+    pub fn removeComponent(self: *Self, entity: Entity, comptime C: type) !void {
         const typeName = @typeName(C);
         if (self.sparseSets.get(typeName)) |sparseSet| {
-            sparseSet.remove(entity);
+            try sparseSet.remove(entity);
         }
     }
 
-    pub fn removeAllComponents(self: *Self, entity: Entity) void {
+    pub fn removeAllComponents(self: *Self, entity: Entity) !void {
         var iter = self.sparseSets.iterator();
         while (iter.next()) |entry| {
             const sparseSet = entry.value_ptr.*;
-            sparseSet.remove(entity);
+            try sparseSet.remove(entity);
         }
     }
 };
@@ -163,12 +163,12 @@ test "SparseSetStorage component operations" {
     }
 
     // Test remove single component
-    storage.removeComponent(e1, Health);
+    try storage.removeComponent(e1, Health);
     try std.testing.expect(!storage.hasComponent(e1, Health));
     try std.testing.expect(storage.hasComponent(e1, Position)); // Position should remain
 
     // Test remove all components
-    storage.removeAllComponents(e1);
+    try storage.removeAllComponents(e1);
     try std.testing.expect(!storage.hasComponent(e1, Position));
     try std.testing.expect(!storage.hasComponent(e1, Health));
 
@@ -191,10 +191,10 @@ test "SparseSetStorage edge cases" {
     };
 
     // Removing component from entity that doesn't have it (shouldn't crash)
-    storage.removeComponent(e1, TestComponent);
+    try storage.removeComponent(e1, TestComponent);
 
     // Removing all components from entity without components (shouldn't crash)
-    storage.removeAllComponents(nonExistentEntity);
+    try storage.removeAllComponents(nonExistentEntity);
 
     // Attaching then retrieving component
     try storage.attachComponent(e1, TestComponent, .{ .value = 42 });

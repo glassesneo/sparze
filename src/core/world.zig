@@ -32,9 +32,9 @@ pub const World = struct {
         return self.entityManager.create();
     }
 
-    pub fn destroyEntity(self: *World, entity: Entity) void {
+    pub fn destroyEntity(self: *World, entity: Entity) !void {
         self.entityManager.destroy(entity);
-        self.sparseSetStorage.removeAllComponents(entity);
+        try self.sparseSetStorage.removeAllComponents(entity);
     }
 
     pub fn containsEntity(self: *const World, entity: Entity) bool {
@@ -92,7 +92,7 @@ test "World entity operations" {
     try std.testing.expectEqual(e2.id, entities[1].id);
 
     // Test entity destruction
-    world.destroyEntity(e1);
+    try world.destroyEntity(e1);
     try std.testing.expect(!world.containsEntity(e1));
     try std.testing.expect(world.containsEntity(e2));
 }
@@ -146,7 +146,7 @@ test "World component operations" {
     }
 
     // Test entity destruction removes components
-    world.destroyEntity(e1);
+    try world.destroyEntity(e1);
     try std.testing.expect(!world.hasComponent(e1, Position));
     try std.testing.expect(!world.hasComponent(e1, Velocity));
 }
