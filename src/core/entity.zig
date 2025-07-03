@@ -1,14 +1,16 @@
 const std = @import("std");
 
 pub const Entity = struct {
-    id: usize,
-    pub fn init(id: usize) Entity {
+    id: EntityId,
+    pub fn init(id: EntityId) Entity {
         return Entity{ .id = id };
     }
 };
 
+pub const EntityId = usize;
+
 pub const EntityManager = struct {
-    next_id: usize,
+    next_id: EntityId,
     entities: std.ArrayList(Entity),
     allocator: std.mem.Allocator,
 
@@ -55,7 +57,7 @@ pub const EntityManager = struct {
         return self.entities.items.len;
     }
 
-    pub fn getEntityById(self: *const EntityManager, id: usize) ?Entity {
+    pub fn getEntityById(self: *const EntityManager, id: EntityId) ?Entity {
         for (self.entities.items) |entity| {
             if (entity.id == id) {
                 return entity;
@@ -71,7 +73,7 @@ pub const EntityManager = struct {
 
 test "Entity basics" {
     const e1 = Entity.init(123);
-    try std.testing.expectEqual(@as(usize, 123), e1.id);
+    try std.testing.expectEqual(@as(EntityId, 123), e1.id);
 }
 
 test "EntityManager operations" {
@@ -88,8 +90,8 @@ test "EntityManager operations" {
     // Test entity creation
     const e1 = manager.create();
     const e2 = manager.create();
-    try std.testing.expectEqual(@as(usize, 0), e1.id);
-    try std.testing.expectEqual(@as(usize, 1), e2.id);
+    try std.testing.expectEqual(@as(EntityId, 0), e1.id);
+    try std.testing.expectEqual(@as(EntityId, 1), e2.id);
     try std.testing.expectEqual(@as(usize, 2), manager.count());
 
     // Test exists check
