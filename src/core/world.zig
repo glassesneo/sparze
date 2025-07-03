@@ -116,6 +116,11 @@ test "World component operations" {
         y: f32 = 0,
     };
 
+    const Acceleration = struct {
+        x: f32 = 0,
+        y: f32 = 0,
+    };
+
     // Test initial state
     try std.testing.expect(!world.hasComponent(e1, Position));
     try std.testing.expect(world.getComponent(e1, Position) == null);
@@ -134,6 +139,7 @@ test "World component operations" {
     // Test attaching multiple components
     try world.attachComponents(e1, .{
         Velocity{ .x = 1, .y = 2 },
+        Acceleration{ .x = 0.1, .y = 0.2 },
     });
 
     try std.testing.expect(world.hasComponent(e1, Velocity));
@@ -145,10 +151,18 @@ test "World component operations" {
         try std.testing.expect(false); // Should not reach here
     }
 
+    if (world.getComponent(e1, Acceleration)) |acc| {
+        try std.testing.expectEqual(@as(f32, 0.1), acc.x);
+        try std.testing.expectEqual(@as(f32, 0.2), acc.y);
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
     // Test entity destruction removes components
     try world.destroyEntity(e1);
     try std.testing.expect(!world.hasComponent(e1, Position));
     try std.testing.expect(!world.hasComponent(e1, Velocity));
+    try std.testing.expect(!world.hasComponent(e1, Acceleration));
 }
 
 test "World multiple entities with components" {
