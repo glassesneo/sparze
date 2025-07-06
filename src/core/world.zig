@@ -32,6 +32,12 @@ pub const World = struct {
         return self.entityManager.create();
     }
 
+    pub fn createEntityWith(self: *World, comptime types: anytype) !Entity {
+        const entity = self.entityManager.create();
+        try self.attachComponents(entity, types);
+        return entity;
+    }
+
     pub fn destroyEntity(self: *World, entity: Entity) !void {
         self.entityManager.destroy(entity);
         try self.sparseSetStorage.removeAllComponents(entity);
@@ -67,8 +73,47 @@ pub const World = struct {
     pub fn getComponent(self: World, entity: Entity, comptime C: type) ?C {
         return self.sparseSetStorage.getComponent(entity, C);
     }
+
+    pub fn removeComponent(self: *World, entity: Entity, comptime C: type) !void {
+        try self.sparseSetStorage.removeComponent(entity, C);
+    }
 };
 
+test "World createEntityWith attaches all components" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var world = World.init(arena.allocator());
+    defer world.deinit();
+
+    const Position = struct { x: i32, y: i32 };
+    const Health = struct { value: i32 };
+    const entity = try world.createEntityWith(.{
+        Position{ .x = 5, .y = 7 },
+        Health{ .value = 42 },
+    });
+    try std.testing.expect(world.hasComponent(entity, Position));
+    try std.testing.expect(world.hasComponent(entity, Health));
+    try std.testing.expectEqual(@as(i32, 5), world.getComponent(entity, Position).?.x);
+    try std.testing.expectEqual(@as(i32, 42), world.getComponent(entity, Health).?.value);
+}
+
+test "World removeComponent detaches only the specified component" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var world = World.init(arena.allocator());
+    defer world.deinit();
+
+    const Position = struct { x: i32 };
+    const Health = struct { value: i32 };
+    const entity = try world.createEntityWith(.{
+        Position{ .x = 1 },
+        Health{ .value = 99 },
+    });
+    try world.removeComponent(entity, Position);
+    try std.testing.expect(!world.hasComponent(entity, Position));
+    try std.testing.expect(world.hasComponent(entity, Health));
+    try std.testing.expectEqual(@as(i32, 99), world.getComponent(entity, Health).?.value);
+}
 test "World entity operations" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
