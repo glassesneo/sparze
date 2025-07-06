@@ -28,18 +28,18 @@ pub const World = struct {
         self.sparseSetStorage.deinit();
     }
 
-    pub fn createEntity(self: *World) Entity {
-        return self.entityManager.create();
+    pub fn createEntity(self: *World) !Entity {
+        return try self.entityManager.create();
     }
 
     pub fn createEntityWith(self: *World, comptime types: anytype) !Entity {
-        const entity = self.entityManager.create();
+        const entity = try self.entityManager.create();
         try self.attachComponents(entity, types);
         return entity;
     }
 
     pub fn destroyEntity(self: *World, entity: Entity) !void {
-        self.entityManager.destroy(entity);
+        try self.entityManager.destroy(entity.id);
         try self.sparseSetStorage.removeAllComponents(entity);
     }
 
@@ -122,13 +122,13 @@ test "World entity operations" {
     defer world.deinit();
 
     // Test entity creation
-    const e1 = world.createEntity();
-    const e2 = world.createEntity();
+    const e1 = try world.createEntity();
+    const e2 = try world.createEntity();
 
     // Test entity existence
     try std.testing.expect(world.containsEntity(e1));
     try std.testing.expect(world.containsEntity(e2));
-    try std.testing.expect(!world.containsEntity(Entity{ .id = 999 }));
+    try std.testing.expect(!world.containsEntity(Entity.init(999, 0)));
 
     // Test getAllEntities
     const entities = world.getAllEntities();
@@ -149,7 +149,7 @@ test "World component operations" {
     var world = World.init(arena.allocator());
     defer world.deinit();
 
-    const e1 = world.createEntity();
+    const e1 = try world.createEntity();
 
     const Position = struct {
         x: f32 = 0,
@@ -220,9 +220,9 @@ test "World multiple entities with components" {
     const Tag = struct {};
     const Health = struct { value: i32 };
 
-    const e1 = world.createEntity();
-    const e2 = world.createEntity();
-    const e3 = world.createEntity();
+    const e1 = try world.createEntity();
+    const e2 = try world.createEntity();
+    const e3 = try world.createEntity();
 
     // Create different component configurations
     try world.attachComponent(e1, Tag, .{});

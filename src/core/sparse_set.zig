@@ -199,9 +199,9 @@ test "SparseSet basic operations" {
     var sparseSet = SparseSet(TestComponent).init(allocator);
     defer sparseSet.deinit();
 
-    const e1 = Entity{ .id = 0 };
-    const e2 = Entity{ .id = 1 };
-    const e3 = Entity{ .id = 5 }; // Testing with non-sequential ID
+    const e1 = Entity.init(1, 0);
+    const e2 = Entity.init(2, 0);
+    const e3 = Entity.init(5, 0);
 
     // Test initial state
     try std.testing.expect(!sparseSet.contains(e1));
@@ -250,8 +250,8 @@ test "AbstractSparseSet interface" {
     var abstract = sparseSet.abstract();
     defer abstract.deinit();
 
-    const e1 = Entity{ .id = 0 };
-    const e2 = Entity{ .id = 1 };
+    const e1 = Entity.init(1, 0);
+    const e2 = Entity.init(2, 0);
 
     // Test contains through abstract interface
     try std.testing.expect(!abstract.contains(e1));
@@ -285,8 +285,8 @@ test "SparseSet edge cases" {
     var set = SparseSet(TestComponent).init(arena.allocator());
     defer set.deinit();
 
-    const e1 = Entity{ .id = 1 };
-    const e2 = Entity{ .id = 2 };
+    const e1 = Entity.init(1, 0);
+    const e2 = Entity.init(2, 0);
 
     // Remove non-existent entity (no crash)
     try set.remove(e1);
@@ -309,8 +309,8 @@ test "SparseSetIterator yields correct entities and components" {
     defer arena.deinit();
     var set = SparseSet(TestComponent).init(arena.allocator());
     defer set.deinit();
-    const e1 = Entity{ .id = 1 };
-    const e2 = Entity{ .id = 2 };
+    const e1 = Entity.init(1, 0);
+    const e2 = Entity.init(2, 0);
     try set.insert(e1, .{ .value = 10 });
     try set.insert(e2, .{ .value = 20 });
 

@@ -2,8 +2,9 @@ const std = @import("std");
 
 pub const Entity = struct {
     id: EntityId,
-    pub fn init(id: EntityId) Entity {
-        return Entity{ .id = id };
+    generation: usize,
+    pub fn init(id: EntityId, generation: usize) Entity {
+        return Entity{ .id = id, .generation = generation };
     }
 };
 
@@ -11,12 +12,16 @@ pub const EntityId = usize;
 
 pub const EntityManager = struct {
     next_id: EntityId,
+    free_ids: std.ArrayList(EntityId),
+    generations: std.ArrayList(usize),
     entities: std.ArrayList(Entity),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) EntityManager {
         return EntityManager{
             .next_id = 0,
+            .free_ids = .init(allocator),
+            .generations = .init(allocator),
             .entities = .init(allocator),
             .allocator = allocator,
         };
@@ -26,19 +31,26 @@ pub const EntityManager = struct {
         self.entities.deinit();
     }
 
-    pub fn create(self: *EntityManager) Entity {
-        const entity = Entity.init(self.next_id);
-        self.next_id += 1;
-        self.entities.append(entity) catch unreachable;
+    pub fn create(self: *EntityManager) !Entity {
+        const entity = if (self.free_ids.pop()) |id| recycle: {
+            self.generations.items[id] += 1;
+            break :recycle Entity.init(id, self.generations.items[id]);
+        } else generate: {
+            defer self.next_id += 1;
+            try self.generations.append(0);
+            break :generate Entity.init(self.next_id, 0);
+        };
+
+        try self.entities.append(entity);
         return entity;
     }
 
-    pub fn destroy(self: *EntityManager, entity: Entity) void {
-        // Find and remove the entity with the matching ID
+    pub fn destroy(self: *EntityManager, id: EntityId) !void {
         var i: usize = 0;
         while (i < self.entities.items.len) : (i += 1) {
-            if (self.entities.items[i].id == entity.id) {
+            if (self.entities.items[i].id == id) {
                 _ = self.entities.orderedRemove(i);
+                try self.free_ids.append(id);
                 break;
             }
         }
@@ -46,7 +58,7 @@ pub const EntityManager = struct {
 
     pub fn exists(self: *const EntityManager, entity: Entity) bool {
         for (self.entities.items) |e| {
-            if (e.id == entity.id) {
+            if (e.id == entity.id and e.generation == entity.generation) {
                 return true;
             }
         }
@@ -72,7 +84,7 @@ pub const EntityManager = struct {
 };
 
 test "Entity basics" {
-    const e1 = Entity.init(123);
+    const e1 = Entity.init(123, 0);
     try std.testing.expectEqual(@as(EntityId, 123), e1.id);
 }
 
@@ -88,8 +100,8 @@ test "EntityManager operations" {
     try std.testing.expectEqual(@as(usize, 0), manager.count());
 
     // Test entity creation
-    const e1 = manager.create();
-    const e2 = manager.create();
+    const e1 = try manager.create();
+    const e2 = try manager.create();
     try std.testing.expectEqual(@as(EntityId, 0), e1.id);
     try std.testing.expectEqual(@as(EntityId, 1), e2.id);
     try std.testing.expectEqual(@as(usize, 2), manager.count());
@@ -97,7 +109,7 @@ test "EntityManager operations" {
     // Test exists check
     try std.testing.expect(manager.exists(e1));
     try std.testing.expect(manager.exists(e2));
-    try std.testing.expect(!manager.exists(Entity.init(99)));
+    try std.testing.expect(!manager.exists(Entity.init(99, 0)));
 
     // Test get by ID
     try std.testing.expectEqual(e1.id, manager.getEntityById(0).?.id);
@@ -110,7 +122,7 @@ test "EntityManager operations" {
     try std.testing.expectEqual(e2.id, all[1].id);
 
     // Test entity destruction
-    manager.destroy(e1);
+    try manager.destroy(e1.id);
     try std.testing.expect(!manager.exists(e1));
     try std.testing.expectEqual(@as(usize, 1), manager.count());
 
@@ -118,6 +130,22 @@ test "EntityManager operations" {
     try std.testing.expect(manager.getEntityById(0) == null);
 
     // Test destroying non-existent entity (should not crash)
-    manager.destroy(Entity.init(99));
+    try manager.destroy(Entity.init(99, 0).id);
     try std.testing.expectEqual(@as(usize, 1), manager.count());
+}
+
+test "EntityManager recycles entity IDs after destruction" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var manager = EntityManager.init(arena.allocator());
+    defer manager.deinit();
+
+    const e1 = try manager.create();
+    const e2 = try manager.create();
+    try manager.destroy(e1.id);
+    const e3 = try manager.create();
+    try std.testing.expectEqual(e1.id, e3.id); // ID should be recycled
+    try std.testing.expect(manager.exists(e3));
+    try std.testing.expect(!manager.exists(e1));
+    try std.testing.expect(manager.exists(e2));
 }

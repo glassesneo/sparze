@@ -111,8 +111,8 @@ test "SparseSetStorage component operations" {
     var storage = SparseSetStorage.init(arena.allocator());
     defer storage.deinit();
 
-    const e1 = Entity{ .id = 1 };
-    const e2 = Entity{ .id = 2 };
+    const e1 = Entity.init(1, 0);
+    const e2 = Entity.init(2, 0);
 
     // Test component types
     const Position = struct {
@@ -183,8 +183,8 @@ test "SparseSetStorage edge cases" {
     var storage = SparseSetStorage.init(arena.allocator());
     defer storage.deinit();
 
-    const e1 = Entity{ .id = 1 };
-    const nonExistentEntity = Entity{ .id = 999 };
+    const e1 = Entity.init(1, 0);
+    const nonExistentEntity = Entity.init(999, 0);
 
     const TestComponent = struct {
         value: i32 = 0,
