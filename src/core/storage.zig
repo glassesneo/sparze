@@ -39,8 +39,8 @@ pub const SparseSetStorage = struct {
             const type_name = entry.key_ptr.*;
             const storage_info = entry.value_ptr.*;
 
-            if (self.sparse_sets.get(type_name)) |sparseSet| {
-                sparseSet.deinit();
+            if (self.sparse_sets.get(type_name)) |sparse_set| {
+                sparse_set.deinit();
 
                 storage_info.destroyFn(storage_info.ptr, self.allocator);
             }
@@ -72,9 +72,6 @@ pub const SparseSetStorage = struct {
 
     pub fn hasComponent(self: Self, entity: Entity, comptime C: type) bool {
         const type_name = @typeName(C);
-        if (!self.sparse_sets.contains(type_name))
-            return false;
-
         if (self.sparse_sets.get(type_name)) |sparse_set|
             return sparse_set.contains(entity);
         return false;
@@ -82,8 +79,8 @@ pub const SparseSetStorage = struct {
 
     pub fn getComponent(self: Self, entity: Entity, comptime C: type) ?C {
         const typeName = @typeName(C);
-        if (self.sparse_sets.get(typeName)) |sparseSet|
-            return sparseSet.get(entity, C);
+        if (self.sparse_sets.get(typeName)) |sparse_set|
+            return sparse_set.get(entity, C);
         return null;
     }
 

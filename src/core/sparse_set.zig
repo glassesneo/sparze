@@ -130,16 +130,16 @@ pub fn SparseSet(comptime C: type) type {
             if (self.free_indexes.pop()) |index| {
                 try self.index_table.put(entity.id, index);
                 self.components.items[index] = component;
-            } else {
-                const index = self.index_table.count();
-                try self.index_table.put(entity.id, index);
-                try self.components.append(component);
+                return;
             }
+
+            const index = self.index_table.count();
+            try self.index_table.put(entity.id, index);
+            try self.components.append(component);
         }
 
         fn remove(self: *Self, entity: Entity) !void {
             if (self.index_table.get(entity.id)) |index| {
-                // _ = self.components.orderedRemove(index);
                 try self.free_indexes.append(index);
                 _ = self.index_table.remove(entity.id);
             }
@@ -169,7 +169,8 @@ fn SparseSetIterator(comptime C: type) type {
                     .id = entry.key_ptr.*,
                     .component = &self.sparse_set.components.items[entry.value_ptr.*],
                 };
-            } else return null;
+            }
+            return null;
         }
         pub fn mutableNext(self: *Self) ?struct { id: Entity.EntityId, component: *C } {
             if (self.iter.next()) |entry| {
@@ -177,7 +178,8 @@ fn SparseSetIterator(comptime C: type) type {
                     .id = entry.key_ptr.*,
                     .component = &self.sparse_set.components.items[entry.value_ptr.*],
                 };
-            } else return null;
+            }
+            return null;
         }
         pub fn reset(self: *Self) void {
             self.iter = self.sparse_set.index_table.iterator();

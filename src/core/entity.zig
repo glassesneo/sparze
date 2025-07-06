@@ -46,9 +46,8 @@ pub const EntityManager = struct {
     }
 
     pub fn destroy(self: *EntityManager, id: Entity.EntityId) !void {
-        var i: usize = 0;
-        while (i < self.entities.items.len) : (i += 1) {
-            if (self.entities.items[i].id == id) {
+        for (self.entities.items, 0..) |entity, i| {
+            if (entity.id == id) {
                 _ = self.entities.orderedRemove(i);
                 try self.free_ids.append(id);
                 break;
@@ -57,12 +56,11 @@ pub const EntityManager = struct {
     }
 
     pub fn exists(self: *const EntityManager, entity: Entity) bool {
-        for (self.entities.items) |e| {
+        return for (self.entities.items) |e| {
             if (e.id == entity.id and e.generation == entity.generation) {
-                return true;
+                break true;
             }
-        }
-        return false;
+        } else false;
     }
 
     pub fn count(self: *const EntityManager) usize {
@@ -70,12 +68,11 @@ pub const EntityManager = struct {
     }
 
     pub fn getEntityById(self: *const EntityManager, id: Entity.EntityId) ?Entity {
-        for (self.entities.items) |entity| {
+        return for (self.entities.items) |entity| {
             if (entity.id == id) {
-                return entity;
+                break entity;
             }
-        }
-        return null;
+        } else null;
     }
 
     pub fn getAllEntities(self: *const EntityManager) []const Entity {
