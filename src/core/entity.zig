@@ -1,6 +1,8 @@
 const std = @import("std");
 
 pub const Entity = struct {
+    pub const EntityId = usize;
+
     id: EntityId,
     generation: usize,
     pub fn init(id: EntityId, generation: usize) Entity {
@@ -8,11 +10,9 @@ pub const Entity = struct {
     }
 };
 
-pub const EntityId = usize;
-
 pub const EntityManager = struct {
-    next_id: EntityId,
-    free_ids: std.ArrayList(EntityId),
+    next_id: Entity.EntityId,
+    free_ids: std.ArrayList(Entity.EntityId),
     generations: std.ArrayList(usize),
     entities: std.ArrayList(Entity),
     allocator: std.mem.Allocator,
@@ -45,7 +45,7 @@ pub const EntityManager = struct {
         return entity;
     }
 
-    pub fn destroy(self: *EntityManager, id: EntityId) !void {
+    pub fn destroy(self: *EntityManager, id: Entity.EntityId) !void {
         var i: usize = 0;
         while (i < self.entities.items.len) : (i += 1) {
             if (self.entities.items[i].id == id) {
@@ -69,7 +69,7 @@ pub const EntityManager = struct {
         return self.entities.items.len;
     }
 
-    pub fn getEntityById(self: *const EntityManager, id: EntityId) ?Entity {
+    pub fn getEntityById(self: *const EntityManager, id: Entity.EntityId) ?Entity {
         for (self.entities.items) |entity| {
             if (entity.id == id) {
                 return entity;
@@ -85,7 +85,7 @@ pub const EntityManager = struct {
 
 test "Entity basics" {
     const e1 = Entity.init(123, 0);
-    try std.testing.expectEqual(@as(EntityId, 123), e1.id);
+    try std.testing.expectEqual(@as(Entity.EntityId, 123), e1.id);
 }
 
 test "EntityManager operations" {
@@ -102,8 +102,8 @@ test "EntityManager operations" {
     // Test entity creation
     const e1 = try manager.create();
     const e2 = try manager.create();
-    try std.testing.expectEqual(@as(EntityId, 0), e1.id);
-    try std.testing.expectEqual(@as(EntityId, 1), e2.id);
+    try std.testing.expectEqual(@as(Entity.EntityId, 0), e1.id);
+    try std.testing.expectEqual(@as(Entity.EntityId, 1), e2.id);
     try std.testing.expectEqual(@as(usize, 2), manager.count());
 
     // Test exists check

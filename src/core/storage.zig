@@ -2,13 +2,13 @@ const std = @import("std");
 
 const Entity = @import("entity.zig").Entity;
 
-const sparse_set = @import("sparse_set.zig");
-const SparseSet = sparse_set.SparseSet;
-const AbstractSparseSet = sparse_set.AbstractSparseSet;
+const sparse_set_module = @import("sparse_set.zig");
+const SparseSet = sparse_set_module.SparseSet;
+const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 
 pub const SparseSetStorage = struct {
-    sparseSets: std.StringHashMap(AbstractSparseSet),
-    componentStorage: std.StringHashMap(StorageInfo),
+    sparse_sets: std.StringHashMap(AbstractSparseSet),
+    component_storage: std.StringHashMap(StorageInfo),
     allocator: std.mem.Allocator,
 
     const StorageInfo = struct {
@@ -20,85 +20,85 @@ pub const SparseSetStorage = struct {
     pub fn destroyTypedStorage(comptime T: type) *const fn (*anyopaque, std.mem.Allocator) void {
         return struct {
             fn destroy(ptr: *anyopaque, allocator: std.mem.Allocator) void {
-                const typedPtr = @as(*T, @ptrCast(@alignCast(ptr)));
-                allocator.destroy(typedPtr);
+                const typed_ptr = @as(*T, @ptrCast(@alignCast(ptr)));
+                allocator.destroy(typed_ptr);
             }
         }.destroy;
     }
 
     pub fn init(allocator: std.mem.Allocator) SparseSetStorage {
         return SparseSetStorage{
-            .sparseSets = .init(allocator),
-            .componentStorage = .init(allocator),
+            .sparse_sets = .init(allocator),
+            .component_storage = .init(allocator),
             .allocator = allocator,
         };
     }
     pub fn deinit(self: *Self) void {
-        var iter = self.componentStorage.iterator();
+        var iter = self.component_storage.iterator();
         while (iter.next()) |entry| {
-            const typeName = entry.key_ptr.*;
-            const storageInfo = entry.value_ptr.*;
+            const type_name = entry.key_ptr.*;
+            const storage_info = entry.value_ptr.*;
 
-            if (self.sparseSets.get(typeName)) |sparseSet| {
+            if (self.sparse_sets.get(type_name)) |sparseSet| {
                 sparseSet.deinit();
 
-                storageInfo.destroyFn(storageInfo.ptr, self.allocator);
+                storage_info.destroyFn(storage_info.ptr, self.allocator);
             }
         }
 
-        self.sparseSets.deinit();
-        self.componentStorage.deinit();
+        self.sparse_sets.deinit();
+        self.component_storage.deinit();
     }
 
     pub fn attachComponent(self: *Self, entity: Entity, comptime C: type, component: C) !void {
-        const typeName = @typeName(C);
-        if (!self.sparseSets.contains(typeName)) {
-            var sparseSet = try self.allocator.create(SparseSet(C));
-            sparseSet.* = SparseSet(C).init(self.allocator);
+        const type_name = @typeName(C);
+        if (!self.sparse_sets.contains(type_name)) {
+            var sparse_set = try self.allocator.create(SparseSet(C));
+            sparse_set.* = SparseSet(C).init(self.allocator);
 
             const storageInfo = StorageInfo{
-                .ptr = @ptrCast(sparseSet),
+                .ptr = @ptrCast(sparse_set),
                 .destroyFn = destroyTypedStorage(SparseSet(C)),
             };
-            try self.componentStorage.put(typeName, storageInfo);
+            try self.component_storage.put(type_name, storageInfo);
 
-            const abstractSparseSet = sparseSet.abstract();
-            try self.sparseSets.put(typeName, abstractSparseSet);
+            const abstract_sparse_set = sparse_set.abstract();
+            try self.sparse_sets.put(type_name, abstract_sparse_set);
         }
 
-        var componentCopy = component;
-        try self.sparseSets.get(typeName).?.insert(entity, &componentCopy);
+        var component_copy = component;
+        try self.sparse_sets.get(type_name).?.insert(entity, &component_copy);
     }
 
     pub fn hasComponent(self: Self, entity: Entity, comptime C: type) bool {
-        const typeName = @typeName(C);
-        if (!self.sparseSets.contains(typeName))
+        const type_name = @typeName(C);
+        if (!self.sparse_sets.contains(type_name))
             return false;
 
-        if (self.sparseSets.get(typeName)) |sparseSet|
-            return sparseSet.contains(entity);
+        if (self.sparse_sets.get(type_name)) |sparse_set|
+            return sparse_set.contains(entity);
         return false;
     }
 
     pub fn getComponent(self: Self, entity: Entity, comptime C: type) ?C {
         const typeName = @typeName(C);
-        if (self.sparseSets.get(typeName)) |sparseSet|
+        if (self.sparse_sets.get(typeName)) |sparseSet|
             return sparseSet.get(entity, C);
         return null;
     }
 
     pub fn removeComponent(self: *Self, entity: Entity, comptime C: type) !void {
-        const typeName = @typeName(C);
-        if (self.sparseSets.get(typeName)) |sparseSet| {
-            try sparseSet.remove(entity);
+        const type_name = @typeName(C);
+        if (self.sparse_sets.get(type_name)) |sparse_set| {
+            try sparse_set.remove(entity);
         }
     }
 
     pub fn removeAllComponents(self: *Self, entity: Entity) !void {
-        var iter = self.sparseSets.iterator();
+        var iter = self.sparse_sets.iterator();
         while (iter.next()) |entry| {
-            const sparseSet = entry.value_ptr.*;
-            try sparseSet.remove(entity);
+            const sparse_set = entry.value_ptr.*;
+            try sparse_set.remove(entity);
         }
     }
 };

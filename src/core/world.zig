@@ -1,60 +1,60 @@
 const std = @import("std");
 
-const entityModule = @import("entity.zig");
-const Entity = entityModule.Entity;
-const EntityManager = entityModule.EntityManager;
+const entity_module = @import("entity.zig");
+const Entity = entity_module.Entity;
+const EntityManager = entity_module.EntityManager;
 
-const sparse_set = @import("sparse_set.zig");
-const SparseSet = sparse_set.SparseSet;
-const AbstractSparseSet = sparse_set.AbstractSparseSet;
+const sparse_set_module = @import("sparse_set.zig");
+const SparseSet = sparse_set_module.SparseSet;
+const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 
 const SparseSetStorage = @import("storage.zig").SparseSetStorage;
 
 pub const World = struct {
-    entityManager: EntityManager,
-    sparseSetStorage: SparseSetStorage,
+    entity_manager: EntityManager,
+    sparse_set_storage: SparseSetStorage,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) World {
         return World{
-            .entityManager = EntityManager.init(allocator),
-            .sparseSetStorage = SparseSetStorage.init(allocator),
+            .entity_manager = .init(allocator),
+            .sparse_set_storage = .init(allocator),
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *World) void {
-        self.entityManager.deinit();
-        self.sparseSetStorage.deinit();
+        self.entity_manager.deinit();
+        self.sparse_set_storage.deinit();
     }
 
     pub fn createEntity(self: *World) !Entity {
-        return try self.entityManager.create();
+        return try self.entity_manager.create();
     }
 
     pub fn createEntityWith(self: *World, comptime types: anytype) !Entity {
-        const entity = try self.entityManager.create();
+        const entity = try self.entity_manager.create();
         try self.attachComponents(entity, types);
         return entity;
     }
 
     pub fn destroyEntity(self: *World, entity: Entity) !void {
-        try self.entityManager.destroy(entity.id);
-        try self.sparseSetStorage.removeAllComponents(entity);
+        try self.entity_manager.destroy(entity.id);
+        try self.sparse_set_storage.removeAllComponents(entity);
     }
 
     pub fn containsEntity(self: *const World, entity: Entity) bool {
-        return self.entityManager.exists(entity);
+        return self.entity_manager.exists(entity);
     }
 
     pub fn getAllEntities(self: *const World) []const Entity {
-        return self.entityManager.getAllEntities();
+        return self.entity_manager.getAllEntities();
     }
 
     /// Attaches a component to an entity.
     /// Note: The component is copied into the ECS storage.
     pub fn attachComponent(self: *World, entity: Entity, comptime C: type, component: C) !void {
-        try self.sparseSetStorage.attachComponent(entity, C, component);
+        try self.sparse_set_storage.attachComponent(entity, C, component);
     }
 
     /// Attaches multiple component to an entity
@@ -67,15 +67,15 @@ pub const World = struct {
     }
 
     pub fn hasComponent(self: World, entity: Entity, comptime C: type) bool {
-        return self.sparseSetStorage.hasComponent(entity, C);
+        return self.sparse_set_storage.hasComponent(entity, C);
     }
 
     pub fn getComponent(self: World, entity: Entity, comptime C: type) ?C {
-        return self.sparseSetStorage.getComponent(entity, C);
+        return self.sparse_set_storage.getComponent(entity, C);
     }
 
     pub fn removeComponent(self: *World, entity: Entity, comptime C: type) !void {
-        try self.sparseSetStorage.removeComponent(entity, C);
+        try self.sparse_set_storage.removeComponent(entity, C);
     }
 };
 
