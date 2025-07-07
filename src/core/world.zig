@@ -78,6 +78,10 @@ pub const World = struct {
         return self.sparse_set_storage.getComponent(entity, C);
     }
 
+    pub fn getComponentPtr(self: *World, entity: Entity, comptime C: type) ?*C {
+        return self.sparse_set_storage.getComponentPtr(entity, C);
+    }
+
     pub fn removeComponent(self: *World, entity: Entity, comptime C: type) !void {
         try self.sparse_set_storage.removeComponent(entity, C);
     }
@@ -88,6 +92,10 @@ pub const World = struct {
 
     pub fn getResource(self: *const World, comptime T: type) ?T {
         return self.resource_storage.get(T);
+    }
+
+    pub fn getResourcePtr(self: *World, comptime T: type) ?*T {
+        return self.resource_storage.getPtr(T);
     }
 };
 
@@ -215,6 +223,30 @@ test "World component operations" {
         try std.testing.expect(false); // Should not reach here
     }
 
+    // Test getComponentPtr for mutable access
+    if (world.getComponentPtr(e1, Position)) |pos_ptr| {
+        try std.testing.expectEqual(@as(f32, 10), pos_ptr.x);
+        try std.testing.expectEqual(@as(f32, 20), pos_ptr.y);
+
+        // Test in-place modification through pointer
+        pos_ptr.x = 100;
+        pos_ptr.y = 200;
+
+        // Verify the modification persisted
+        if (world.getComponent(e1, Position)) |modified_pos| {
+            try std.testing.expectEqual(@as(f32, 100), modified_pos.x);
+            try std.testing.expectEqual(@as(f32, 200), modified_pos.y);
+        } else {
+            try std.testing.expect(false); // Should not reach here
+        }
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
+    // Test getComponentPtr for non-existent component
+    const e2 = try world.createEntity();
+    try std.testing.expect(world.getComponentPtr(e2, Position) == null);
+
     // Test entity destruction removes components
     try world.destroyEntity(e1);
     try std.testing.expect(!world.hasComponent(e1, Position));
@@ -286,7 +318,25 @@ test "World resource put/get/update" {
         try std.testing.expect(false);
     }
 
+    // Test getResourcePtr for mutable access
+    if (world.getResourcePtr(Config)) |config_ptr| {
+        try std.testing.expectEqual(@as(i32, 99), config_ptr.value);
+
+        // Test in-place modification through pointer
+        config_ptr.value = 123;
+
+        // Verify the modification persisted
+        if (world.getResource(Config)) |modified_config| {
+            try std.testing.expectEqual(@as(i32, 123), modified_config.value);
+        } else {
+            try std.testing.expect(false);
+        }
+    } else {
+        try std.testing.expect(false);
+    }
+
     // Non-existent resource returns null
     const Dummy = struct { x: u8 };
     try std.testing.expect(world.getResource(Dummy) == null);
+    try std.testing.expect(world.getResourcePtr(Dummy) == null);
 }

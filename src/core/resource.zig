@@ -15,6 +15,10 @@ pub const AbstractResource = struct {
         return typed_ptr.*;
     }
 
+    pub fn getPtr(self: *AbstractResource, comptime T: type) *T {
+        return castTo(T, self.vtable.getFn(self.instance));
+    }
+
     pub fn set(self: *const AbstractResource, value: *anyopaque) void {
         self.vtable.setFn(self.instance, value);
     }
@@ -114,4 +118,14 @@ test "AbstractResource get/set" {
     var new_val = MyType{ .value = 99 };
     abs.set(&new_val);
     try std.testing.expectEqual(@as(i32, 99), abs.get(MyType).value);
+
+    // Test getPtr through abstract interface
+    const resource_ptr = abs.getPtr(MyType);
+    try std.testing.expectEqual(@as(i32, 99), resource_ptr.value);
+
+    // Test in-place modification through pointer
+    resource_ptr.value = 200;
+
+    // Verify the modification persisted
+    try std.testing.expectEqual(@as(i32, 200), abs.get(MyType).value);
 }

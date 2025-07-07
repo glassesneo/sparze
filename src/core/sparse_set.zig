@@ -19,10 +19,17 @@ pub const AbstractSparseSet = struct {
 
     pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?T {
         if (self.vtable.getFn(self.instance, entity)) |component| {
-            const typedPtr = castTo(T, component);
-            return typedPtr.*;
+            const typed_ptr = castTo(T, component);
+            return typed_ptr.*;
         }
         return null;
+    }
+
+    pub fn getPtr(self: *AbstractSparseSet, entity: Entity, comptime T: type) ?*T {
+        return if (self.vtable.getFn(self.instance, entity)) |component|
+            castTo(T, component)
+        else
+            null;
     }
 
     pub fn contains(self: *const AbstractSparseSet, entity: Entity) bool {
@@ -270,6 +277,24 @@ test "AbstractSparseSet interface" {
 
     // Test non-existent component get
     try std.testing.expect(abstract.get(e2, TestComponent) == null);
+
+    // Test getPtr through abstract interface
+    if (abstract.getPtr(e1, TestComponent)) |component_ptr| {
+        try std.testing.expectEqual(@as(i32, 42), component_ptr.value);
+        // Test in-place modification through pointer
+        component_ptr.value = 100;
+        // Verify the modification persisted
+        if (abstract.get(e1, TestComponent)) |modified_component| {
+            try std.testing.expectEqual(@as(i32, 100), modified_component.value);
+        } else {
+            try std.testing.expect(false); // Should not reach here
+        }
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
+    // Test getPtr for non-existent component
+    try std.testing.expect(abstract.getPtr(e2, TestComponent) == null);
 
     // Test remove through abstract interface
     try abstract.remove(e1);

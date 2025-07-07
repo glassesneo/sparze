@@ -88,6 +88,13 @@ pub const SparseSetStorage = struct {
         return null;
     }
 
+    pub fn getComponentPtr(self: *Self, entity: Entity, comptime C: type) ?*C {
+        const type_name = @typeName(C);
+        if (self.sparse_sets.getPtr(type_name)) |sparse_set|
+            return sparse_set.getPtr(entity, C);
+        return null;
+    }
+
     pub fn removeComponent(self: *Self, entity: Entity, comptime C: type) !void {
         const type_name = @typeName(C);
         if (self.sparse_sets.get(type_name)) |sparse_set| {
@@ -162,6 +169,29 @@ test "SparseSetStorage component operations" {
     } else {
         try std.testing.expect(false); // Should not reach here
     }
+
+    // Test getComponentPtr for mutable access
+    if (storage.getComponentPtr(e1, Position)) |pos_ptr| {
+        try std.testing.expectEqual(@as(f32, 10), pos_ptr.x);
+        try std.testing.expectEqual(@as(f32, 20), pos_ptr.y);
+
+        // Test in-place modification through pointer
+        pos_ptr.x = 100;
+        pos_ptr.y = 200;
+
+        // Verify the modification persisted
+        if (storage.getComponent(e1, Position)) |modified_pos| {
+            try std.testing.expectEqual(@as(f32, 100), modified_pos.x);
+            try std.testing.expectEqual(@as(f32, 200), modified_pos.y);
+        } else {
+            try std.testing.expect(false); // Should not reach here
+        }
+    } else {
+        try std.testing.expect(false); // Should not reach here
+    }
+
+    // Test getComponentPtr for non-existent component
+    try std.testing.expect(storage.getComponentPtr(e2, Health) == null);
 
     // Test remove single component
     try storage.removeComponent(e1, Health);
@@ -272,6 +302,14 @@ pub const ResourceStorage = struct {
         else
             null;
     }
+
+    pub fn getPtr(self: *Self, comptime T: type) ?*T {
+        const type_name = @typeName(T);
+        return if (self.resources.getPtr(type_name)) |resource|
+            resource.getPtr(T)
+        else
+            null;
+    }
 };
 
 test "ResourceStorage put/get/update" {
@@ -303,7 +341,25 @@ test "ResourceStorage put/get/update" {
         try expect(false);
     }
 
+    // Test getPtr for mutable access
+    if (storage.getPtr(Config)) |config_ptr| {
+        try expect(config_ptr.value == 456);
+
+        // Test in-place modification through pointer
+        config_ptr.value = 789;
+
+        // Verify the modification persisted
+        if (storage.get(Config)) |modified_config| {
+            try expect(modified_config.value == 789);
+        } else {
+            try expect(false);
+        }
+    } else {
+        try expect(false);
+    }
+
     // Non-existent resource returns null
     const Dummy = struct { x: u8 };
     try expect(storage.get(Dummy) == null);
+    try expect(storage.getPtr(Dummy) == null);
 }
