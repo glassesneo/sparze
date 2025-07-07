@@ -224,3 +224,7 @@ Sparze is **not thread-safe** by design for maximum performance. If you need con
 - Use separate World instances per thread
 - Implement your own synchronization around World operations
 - Consider message-passing between systems instead of shared state
+
+## License
+
+This project is licensed under the MIT License - see the COPYING for details.
