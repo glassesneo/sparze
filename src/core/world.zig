@@ -8,17 +8,21 @@ const sparse_set_module = @import("sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 
-const SparseSetStorage = @import("storage.zig").SparseSetStorage;
+const storage_module = @import("storage.zig");
+const SparseSetStorage = storage_module.SparseSetStorage;
+const ResourceStorage = storage_module.ResourceStorage;
 
 pub const World = struct {
     entity_manager: EntityManager,
     sparse_set_storage: SparseSetStorage,
+    resource_storage: ResourceStorage,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) World {
         return World{
             .entity_manager = .init(allocator),
             .sparse_set_storage = .init(allocator),
+            .resource_storage = .init(allocator),
             .allocator = allocator,
         };
     }
@@ -76,6 +80,14 @@ pub const World = struct {
 
     pub fn removeComponent(self: *World, entity: Entity, comptime C: type) !void {
         try self.sparse_set_storage.removeComponent(entity, C);
+    }
+
+    pub fn putResource(self: *World, comptime T: type, value: T) !void {
+        try self.resource_storage.put(T, value);
+    }
+
+    pub fn getResource(self: *const World, comptime T: type) ?T {
+        return self.resource_storage.get(T);
     }
 };
 
@@ -245,4 +257,36 @@ test "World multiple entities with components" {
     // Test component values
     try std.testing.expectEqual(@as(i32, 100), world.getComponent(e1, Health).?.value);
     try std.testing.expectEqual(@as(i32, 50), world.getComponent(e2, Health).?.value);
+}
+
+test "World resource put/get/update" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var world = World.init(arena.allocator());
+    defer world.deinit();
+
+    const Config = struct {
+        value: i32,
+        pub fn deinit(_: *@This()) void {}
+    };
+
+    // Put and get resource
+    try world.putResource(Config, Config{ .value = 42 });
+    if (world.getResource(Config)) |got| {
+        try std.testing.expectEqual(@as(i32, 42), got.value);
+    } else {
+        try std.testing.expect(false);
+    }
+
+    // Update resource
+    try world.putResource(Config, Config{ .value = 99 });
+    if (world.getResource(Config)) |got| {
+        try std.testing.expectEqual(@as(i32, 99), got.value);
+    } else {
+        try std.testing.expect(false);
+    }
+
+    // Non-existent resource returns null
+    const Dummy = struct { x: u8 };
+    try std.testing.expect(world.getResource(Dummy) == null);
 }

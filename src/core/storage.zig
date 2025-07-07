@@ -6,6 +6,10 @@ const sparse_set_module = @import("sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 
+const resource_module = @import("resource.zig");
+const Resource = resource_module.Resource;
+const AbstractResource = resource_module.AbstractResource;
+
 pub const SparseSetStorage = struct {
     sparse_sets: std.StringHashMap(AbstractSparseSet),
     component_storage: std.StringHashMap(StorageInfo),
@@ -199,4 +203,107 @@ test "SparseSetStorage edge cases" {
 
     // Get non-existent component
     try std.testing.expect(storage.getComponent(nonExistentEntity, TestComponent) == null);
+}
+
+pub const ResourceStorage = struct {
+    resources: std.StringHashMap(AbstractResource),
+    value_storage: std.StringHashMap(StorageInfo),
+    allocator: std.mem.Allocator,
+
+    const StorageInfo = struct {
+        ptr: *anyopaque,
+        destroyFn: *const fn (*anyopaque, std.mem.Allocator) void,
+    };
+    const Self = ResourceStorage;
+
+    pub fn destroyTypedStorage(comptime T: type) *const fn (*anyopaque, std.mem.Allocator) void {
+        return struct {
+            fn destroy(ptr: *anyopaque, allocator: std.mem.Allocator) void {
+                const typed_ptr = @as(*T, @ptrCast(@alignCast(ptr)));
+                allocator.destroy(typed_ptr);
+            }
+        }.destroy;
+    }
+
+    pub fn init(allocator: std.mem.Allocator) ResourceStorage {
+        return ResourceStorage{
+            .resources = .init(allocator),
+            .value_storage = .init(allocator),
+            .allocator = allocator,
+        };
+    }
+    pub fn deinit(self: *Self) void {
+        var iter = self.value_storage.iterator();
+        while (iter.next()) |entry| {
+            const type_name = entry.key_ptr.*;
+            const storage_info = entry.value_ptr.*;
+
+            if (self.resources.get(type_name)) |resource| {
+                resource.deinit();
+
+                storage_info.destroyFn(storage_info.ptr, self.allocator);
+            }
+        }
+
+        self.resources.deinit();
+        self.value_storage.deinit();
+    }
+
+    pub fn put(self: *Self, comptime T: type, value: T) !void {
+        const type_name = @typeName(T);
+        var resource = try self.allocator.create(Resource(T));
+        resource.* = try Resource(T).init(self.allocator);
+        resource.*.value = value;
+
+        const storageInfo = StorageInfo{
+            .ptr = @ptrCast(resource),
+            .destroyFn = destroyTypedStorage(Resource(T)),
+        };
+        try self.value_storage.put(type_name, storageInfo);
+
+        const abstract_resource = try resource.abstract();
+        try self.resources.put(type_name, abstract_resource);
+    }
+
+    pub fn get(self: Self, comptime T: type) ?T {
+        const type_name = @typeName(T);
+        return if (self.resources.get(type_name)) |resource|
+            resource.get(T)
+        else
+            null;
+    }
+};
+
+test "ResourceStorage put/get/update" {
+    const expect = std.testing.expect;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var storage = ResourceStorage.init(arena.allocator());
+    defer storage.deinit();
+
+    const Config = struct {
+        value: i32,
+        pub fn deinit(_: *@This()) void {}
+    };
+
+    // Put a resource and get it
+    try storage.put(Config, Config{ .value = 123 });
+    if (storage.get(Config)) |got| {
+        try expect(got.value == 123);
+    } else {
+        try expect(false);
+    }
+
+    // Update the resource
+    try storage.put(Config, Config{ .value = 456 });
+    if (storage.get(Config)) |got| {
+        try expect(got.value == 456);
+    } else {
+        try expect(false);
+    }
+
+    // Non-existent resource returns null
+    const Dummy = struct { x: u8 };
+    try expect(storage.get(Dummy) == null);
 }
