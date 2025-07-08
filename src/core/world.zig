@@ -30,6 +30,7 @@ pub const World = struct {
     pub fn deinit(self: *World) void {
         self.entity_manager.deinit();
         self.sparse_set_storage.deinit();
+        self.resource_storage.deinit();
     }
 
     pub fn createEntity(self: *World) !Entity {

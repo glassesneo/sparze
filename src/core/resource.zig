@@ -68,15 +68,14 @@ pub fn Resource(comptime T: type) type {
         pub const ResourceType = T;
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            const value: *T = try allocator.create(T);
             return Self{
-                .value = value.*,
+                .value = undefined,
                 .allocator = allocator,
             };
         }
 
         pub fn deinit(self: *Self) void {
-            self.allocator.destroy(&(self.value));
+            _ = self;
         }
 
         pub fn abstract(self: *Self) !AbstractResource {

@@ -122,6 +122,7 @@ pub fn SparseSet(comptime C: type) type {
         pub fn deinit(self: *Self) void {
             self.components.deinit();
             self.index_table.deinit();
+            self.free_indexes.deinit();
         }
 
         fn contains(self: Self, entity: Entity) bool {

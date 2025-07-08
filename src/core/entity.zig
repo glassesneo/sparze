@@ -28,6 +28,8 @@ pub const EntityManager = struct {
     }
 
     pub fn deinit(self: *EntityManager) void {
+        self.free_ids.deinit();
+        self.generations.deinit();
         self.entities.deinit();
     }
 
