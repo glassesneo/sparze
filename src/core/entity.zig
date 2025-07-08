@@ -15,6 +15,8 @@ pub const EntityManager = struct {
     free_ids: std.ArrayList(Entity.EntityId),
     generations: std.ArrayList(usize),
     entities: std.ArrayList(Entity),
+    // Add hash map for O(1) entity lookups
+    entity_lookup: std.AutoHashMap(Entity.EntityId, usize),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) EntityManager {
@@ -23,6 +25,7 @@ pub const EntityManager = struct {
             .free_ids = .init(allocator),
             .generations = .init(allocator),
             .entities = .init(allocator),
+            .entity_lookup = .init(allocator),
             .allocator = allocator,
         };
     }
@@ -31,6 +34,7 @@ pub const EntityManager = struct {
         self.free_ids.deinit();
         self.generations.deinit();
         self.entities.deinit();
+        self.entity_lookup.deinit();
     }
 
     pub fn create(self: *EntityManager) !Entity {
@@ -43,26 +47,33 @@ pub const EntityManager = struct {
             break :generate Entity.init(self.next_id, 0);
         };
 
+        const index = self.entities.items.len;
         try self.entities.append(entity);
+        try self.entity_lookup.put(entity.id, index);
         return entity;
     }
 
     pub fn destroy(self: *EntityManager, id: Entity.EntityId) !void {
-        for (self.entities.items, 0..) |entity, i| {
-            if (entity.id == id) {
-                _ = self.entities.orderedRemove(i);
-                try self.free_ids.append(id);
-                break;
+        if (self.entity_lookup.get(id)) |index| {
+            // Use swapRemove for O(1) removal
+            _ = self.entities.swapRemove(index);
+            _ = self.entity_lookup.remove(id);
+            try self.free_ids.append(id);
+
+            // Update lookup table for the swapped entity (if any)
+            if (index < self.entities.items.len) {
+                const swapped_entity = self.entities.items[index];
+                try self.entity_lookup.put(swapped_entity.id, index);
             }
         }
     }
 
     pub fn exists(self: *const EntityManager, entity: Entity) bool {
-        return for (self.entities.items) |e| {
-            if (e.id == entity.id and e.generation == entity.generation) {
-                break true;
-            }
-        } else false;
+        if (self.entity_lookup.get(entity.id)) |index| {
+            const stored_entity = self.entities.items[index];
+            return stored_entity.generation == entity.generation;
+        }
+        return false;
     }
 
     pub fn count(self: *const EntityManager) usize {
@@ -70,11 +81,10 @@ pub const EntityManager = struct {
     }
 
     pub fn getEntityById(self: *const EntityManager, id: Entity.EntityId) ?Entity {
-        return for (self.entities.items) |entity| {
-            if (entity.id == id) {
-                break entity;
-            }
-        } else null;
+        if (self.entity_lookup.get(id)) |index| {
+            return self.entities.items[index];
+        }
+        return null;
     }
 
     pub fn getAllEntities(self: *const EntityManager) []const Entity {
@@ -147,4 +157,33 @@ test "EntityManager recycles entity IDs after destruction" {
     try std.testing.expect(manager.exists(e3));
     try std.testing.expect(!manager.exists(e1));
     try std.testing.expect(manager.exists(e2));
+}
+
+test "EntityManager O(1) operations performance" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var manager = EntityManager.init(arena.allocator());
+    defer manager.deinit();
+
+    // Create many entities to test scalability
+    const num_entities = 1000;
+    var entities: [num_entities]Entity = undefined;
+
+    // Test O(1) creation and lookup
+    for (0..num_entities) |i| {
+        entities[i] = try manager.create();
+        try std.testing.expect(manager.exists(entities[i]));
+        try std.testing.expectEqual(entities[i].id, manager.getEntityById(entities[i].id).?.id);
+    }
+
+    try std.testing.expectEqual(@as(usize, num_entities), manager.count());
+
+    // Test O(1) destruction
+    for (0..num_entities / 2) |i| {
+        try manager.destroy(entities[i].id);
+        try std.testing.expect(!manager.exists(entities[i]));
+        try std.testing.expect(manager.getEntityById(entities[i].id) == null);
+    }
+
+    try std.testing.expectEqual(@as(usize, num_entities / 2), manager.count());
 }
