@@ -24,3 +24,9 @@ jobs:
       - name: Run Tests
         run: |
           zig build test
+      - name: Build Examples
+        run: |
+          zig build examples
+      - name: Run Examples
+        run: |
+          zig build run-examples

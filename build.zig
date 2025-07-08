@@ -1,5 +1,13 @@
 const std = @import("std");
 
+const examples = [_]Example{
+    .{ .name = "basic" },
+};
+
+const Example = struct {
+    name: []const u8,
+};
+
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
@@ -42,6 +50,13 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
+    // Build examples
+    buildExamples(b, .{
+        .target = target,
+        .optimize = optimize,
+        .mod_sparze = lib_mod,
+    });
+
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
@@ -55,4 +70,39 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
+}
+
+const ExampleOptions = struct {
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    mod_sparze: *std.Build.Module,
+};
+
+fn buildExamples(b: *std.Build, options: ExampleOptions) void {
+    const examples_step = b.step("examples", "Build examples");
+    const run_examples_step = b.step("run-examples", "Run all examples");
+
+    for (examples) |example| {
+        buildExample(b, example, options, examples_step, run_examples_step);
+    }
+}
+
+fn buildExample(b: *std.Build, example: Example, options: ExampleOptions, examples_step: *std.Build.Step, run_examples_step: *std.Build.Step) void {
+    const mod = b.createModule(.{
+        .root_source_file = b.path(b.fmt("examples/{s}.zig", .{example.name})),
+        .target = options.target,
+        .optimize = options.optimize,
+    });
+    mod.addImport("sparze", options.mod_sparze);
+
+    const example_step = b.addExecutable(.{
+        .name = example.name,
+        .root_module = mod,
+    });
+
+    examples_step.dependOn(&b.addInstallArtifact(example_step, .{}).step);
+
+    const run = b.addRunArtifact(example_step);
+    run_examples_step.dependOn(&run.step);
+    b.step(b.fmt("run-{s}", .{example.name}), b.fmt("Run {s} example", .{example.name})).dependOn(&run.step);
 }
