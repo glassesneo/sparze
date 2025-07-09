@@ -11,8 +11,8 @@ const Resource = resource_module.Resource;
 const AbstractResource = resource_module.AbstractResource;
 
 pub const SparseSetStorage = struct {
-    sparse_sets: std.StringHashMap(AbstractSparseSet),
-    component_storage: std.StringHashMap(StorageInfo),
+    sparse_sets: std.AutoHashMap(TypeId, AbstractSparseSet),
+    component_storage: std.AutoHashMap(TypeId, StorageInfo),
     allocator: std.mem.Allocator,
 
     const StorageInfo = struct {
@@ -20,6 +20,11 @@ pub const SparseSetStorage = struct {
         destroyFn: *const fn (*anyopaque, std.mem.Allocator) void,
     };
     const Self = SparseSetStorage;
+
+    const TypeId = u64;
+    fn typeId(comptime T: type) TypeId {
+        return comptime std.hash_map.hashString(@typeName(T));
+    }
 
     pub fn destroyTypedStorage(comptime T: type) *const fn (*anyopaque, std.mem.Allocator) void {
         return struct {
@@ -40,10 +45,10 @@ pub const SparseSetStorage = struct {
     pub fn deinit(self: *Self) void {
         var iter = self.component_storage.iterator();
         while (iter.next()) |entry| {
-            const type_name = entry.key_ptr.*;
+            const type_id = entry.key_ptr.*;
             const storage_info = entry.value_ptr.*;
 
-            if (self.sparse_sets.get(type_name)) |sparse_set| {
+            if (self.sparse_sets.get(type_id)) |sparse_set| {
                 sparse_set.deinit();
 
                 storage_info.destroyFn(storage_info.ptr, self.allocator);
@@ -55,8 +60,8 @@ pub const SparseSetStorage = struct {
     }
 
     pub fn attachComponent(self: *Self, entity: Entity, comptime C: type, component: C) !void {
-        const type_name = @typeName(C);
-        if (!self.sparse_sets.contains(type_name)) {
+        const type_id = comptime typeId(C);
+        if (!self.sparse_sets.contains(type_id)) {
             var sparse_set = try self.allocator.create(SparseSet(C));
             sparse_set.* = SparseSet(C).init(self.allocator);
 
@@ -64,40 +69,40 @@ pub const SparseSetStorage = struct {
                 .ptr = @ptrCast(sparse_set),
                 .destroyFn = destroyTypedStorage(SparseSet(C)),
             };
-            try self.component_storage.put(type_name, storageInfo);
+            try self.component_storage.put(type_id, storageInfo);
 
             const abstract_sparse_set = sparse_set.abstract();
-            try self.sparse_sets.put(type_name, abstract_sparse_set);
+            try self.sparse_sets.put(type_id, abstract_sparse_set);
         }
 
         var component_copy = component;
-        try self.sparse_sets.get(type_name).?.insert(entity, &component_copy);
+        try self.sparse_sets.get(type_id).?.insert(entity, &component_copy);
     }
 
     pub fn hasComponent(self: Self, entity: Entity, comptime C: type) bool {
-        const type_name = @typeName(C);
-        if (self.sparse_sets.get(type_name)) |sparse_set|
+        const type_id = comptime typeId(C);
+        if (self.sparse_sets.get(type_id)) |sparse_set|
             return sparse_set.contains(entity);
         return false;
     }
 
     pub fn getComponent(self: Self, entity: Entity, comptime C: type) ?C {
-        const typeName = @typeName(C);
-        if (self.sparse_sets.get(typeName)) |sparse_set|
+        const type_id = comptime typeId(C);
+        if (self.sparse_sets.get(type_id)) |sparse_set|
             return sparse_set.get(entity, C);
         return null;
     }
 
     pub fn getComponentPtr(self: *Self, entity: Entity, comptime C: type) ?*C {
-        const type_name = @typeName(C);
-        if (self.sparse_sets.getPtr(type_name)) |sparse_set|
+        const type_id = comptime typeId(C);
+        if (self.sparse_sets.getPtr(type_id)) |sparse_set|
             return sparse_set.getPtr(entity, C);
         return null;
     }
 
     pub fn removeComponent(self: *Self, entity: Entity, comptime C: type) !void {
-        const type_name = @typeName(C);
-        if (self.sparse_sets.get(type_name)) |sparse_set| {
+        const type_id = comptime typeId(C);
+        if (self.sparse_sets.get(type_id)) |sparse_set| {
             try sparse_set.remove(entity);
         }
     }
@@ -236,8 +241,8 @@ test "SparseSetStorage edge cases" {
 }
 
 pub const ResourceStorage = struct {
-    resources: std.StringHashMap(AbstractResource),
-    value_storage: std.StringHashMap(StorageInfo),
+    resources: std.AutoHashMap(TypeId, AbstractResource),
+    value_storage: std.AutoHashMap(TypeId, StorageInfo),
     allocator: std.mem.Allocator,
 
     const StorageInfo = struct {
@@ -245,6 +250,11 @@ pub const ResourceStorage = struct {
         destroyFn: *const fn (*anyopaque, std.mem.Allocator) void,
     };
     const Self = ResourceStorage;
+
+    const TypeId = u64;
+    fn typeId(comptime T: type) TypeId {
+        return comptime std.hash_map.hashString(@typeName(T));
+    }
 
     pub fn destroyTypedStorage(comptime T: type) *const fn (*anyopaque, std.mem.Allocator) void {
         return struct {
@@ -265,10 +275,10 @@ pub const ResourceStorage = struct {
     pub fn deinit(self: *Self) void {
         var iter = self.value_storage.iterator();
         while (iter.next()) |entry| {
-            const type_name = entry.key_ptr.*;
+            const type_id = entry.key_ptr.*;
             const storage_info = entry.value_ptr.*;
 
-            if (self.resources.get(type_name)) |resource| {
+            if (self.resources.get(type_id)) |resource| {
                 resource.deinit();
 
                 storage_info.destroyFn(storage_info.ptr, self.allocator);
@@ -280,7 +290,7 @@ pub const ResourceStorage = struct {
     }
 
     pub fn put(self: *Self, comptime T: type, value: T) !void {
-        const type_name = @typeName(T);
+        const type_id = comptime typeId(T);
         var resource = try self.allocator.create(Resource(T));
         resource.* = try Resource(T).init(self.allocator);
         resource.*.value = value;
@@ -289,23 +299,23 @@ pub const ResourceStorage = struct {
             .ptr = @ptrCast(resource),
             .destroyFn = destroyTypedStorage(Resource(T)),
         };
-        try self.value_storage.put(type_name, storageInfo);
+        try self.value_storage.put(type_id, storageInfo);
 
         const abstract_resource = try resource.abstract();
-        try self.resources.put(type_name, abstract_resource);
+        try self.resources.put(type_id, abstract_resource);
     }
 
     pub fn get(self: Self, comptime T: type) ?T {
-        const type_name = @typeName(T);
-        return if (self.resources.get(type_name)) |resource|
+        const type_id = comptime typeId(T);
+        return if (self.resources.get(type_id)) |resource|
             resource.get(T)
         else
             null;
     }
 
     pub fn getPtr(self: *Self, comptime T: type) ?*T {
-        const type_name = @typeName(T);
-        return if (self.resources.getPtr(type_name)) |resource|
+        const type_id = comptime typeId(T);
+        return if (self.resources.getPtr(type_id)) |resource|
             resource.getPtr(T)
         else
             null;
