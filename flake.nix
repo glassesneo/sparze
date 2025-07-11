@@ -48,18 +48,17 @@
         }
     );
 
-    packages = forAllSystems (
-      system: pkgs: {
-        default = pkgs.stdenv.mkDerivation {
-          pname = "zig_flake";
-          version = "0.1.0";
-          src = ../.;
-          # deps = callPackage ./deps.nix {};
-          nativeBuildInputs = [
-            pkgs.zig_0_14.hook
-          ];
-        };
-      }
-    );
+    # packages = forAllSystems (
+    # system: pkgs: {
+    # default = pkgs.stdenv.mkDerivation {
+    # pname = "zig_flake";
+    # version = "0.1.0";
+    # src = ../.;
+    # nativeBuildInputs = [
+    # pkgs.zig_0_14.hook
+    # ];
+    # };
+    # }
+    # );
   };
 }
