@@ -61,22 +61,23 @@ pub const SparseSetStorage = struct {
 
     pub fn attachComponent(self: *Self, entity: Entity, comptime C: type, component: C) !void {
         const type_id = comptime typeId(C);
-        if (!self.sparse_sets.contains(type_id)) {
-            var sparse_set = try self.allocator.create(SparseSet(C));
-            sparse_set.* = SparseSet(C).init(self.allocator);
-
-            const storageInfo = StorageInfo{
-                .ptr = @ptrCast(sparse_set),
-                .destroyFn = destroyTypedStorage(SparseSet(C)),
-            };
-            try self.component_storage.put(type_id, storageInfo);
-
-            const abstract_sparse_set = sparse_set.abstract();
-            try self.sparse_sets.put(type_id, abstract_sparse_set);
+        if (self.sparse_sets.get(type_id)) |sparse_set| {
+            var component_copy = component;
+            try sparse_set.insert(entity, &component_copy);
+            return;
         }
 
+        var sparse_set_ptr = try self.allocator.create(SparseSet(C));
+        sparse_set_ptr.* = SparseSet(C).init(self.allocator);
+        const storageInfo = StorageInfo{
+            .ptr = @ptrCast(sparse_set_ptr),
+            .destroyFn = destroyTypedStorage(SparseSet(C)),
+        };
+        try self.component_storage.put(type_id, storageInfo);
+        const abstract_sparse_set = sparse_set_ptr.abstract();
         var component_copy = component;
-        try self.sparse_sets.get(type_id).?.insert(entity, &component_copy);
+        try abstract_sparse_set.insert(entity, &component_copy);
+        try self.sparse_sets.put(type_id, abstract_sparse_set);
     }
 
     pub fn hasComponent(self: Self, entity: Entity, comptime C: type) bool {
