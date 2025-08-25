@@ -3,91 +3,89 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const entity_module = @import("entity.zig");
 pub const entity_id_limit = entity_module.entity_id_limit;
-const Entity = struct {
-    id: u16,
+const EntityRegistry = entity_module.EntityRegistry;
+const Entity = entity_module.Entity;
+const getIndex = entity_module.getIndex;
 
-    pub fn init(id: u16) Entity {
-        return .{ .id = id };
-    }
-};
+// pub const AbstractSparseSet = struct {
+// vtable: *const VTable,
+// instance: *anyopaque,
+// const VTable = struct {
+// insertFn: *const fn (*anyopaque, Entity, *anyopaque) void,
+// getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
+// containsFn: *const fn (*anyopaque, Entity) bool,
+// removeFn: *const fn (*anyopaque, Entity) void,
+// };
 
-pub const AbstractSparseSet = struct {
-    vtable: *const VTable,
-    instance: *anyopaque,
-    const VTable = struct {
-        insertFn: *const fn (*anyopaque, Entity, *anyopaque) void,
-        getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
-        containsFn: *const fn (*anyopaque, Entity) bool,
-        removeFn: *const fn (*anyopaque, Entity) void,
-    };
+// pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) void {
+// return self.vtable.insertFn(self.instance, entity, component);
+// }
 
-    pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) void {
-        return self.vtable.insertFn(self.instance, entity, component);
-    }
+// pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?T {
+// if (self.vtable.getFn(self.instance, entity)) |component| {
+// const typed_ptr = castTo(T, component);
+// return typed_ptr.*;
+// }
+// return null;
+// }
 
-    pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?T {
-        if (self.vtable.getFn(self.instance, entity)) |component| {
-            const typed_ptr = castTo(T, component);
-            return typed_ptr.*;
-        }
-        return null;
-    }
+// pub fn getPtr(self: *AbstractSparseSet, entity: Entity, comptime T: type) ?*T {
+// return if (self.vtable.getFn(self.instance, entity)) |component|
+// castTo(T, component)
+// else
+// null;
+// }
 
-    pub fn getPtr(self: *AbstractSparseSet, entity: Entity, comptime T: type) ?*T {
-        return if (self.vtable.getFn(self.instance, entity)) |component|
-            castTo(T, component)
-        else
-            null;
-    }
+// pub fn contains(self: *const AbstractSparseSet, entity: Entity) bool {
+// return self.vtable.containsFn(self.instance, entity);
+// }
 
-    pub fn contains(self: *const AbstractSparseSet, entity: Entity) bool {
-        return self.vtable.containsFn(self.instance, entity);
-    }
+// pub fn remove(self: *const AbstractSparseSet, entity: Entity) void {
+// return self.vtable.removeFn(self.instance, entity);
+// }
 
-    pub fn remove(self: *const AbstractSparseSet, entity: Entity) void {
-        return self.vtable.removeFn(self.instance, entity);
-    }
+// fn castTo(comptime T: type, ptr: *anyopaque) *T {
+// return @ptrCast(@alignCast(ptr));
+// }
 
-    fn castTo(comptime T: type, ptr: *anyopaque) *T {
-        return @ptrCast(@alignCast(ptr));
-    }
+// pub fn init(comptime T: type, instance: *T) AbstractSparseSet {
+// const vtable = comptime VTable{
+// .insertFn = struct {
+// fn insert(ptr: *anyopaque, entity: Entity, component_ptr: *anyopaque) void {
+// const self = castTo(T, ptr);
+// const component = castTo(T.Component, component_ptr);
+// return self.insert(entity, component.*);
+// }
+// }.insert,
+// .getFn = struct {
+// fn get(ptr: *anyopaque, entity: Entity) ?*anyopaque {
+// const self = castTo(T, ptr);
+// const dense_index = self.sparse[entity.id] orelse return null;
+// return @ptrCast(&self.components[dense_index]);
+// }
+// }.get,
+// .containsFn = struct {
+// fn contains(ptr: *anyopaque, entity: Entity) bool {
+// const self = castTo(T, ptr);
+// return self.contains(entity);
+// }
+// }.contains,
+// .removeFn = struct {
+// fn remove(ptr: *anyopaque, entity: Entity) void {
+// const self = castTo(T, ptr);
+// self.remove(entity);
+// }
+// }.remove,
+// };
+// return .{
+// .vtable = &vtable,
+// .instance = instance,
+// };
+// }
+// };
 
-    pub fn init(comptime T: type, instance: *T) AbstractSparseSet {
-        const vtable = comptime VTable{
-            .insertFn = struct {
-                fn insert(ptr: *anyopaque, entity: Entity, component_ptr: *anyopaque) void {
-                    const self = castTo(T, ptr);
-                    const component = castTo(T.Component, component_ptr);
-                    return self.insert(entity, component.*);
-                }
-            }.insert,
-            .getFn = struct {
-                fn get(ptr: *anyopaque, entity: Entity) ?*anyopaque {
-                    const self = castTo(T, ptr);
-                    const dense_index = self.sparse[entity.id] orelse return null;
-                    return @ptrCast(&self.components[dense_index]);
-                }
-            }.get,
-            .containsFn = struct {
-                fn contains(ptr: *anyopaque, entity: Entity) bool {
-                    const self = castTo(T, ptr);
-                    return self.contains(entity);
-                }
-            }.contains,
-            .removeFn = struct {
-                fn remove(ptr: *anyopaque, entity: Entity) void {
-                    const self = castTo(T, ptr);
-                    self.remove(entity);
-                }
-            }.remove,
-        };
-        return .{
-            .vtable = &vtable,
-            .instance = instance,
-        };
-    }
-};
-
+/// SparseSet creates a new sparse set type for the given component type.
+/// Complexity: O(1) for type generation (compile-time).
 pub fn SparseSet(comptime Component: type) type {
     return struct {
         const Self = @This();
@@ -96,6 +94,7 @@ pub fn SparseSet(comptime Component: type) type {
         packed_array: ArrayList(u16), // element: entity id
         components: ArrayList(Component),
 
+        /// Initialize a new SparseSet with the given allocator.
         pub fn init(allocator: Allocator) Self {
             return .{
                 .allocator = allocator,
@@ -105,45 +104,73 @@ pub fn SparseSet(comptime Component: type) type {
             };
         }
 
+        /// Deinitialize the SparseSet, freeing internal buffers.
         pub fn deinit(self: *Self) void {
             self.packed_array.deinit();
             self.components.deinit();
         }
 
+        /// Check whether the set contains a component for the given entity.
+        /// Complexity: O(1).
         fn contains(self: Self, entity: Entity) bool {
-            if (entity.id >= entity_id_limit) return false;
-            const dense_index = self.sparse_array[entity.id] orelse return false;
-            if (dense_index >= self.packed_array.items.len) return false;
-            return entity.id == self.packed_array.items[dense_index];
+            const sparse_index = getIndex(entity);
+            return self.hasIndex(sparse_index);
         }
 
+        /// Retrieve the component associated with an entity, if present.
+        /// Complexity: O(1).
         fn get(self: Self, entity: Entity) ?Component {
-            if (!self.contains(entity)) return null;
-            const dense_index = self.sparse_array[entity.id].?;
+            const sparse_index = getIndex(entity);
+            if (!self.hasIndex(sparse_index)) return null;
+            const dense_index = self.sparse_array[sparse_index].?;
             return self.components.items[dense_index];
         }
 
+        /// Insert or replace a component for the given entity.
+        /// Complexity: O(1) amortized (ArrayList may reallocate).
         fn insert(self: *Self, entity: Entity, component: Component) !void {
-            if (self.contains(entity)) {
-                const dense_index = self.sparse_array[entity.id].?;
+            const sparse_index = getIndex(entity);
+            if (self.hasIndex(sparse_index)) {
+                const dense_index = self.sparse_array[sparse_index].?;
                 self.components.items[dense_index] = component;
-                self.packed_array.items[dense_index] = entity.id;
+                self.packed_array.items[dense_index] = sparse_index;
                 return;
             }
 
             const dense_index: u16 = @intCast(self.components.items.len);
             try self.components.append(component);
-            try self.packed_array.append(entity.id);
-            self.sparse_array[entity.id] = dense_index;
+            try self.packed_array.append(sparse_index);
+            self.sparse_array[sparse_index] = dense_index;
         }
 
+        /// Remove the component associated with an entity, if it exists.
+        /// Complexity: O(1).
         fn remove(self: *Self, entity: Entity) void {
-            if (!self.contains(entity)) return;
-            const dense_index = self.sparse_array[entity.id].?;
-            const last_entity = self.packed_array.getLast();
+            const sparse_index = getIndex(entity);
+            if (!self.hasIndex(sparse_index)) return;
+            const dense_index = self.sparse_array[sparse_index].?;
+            const last_dense: u16 = @intCast(self.components.items.len - 1);
+            const last_entity = self.packed_array.items[last_dense];
+            // Remove from packed (dense) entity array
             _ = self.packed_array.swapRemove(dense_index);
+            // Remove component, preserving order via swap if not last
+            if (dense_index != last_dense) {
+                self.components.items[dense_index] = self.components.items[last_dense];
+            }
+            _ = self.components.swapRemove(last_dense);
+            // Update sparse array for the entity that moved into the vacated slot
             self.sparse_array[last_entity] = dense_index;
-            self.sparse_array[entity.id] = null;
+            // Clear the removed entity's entry
+            self.sparse_array[sparse_index] = null;
+        }
+
+        /// Internal helper: check whether a sparse index maps to a valid dense entry.
+        /// Complexity: O(1).
+        fn hasIndex(self: Self, index: u16) bool {
+            if (index >= entity_id_limit) return false;
+            const dense_index = self.sparse_array[index] orelse return false;
+            if (dense_index >= self.packed_array.items.len) return false;
+            return index == self.packed_array.items[dense_index];
         }
     };
 }
@@ -155,15 +182,16 @@ test "SparseSet basic operations" {
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-
     const allocator = arena.allocator();
+
+    var registry = EntityRegistry.init();
 
     var sparseSet = SparseSet(TestComponent).init(allocator);
     defer sparseSet.deinit();
 
-    const e1 = Entity.init(1);
-    const e2 = Entity.init(2);
-    const e3 = Entity.init(5);
+    const e1 = registry.create();
+    const e2 = registry.create();
+    const e3 = registry.create();
 
     // Test initial state
     try std.testing.expect(!sparseSet.contains(e1));
@@ -197,4 +225,34 @@ test "SparseSet basic operations" {
 
     // Test removing non-existent entity (should not crash)
     sparseSet.remove(e3);
+}
+
+test "SparseSet removal consistency" {
+    const TestComp = struct { v: usize };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var set = SparseSet(TestComp).init(allocator);
+    defer set.deinit();
+
+    var registry = EntityRegistry.init();
+    const total = 10;
+    var ids = [_]Entity{undefined} ** total;
+    for (0..total) |i| {
+        ids[i] = registry.create();
+        try set.insert(ids[i], .{ .v = i });
+    }
+
+    const mid = ids[5];
+    set.remove(mid);
+    try std.testing.expect(!set.contains(mid));
+
+    for (0..total) |i| {
+        if (i == 5) continue;
+        const comp = set.get(ids[i]).?;
+        try std.testing.expectEqual(@as(usize, i), comp.v);
+    }
+
+    try std.testing.expectEqual(@as(usize, total - 1), set.components.items.len);
 }
