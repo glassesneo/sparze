@@ -42,10 +42,10 @@ pub const EntityRegistry = struct {
     pub fn create(self: *EntityRegistry) Entity {
         const index, const version = if (self.available > 0) recycle: {
             // Recycle from the implicit free list.
-            const head_index: u16 = getIndex(self.next_index_to_recycle);
-            const head_value: Entity = self.entities[head_index];
-            const version: u16 = getVersion(head_value);
-            const next_index: u16 = getIndex(head_value);
+            const head_index = getIndex(self.next_index_to_recycle);
+            const head_value = self.entities[head_index];
+            const version = getVersion(head_value);
+            const next_index = getIndex(head_value);
 
             // Advance the head and decrease available count.
             self.next_index_to_recycle = next_index;
@@ -55,8 +55,9 @@ pub const EntityRegistry = struct {
             // Create a new identifier with version 0.
             std.debug.assert(self.next_index < entity_id_limit);
             const index: u16 = @intCast(self.next_index);
+            const version: u16 = 0;
             self.next_index += 1;
-            break :new .{ index, 0 };
+            break :new .{ index, version };
         };
 
         const entity = makeEntity(index, version);
@@ -68,12 +69,12 @@ pub const EntityRegistry = struct {
     /// Increments the version so stale identifiers can be detected.
     /// Complexity: O(1).
     pub fn destroy(self: *EntityRegistry, entity: Entity) void {
-        const index: u16 = getIndex(entity);
-        const current: Entity = self.entities[index];
+        const index = getIndex(entity);
+        const current = self.entities[index];
         const new_version: u16 = getVersion(current) + 1;
 
         // Link this index to the previous head of the free list.
-        const prev_head_index: u16 = if (self.available == 0)
+        const prev_head_index = if (self.available == 0)
             index
         else
             getIndex(self.next_index_to_recycle);
@@ -90,7 +91,7 @@ pub const EntityRegistry = struct {
     /// Performs bounds and version checks; stale or never-allocated handles return false.
     /// Complexity: O(1).
     pub fn isAlive(self: *const EntityRegistry, entity: Entity) bool {
-        const index: u16 = getIndex(entity);
+        const index = getIndex(entity);
         // If index was never allocated, it's not alive.
         if (index >= self.next_index) return false;
         const i: usize = index;

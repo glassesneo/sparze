@@ -92,15 +92,15 @@ pub fn SparseSet(comptime Component: type) type {
             return .{
                 .allocator = allocator,
                 .sparse_array = [_]?u16{null} ** entity_id_limit,
-                .packed_array = .init(allocator),
-                .components = .init(allocator),
+                .packed_array = .{},
+                .components = .{},
             };
         }
 
         /// Deinitialize the SparseSet, freeing internal buffers.
         pub fn deinit(self: *Self) void {
-            self.packed_array.deinit();
-            self.components.deinit();
+            self.packed_array.deinit(self.allocator);
+            self.components.deinit(self.allocator);
         }
 
         /// Check whether the set contains a component for the given entity.
@@ -131,8 +131,8 @@ pub fn SparseSet(comptime Component: type) type {
             }
 
             const dense_index: u16 = @intCast(self.components.items.len);
-            try self.components.append(component);
-            try self.packed_array.append(sparse_index);
+            try self.components.append(self.allocator, component);
+            try self.packed_array.append(self.allocator, sparse_index);
             self.sparse_array[sparse_index] = dense_index;
         }
 

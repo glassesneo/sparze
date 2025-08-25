@@ -7,20 +7,19 @@
         nixpkgs.follows = "nixpkgs";
       };
     };
-    zls-overlay.url = "github:zigtools/zls/0.14.0";
-    zon2nix = {
-      url = "github:jcollie/zon2nix";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-      };
-    };
+    zls-overlay.url = "github:zigtools/zls/0.15.0";
+    # zon2nix = {
+    # url = "github:jcollie/zon2nix";
+    # inputs = {
+    # nixpkgs.follows = "nixpkgs";
+    # };
+    # };
   };
 
   outputs = {
     nixpkgs,
     zig-overlay,
     zls-overlay,
-    zon2nix,
     ...
   } @ inputs: let
     allSystems = [
@@ -33,17 +32,17 @@
   in {
     devShell = forAllSystems (
       system: pkgs: let
-        zig = zig-overlay.packages.${system}."0.14.0";
+        zig = zig-overlay.packages.${system}."0.15.1";
         zls = zls-overlay.packages.${system}.zls.overrideAttrs (old: {
           nativeBuildInputs = [zig];
         });
-        zon2nix = inputs.zon2nix.packages.${system}.zon2nix;
+        # zon2nix = inputs.zon2nix.packages.${system}.zon2nix;
       in
         pkgs.mkShell {
           packages = [
             zig
             zls
-            zon2nix
+            # zon2nix
           ];
         }
     );
