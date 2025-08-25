@@ -7,82 +7,75 @@ const EntityRegistry = entity_module.EntityRegistry;
 const Entity = entity_module.Entity;
 const getIndex = entity_module.getIndex;
 
-// pub const AbstractSparseSet = struct {
-// vtable: *const VTable,
-// instance: *anyopaque,
-// const VTable = struct {
-// insertFn: *const fn (*anyopaque, Entity, *anyopaque) void,
-// getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
-// containsFn: *const fn (*anyopaque, Entity) bool,
-// removeFn: *const fn (*anyopaque, Entity) void,
-// };
+pub const AbstractSparseSet = struct {
+    vtable: *const VTable,
+    instance: *anyopaque,
+    const VTable = struct {
+        getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
+        insertFn: *const fn (*anyopaque, Entity, *anyopaque) anyerror!void,
+        containsFn: *const fn (*anyopaque, Entity) bool,
+        removeFn: *const fn (*anyopaque, Entity) void,
+    };
 
-// pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) void {
-// return self.vtable.insertFn(self.instance, entity, component);
-// }
+    pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?T {
+        const component = self.vtable.getFn(self.instance, entity) orelse return null;
+        const typed_ptr = castTo(T, component);
+        return typed_ptr.*;
+    }
 
-// pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?T {
-// if (self.vtable.getFn(self.instance, entity)) |component| {
-// const typed_ptr = castTo(T, component);
-// return typed_ptr.*;
-// }
-// return null;
-// }
+    pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) !void {
+        return try self.vtable.insertFn(self.instance, entity, component);
+    }
 
-// pub fn getPtr(self: *AbstractSparseSet, entity: Entity, comptime T: type) ?*T {
-// return if (self.vtable.getFn(self.instance, entity)) |component|
-// castTo(T, component)
-// else
-// null;
-// }
+    pub fn contains(self: *const AbstractSparseSet, entity: Entity) bool {
+        return self.vtable.containsFn(self.instance, entity);
+    }
 
-// pub fn contains(self: *const AbstractSparseSet, entity: Entity) bool {
-// return self.vtable.containsFn(self.instance, entity);
-// }
+    pub fn remove(self: *const AbstractSparseSet, entity: Entity) void {
+        return self.vtable.removeFn(self.instance, entity);
+    }
 
-// pub fn remove(self: *const AbstractSparseSet, entity: Entity) void {
-// return self.vtable.removeFn(self.instance, entity);
-// }
+    fn castTo(comptime T: type, ptr: *anyopaque) *T {
+        return @ptrCast(@alignCast(ptr));
+    }
 
-// fn castTo(comptime T: type, ptr: *anyopaque) *T {
-// return @ptrCast(@alignCast(ptr));
-// }
-
-// pub fn init(comptime T: type, instance: *T) AbstractSparseSet {
-// const vtable = comptime VTable{
-// .insertFn = struct {
-// fn insert(ptr: *anyopaque, entity: Entity, component_ptr: *anyopaque) void {
-// const self = castTo(T, ptr);
-// const component = castTo(T.Component, component_ptr);
-// return self.insert(entity, component.*);
-// }
-// }.insert,
-// .getFn = struct {
-// fn get(ptr: *anyopaque, entity: Entity) ?*anyopaque {
-// const self = castTo(T, ptr);
-// const dense_index = self.sparse[entity.id] orelse return null;
-// return @ptrCast(&self.components[dense_index]);
-// }
-// }.get,
-// .containsFn = struct {
-// fn contains(ptr: *anyopaque, entity: Entity) bool {
-// const self = castTo(T, ptr);
-// return self.contains(entity);
-// }
-// }.contains,
-// .removeFn = struct {
-// fn remove(ptr: *anyopaque, entity: Entity) void {
-// const self = castTo(T, ptr);
-// self.remove(entity);
-// }
-// }.remove,
-// };
-// return .{
-// .vtable = &vtable,
-// .instance = instance,
-// };
-// }
-// };
+    pub fn init(comptime Component: type, instance: *SparseSet(Component)) AbstractSparseSet {
+        const SparseSetType = SparseSet(Component);
+        const vtable = comptime VTable{
+            .getFn = struct {
+                fn get(ptr: *anyopaque, entity: Entity) ?*anyopaque {
+                    const self = castTo(SparseSetType, ptr);
+                    const sparse_index = getIndex(entity);
+                    const dense_index = self.sparse_array[sparse_index] orelse return null;
+                    return @ptrCast(&self.components.items[dense_index]);
+                }
+            }.get,
+            .insertFn = struct {
+                fn insert(ptr: *anyopaque, entity: Entity, component_ptr: *anyopaque) !void {
+                    const self = castTo(SparseSetType, ptr);
+                    const component = castTo(Component, component_ptr);
+                    try self.insert(entity, component.*);
+                }
+            }.insert,
+            .containsFn = struct {
+                fn contains(ptr: *anyopaque, entity: Entity) bool {
+                    const self = castTo(SparseSetType, ptr);
+                    return self.contains(entity);
+                }
+            }.contains,
+            .removeFn = struct {
+                fn remove(ptr: *anyopaque, entity: Entity) void {
+                    const self = castTo(SparseSetType, ptr);
+                    self.remove(entity);
+                }
+            }.remove,
+        };
+        return .{
+            .vtable = &vtable,
+            .instance = instance,
+        };
+    }
+};
 
 /// SparseSet creates a new sparse set type for the given component type.
 /// Complexity: O(1) for type generation (compile-time).
@@ -172,6 +165,10 @@ pub fn SparseSet(comptime Component: type) type {
             if (dense_index >= self.packed_array.items.len) return false;
             return index == self.packed_array.items[dense_index];
         }
+
+        fn abstract(self: *Self) AbstractSparseSet {
+            return AbstractSparseSet.init(Component, self);
+        }
     };
 }
 
@@ -255,4 +252,34 @@ test "SparseSet removal consistency" {
     }
 
     try std.testing.expectEqual(@as(usize, total - 1), set.components.items.len);
+}
+
+test "AbstractSparseSet dynamic dispatch" {
+    const TestComp = struct { v: usize };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var set = SparseSet(TestComp).init(allocator);
+    defer set.deinit();
+
+    // Concrete API works
+    var registry = EntityRegistry.init();
+    const entity = registry.create();
+    try set.insert(entity, .{ .v = 42 });
+    try std.testing.expect(set.contains(entity));
+    try std.testing.expectEqual(@as(usize, 42), set.get(entity).?.v);
+
+    // Convert to abstract interface
+    const abstract_set = set.abstract();
+
+    // Dynamic get/contains match concrete behavior
+    try std.testing.expect(abstract_set.contains(entity));
+    const component = abstract_set.get(entity, TestComp).?;
+    try std.testing.expectEqual(@as(usize, 42), component.v);
+
+    // Remove via abstract interface and verify
+    abstract_set.remove(entity);
+    try std.testing.expect(!abstract_set.contains(entity));
+    try std.testing.expect(abstract_set.get(entity, TestComp) == null);
 }
