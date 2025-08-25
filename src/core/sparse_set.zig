@@ -2,9 +2,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const entity_module = @import("entity.zig");
-pub const entity_id_limit = entity_module.entity_id_limit;
+pub const max_entities = entity_module.max_entities;
 const EntityRegistry = entity_module.EntityRegistry;
 const Entity = entity_module.Entity;
+const EntityIndex = entity_module.EntityIndex;
+const EntityVersion = entity_module.EntityVersion;
 const getIndex = entity_module.getIndex;
 
 pub const AbstractSparseSet = struct {
@@ -83,15 +85,15 @@ pub fn SparseSet(comptime Component: type) type {
     return struct {
         const Self = @This();
         allocator: Allocator,
-        sparse_array: [entity_id_limit]?u16, // index: entity id, element: index of components
-        packed_array: ArrayList(u16), // element: entity id
+        sparse_array: [max_entities]?u16, // index: entity index, element: index of components
+        packed_array: ArrayList(EntityIndex),
         components: ArrayList(Component),
 
         /// Initialize a new SparseSet with the given allocator.
         pub fn init(allocator: Allocator) Self {
             return .{
                 .allocator = allocator,
-                .sparse_array = [_]?u16{null} ** entity_id_limit,
+                .sparse_array = [_]?u16{null} ** max_entities,
                 .packed_array = .{},
                 .components = .{},
             };
@@ -146,10 +148,7 @@ pub fn SparseSet(comptime Component: type) type {
             const last_entity = self.packed_array.items[last_dense];
             // Remove from packed (dense) entity array
             _ = self.packed_array.swapRemove(dense_index);
-            // Remove component, preserving order via swap if not last
-            if (dense_index != last_dense) {
-                self.components.items[dense_index] = self.components.items[last_dense];
-            }
+            self.components.items[dense_index] = self.components.items[last_dense];
             _ = self.components.swapRemove(last_dense);
             // Update sparse array for the entity that moved into the vacated slot
             self.sparse_array[last_entity] = dense_index;
@@ -159,8 +158,7 @@ pub fn SparseSet(comptime Component: type) type {
 
         /// Internal helper: check whether a sparse index maps to a valid dense entry.
         /// Complexity: O(1).
-        fn hasIndex(self: Self, index: u16) bool {
-            if (index >= entity_id_limit) return false;
+        fn hasIndex(self: Self, index: EntityIndex) bool {
             const dense_index = self.sparse_array[index] orelse return false;
             if (dense_index >= self.packed_array.items.len) return false;
             return index == self.packed_array.items[dense_index];

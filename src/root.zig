@@ -4,7 +4,11 @@ const Entity = entity_module.Entity;
 const getIndex = entity_module.getIndex;
 const getVersion = entity_module.getVersion;
 
-comptime {
+const sparse_set_module = @import("core/sparse_set.zig");
+const SparseSet = sparse_set_module.SparseSet;
+const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
+
+test {
     std.testing.refAllDecls(@This());
 }
 

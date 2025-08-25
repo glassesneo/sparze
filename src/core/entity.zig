@@ -1,7 +1,9 @@
 const std = @import("std");
 
 pub const Entity = u32;
-pub const entity_id_limit = std.math.pow(Entity, 2, 16);
+pub const EntityIndex = u16;
+pub const EntityVersion = u16;
+pub const max_entities = std.math.maxInt(EntityIndex);
 
 pub const index_bits: u5 = 16;
 pub const version_bits: u5 = 16;
@@ -10,20 +12,20 @@ pub const version_mask: u32 = (1 << version_bits) - 1;
 
 /// Extracts the 16-bit index from an Entity identifier.
 /// Complexity: O(1).
-pub fn getIndex(entity: Entity) u16 {
+pub fn getIndex(entity: Entity) EntityIndex {
     return @intCast(entity & index_mask);
 }
 
 /// Extracts the 16-bit version from an Entity identifier.
 /// Complexity: O(1).
-pub fn getVersion(entity: Entity) u16 {
+pub fn getVersion(entity: Entity) EntityVersion {
     return @intCast((entity >> index_bits) & version_mask);
 }
 
 pub const EntityRegistry = struct {
-    entities: [entity_id_limit]Entity,
-    next_index: u16,
-    available: u16,
+    entities: [max_entities]Entity,
+    next_index: EntityIndex,
+    available: EntityIndex,
     next_index_to_recycle: Entity,
 
     /// Initializes an empty entity registry backed by a fixed-size array.
@@ -53,9 +55,9 @@ pub const EntityRegistry = struct {
             break :recycle .{ head_index, version };
         } else new: {
             // Create a new identifier with version 0.
-            std.debug.assert(self.next_index < entity_id_limit);
-            const index: u16 = @intCast(self.next_index);
-            const version: u16 = 0;
+            std.debug.assert(self.next_index < max_entities);
+            const index: EntityIndex = @intCast(self.next_index);
+            const version: EntityVersion = 0;
             self.next_index += 1;
             break :new .{ index, version };
         };
@@ -71,7 +73,7 @@ pub const EntityRegistry = struct {
     pub fn destroy(self: *EntityRegistry, entity: Entity) void {
         const index = getIndex(entity);
         const current = self.entities[index];
-        const new_version: u16 = getVersion(current) + 1;
+        const new_version: EntityVersion = getVersion(current) + 1;
 
         // Link this index to the previous head of the free list.
         const prev_head_index = if (self.available == 0)
@@ -106,13 +108,13 @@ pub const EntityRegistry = struct {
         return @as(usize, self.next_index - self.available);
     }
 
-    fn makeEntity(index: u16, version: u16) Entity {
+    fn makeEntity(index: EntityIndex, version: EntityVersion) Entity {
         return (@as(u32, version) << index_bits) | (@as(u32, index) & index_mask);
     }
 
     test "makeEntity packs index and version correctly" {
-        const index: u16 = 12345;
-        const version: u16 = 42;
+        const index: EntityIndex = 12345;
+        const version: EntityVersion = 42;
         const e = makeEntity(index, version);
         try std.testing.expect(getIndex(e) == index);
         try std.testing.expect(getVersion(e) == version);
