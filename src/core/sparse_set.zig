@@ -1,19 +1,27 @@
 const std = @import("std");
-const Entity = @import("entity.zig").Entity;
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+const entity_module = @import("entity.zig");
+pub const entity_id_limit = entity_module.entity_id_limit;
+const Entity = struct {
+    id: u16,
+
+    pub fn init(id: u16) Entity {
+        return .{ .id = id };
+    }
+};
 
 pub const AbstractSparseSet = struct {
     vtable: *const VTable,
     instance: *anyopaque,
     const VTable = struct {
-        insertFn: *const fn (*anyopaque, Entity, *anyopaque) anyerror!void,
+        insertFn: *const fn (*anyopaque, Entity, *anyopaque) void,
         getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
         containsFn: *const fn (*anyopaque, Entity) bool,
-        removeFn: *const fn (*anyopaque, Entity) anyerror!void,
-        iteratorFn: *const fn (*anyopaque, *anyopaque) void,
-        deinitFn: *const fn (*anyopaque) void,
+        removeFn: *const fn (*anyopaque, Entity) void,
     };
 
-    pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) !void {
+    pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) void {
         return self.vtable.insertFn(self.instance, entity, component);
     }
 
@@ -36,16 +44,8 @@ pub const AbstractSparseSet = struct {
         return self.vtable.containsFn(self.instance, entity);
     }
 
-    pub fn remove(self: *const AbstractSparseSet, entity: Entity) !void {
-        return try self.vtable.removeFn(self.instance, entity);
-    }
-
-    pub fn iterator(self: *const AbstractSparseSet, comptime T: type, iter: *SparseSetIterator(T)) void {
-        self.vtable.iteratorFn(self.instance, iter);
-    }
-
-    pub fn deinit(self: *const AbstractSparseSet) void {
-        return self.vtable.deinitFn(self.instance);
+    pub fn remove(self: *const AbstractSparseSet, entity: Entity) void {
+        return self.vtable.removeFn(self.instance, entity);
     }
 
     fn castTo(comptime T: type, ptr: *anyopaque) *T {
@@ -55,7 +55,7 @@ pub const AbstractSparseSet = struct {
     pub fn init(comptime T: type, instance: *T) AbstractSparseSet {
         const vtable = comptime VTable{
             .insertFn = struct {
-                fn insert(ptr: *anyopaque, entity: Entity, component_ptr: *anyopaque) !void {
+                fn insert(ptr: *anyopaque, entity: Entity, component_ptr: *anyopaque) void {
                     const self = castTo(T, ptr);
                     const component = castTo(T.Component, component_ptr);
                     return self.insert(entity, component.*);
@@ -64,10 +64,8 @@ pub const AbstractSparseSet = struct {
             .getFn = struct {
                 fn get(ptr: *anyopaque, entity: Entity) ?*anyopaque {
                     const self = castTo(T, ptr);
-                    if (self.index_table.get(entity.id)) |index| {
-                        return @ptrCast(&self.components.items[index]);
-                    }
-                    return null;
+                    const dense_index = self.sparse[entity.id] orelse return null;
+                    return @ptrCast(&self.components[dense_index]);
                 }
             }.get,
             .containsFn = struct {
@@ -77,24 +75,11 @@ pub const AbstractSparseSet = struct {
                 }
             }.contains,
             .removeFn = struct {
-                fn remove(ptr: *anyopaque, entity: Entity) !void {
+                fn remove(ptr: *anyopaque, entity: Entity) void {
                     const self = castTo(T, ptr);
-                    try self.remove(entity);
+                    self.remove(entity);
                 }
             }.remove,
-            .iteratorFn = struct {
-                fn iterator(ptr: *anyopaque, iter: *anyopaque) void {
-                    const self = castTo(T, ptr);
-                    const iter_ptr = castTo(SparseSetIterator(T.Component), iter);
-                    iter_ptr.* = SparseSetIterator(T.Component).init(self);
-                }
-            }.iterator,
-            .deinitFn = struct {
-                fn deinit(ptr: *anyopaque) void {
-                    const self = castTo(T, ptr);
-                    return self.deinit();
-                }
-            }.deinit,
         };
         return .{
             .vtable = &vtable,
@@ -103,94 +88,62 @@ pub const AbstractSparseSet = struct {
     }
 };
 
-pub fn SparseSet(comptime C: type) type {
+pub fn SparseSet(comptime Component: type) type {
     return struct {
-        components: std.ArrayList(C),
-        index_table: std.AutoHashMap(Entity.EntityId, u32),
-        free_indexes: std.ArrayList(u32),
         const Self = @This();
-        pub const Component = C;
+        allocator: Allocator,
+        sparse_array: [entity_id_limit]?u16, // index: entity id, element: index of components
+        packed_array: ArrayList(u16), // element: entity id
+        components: ArrayList(Component),
 
-        pub fn init(allocator: std.mem.Allocator) Self {
-            return Self{
+        pub fn init(allocator: Allocator) Self {
+            return .{
+                .allocator = allocator,
+                .sparse_array = [_]?u16{null} ** entity_id_limit,
+                .packed_array = .init(allocator),
                 .components = .init(allocator),
-                .index_table = .init(allocator),
-                .free_indexes = .init(allocator),
             };
         }
 
         pub fn deinit(self: *Self) void {
+            self.packed_array.deinit();
             self.components.deinit();
-            self.index_table.deinit();
-            self.free_indexes.deinit();
         }
 
         fn contains(self: Self, entity: Entity) bool {
-            return self.index_table.contains(entity.id);
+            if (entity.id >= entity_id_limit) return false;
+            const dense_index = self.sparse_array[entity.id] orelse return false;
+            if (dense_index >= self.packed_array.items.len) return false;
+            return entity.id == self.packed_array.items[dense_index];
         }
 
-        fn insert(self: *Self, entity: Entity, component: C) !void {
-            if (self.index_table.get(entity.id)) |index| {
-                self.components.items[index] = component;
+        fn get(self: Self, entity: Entity) ?Component {
+            if (!self.contains(entity)) return null;
+            const dense_index = self.sparse_array[entity.id].?;
+            return self.components.items[dense_index];
+        }
+
+        fn insert(self: *Self, entity: Entity, component: Component) !void {
+            if (self.contains(entity)) {
+                const dense_index = self.sparse_array[entity.id].?;
+                self.components.items[dense_index] = component;
+                self.packed_array.items[dense_index] = entity.id;
                 return;
             }
 
-            if (self.free_indexes.pop()) |index| {
-                try self.index_table.put(entity.id, index);
-                self.components.items[index] = component;
-                return;
-            }
-
-            const index = self.index_table.count();
-            try self.index_table.put(entity.id, index);
+            const dense_index: u16 = @intCast(self.components.items.len);
             try self.components.append(component);
+            try self.packed_array.append(entity.id);
+            self.sparse_array[entity.id] = dense_index;
         }
 
-        fn remove(self: *Self, entity: Entity) !void {
-            if (self.index_table.get(entity.id)) |index| {
-                try self.free_indexes.append(index);
-                _ = self.index_table.remove(entity.id);
-            }
-        }
-
-        pub fn abstract(self: *Self) AbstractSparseSet {
-            return AbstractSparseSet.init(Self, self);
-        }
-    };
-}
-
-fn SparseSetIterator(comptime C: type) type {
-    return struct {
-        const Self = @This();
-        sparse_set: *const SparseSet(C),
-        iter: std.AutoHashMap(Entity.EntityId, u32).Iterator,
-        pub fn init(sparse_set: *const SparseSet(C)) Self {
-            return Self{
-                .sparse_set = sparse_set,
-                .iter = sparse_set.index_table.iterator(),
-            };
-        }
-
-        pub fn next(self: *Self) ?struct { id: Entity.EntityId, component: *const C } {
-            if (self.iter.next()) |entry| {
-                return .{
-                    .id = entry.key_ptr.*,
-                    .component = &self.sparse_set.components.items[entry.value_ptr.*],
-                };
-            }
-            return null;
-        }
-        pub fn mutableNext(self: *Self) ?struct { id: Entity.EntityId, component: *C } {
-            if (self.iter.next()) |entry| {
-                return .{
-                    .id = entry.key_ptr.*,
-                    .component = &self.sparse_set.components.items[entry.value_ptr.*],
-                };
-            }
-            return null;
-        }
-        pub fn reset(self: *Self) void {
-            self.iter = self.sparse_set.index_table.iterator();
+        fn remove(self: *Self, entity: Entity) void {
+            if (!self.contains(entity)) return;
+            const dense_index = self.sparse_array[entity.id].?;
+            const last_entity = self.packed_array.getLast();
+            _ = self.packed_array.swapRemove(dense_index);
+            self.sparse_array[last_entity] = dense_index;
+            self.sparse_array[entity.id] = null;
         }
     };
 }
@@ -202,14 +155,15 @@ test "SparseSet basic operations" {
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
+
     const allocator = arena.allocator();
 
     var sparseSet = SparseSet(TestComponent).init(allocator);
     defer sparseSet.deinit();
 
-    const e1 = Entity.init(1, 0);
-    const e2 = Entity.init(2, 0);
-    const e3 = Entity.init(5, 0);
+    const e1 = Entity.init(1);
+    const e2 = Entity.init(2);
+    const e3 = Entity.init(5);
 
     // Test initial state
     try std.testing.expect(!sparseSet.contains(e1));
@@ -222,138 +176,25 @@ test "SparseSet basic operations" {
     try std.testing.expect(!sparseSet.contains(e3));
 
     // Test component retrieval through indexTable
-    if (sparseSet.index_table.get(e1.id)) |index| {
-        try std.testing.expectEqual(@as(i32, 10), sparseSet.components.items[index].value);
+    if (sparseSet.get(e1)) |component| {
+        try std.testing.expectEqual(@as(i32, 10), component.value);
     } else {
         try std.testing.expect(false); // Should not reach here
     }
 
     // Test updating existing component
     try sparseSet.insert(e1, .{ .value = 15 });
-    if (sparseSet.index_table.get(e1.id)) |index| {
-        try std.testing.expectEqual(@as(i32, 15), sparseSet.components.items[index].value);
+    if (sparseSet.get(e1)) |component| {
+        try std.testing.expectEqual(@as(i32, 15), component.value);
     } else {
         try std.testing.expect(false); // Should not reach here
     }
 
     // Test removal
-    try sparseSet.remove(e1);
+    sparseSet.remove(e1);
     try std.testing.expect(!sparseSet.contains(e1));
     try std.testing.expect(sparseSet.contains(e2));
 
     // Test removing non-existent entity (should not crash)
-    try sparseSet.remove(e3);
-}
-
-test "AbstractSparseSet interface" {
-    const TestComponent = struct {
-        value: i32,
-    };
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var sparseSet = SparseSet(TestComponent).init(allocator);
-    var abstract = sparseSet.abstract();
-    defer abstract.deinit();
-
-    const e1 = Entity.init(1, 0);
-    const e2 = Entity.init(2, 0);
-
-    // Test contains through abstract interface
-    try std.testing.expect(!abstract.contains(e1));
-
-    // Test insert through abstract interface
-    var comp1 = TestComponent{ .value = 42 };
-    try abstract.insert(e1, &comp1);
-    try std.testing.expect(abstract.contains(e1));
-
-    // Test get through abstract interface
-    if (abstract.get(e1, TestComponent)) |component| {
-        try std.testing.expectEqual(@as(i32, 42), component.value);
-    } else {
-        try std.testing.expect(false); // Should not reach here
-    }
-
-    // Test non-existent component get
-    try std.testing.expect(abstract.get(e2, TestComponent) == null);
-
-    // Test getPtr through abstract interface
-    if (abstract.getPtr(e1, TestComponent)) |component_ptr| {
-        try std.testing.expectEqual(@as(i32, 42), component_ptr.value);
-        // Test in-place modification through pointer
-        component_ptr.value = 100;
-        // Verify the modification persisted
-        if (abstract.get(e1, TestComponent)) |modified_component| {
-            try std.testing.expectEqual(@as(i32, 100), modified_component.value);
-        } else {
-            try std.testing.expect(false); // Should not reach here
-        }
-    } else {
-        try std.testing.expect(false); // Should not reach here
-    }
-
-    // Test getPtr for non-existent component
-    try std.testing.expect(abstract.getPtr(e2, TestComponent) == null);
-
-    // Test remove through abstract interface
-    try abstract.remove(e1);
-    try std.testing.expect(!abstract.contains(e1));
-}
-
-test "SparseSet edge cases" {
-    const TestComponent = struct {
-        value: i32,
-    };
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var set = SparseSet(TestComponent).init(arena.allocator());
-    defer set.deinit();
-
-    const e1 = Entity.init(1, 0);
-    const e2 = Entity.init(2, 0);
-
-    // Remove non-existent entity (no crash)
-    try set.remove(e1);
-
-    // Insert, remove, reuse index
-    try set.insert(e1, .{ .value = 10 });
-    try set.remove(e1);
-    try set.insert(e2, .{ .value = 20 });
-    try std.testing.expect(set.contains(e2));
-    try std.testing.expect(!set.contains(e1));
-
-    // Remove again, freeIndex should have one entry
-    try set.remove(e2);
-    try std.testing.expect(set.free_indexes.items.len == 1);
-}
-
-test "SparseSetIterator yields correct entities and components" {
-    const TestComponent = struct { value: i32 };
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var set = SparseSet(TestComponent).init(arena.allocator());
-    defer set.deinit();
-    const e1 = Entity.init(1, 0);
-    const e2 = Entity.init(2, 0);
-    try set.insert(e1, .{ .value = 10 });
-    try set.insert(e2, .{ .value = 20 });
-
-    var abstract = set.abstract();
-    var iter: SparseSetIterator(TestComponent) = undefined;
-    abstract.iterator(TestComponent, &iter);
-    var found = [_]bool{ false, false };
-    while (iter.next()) |entry| {
-        if (entry.id == e1.id) {
-            try std.testing.expectEqual(@as(i32, 10), entry.component.value);
-            found[0] = true;
-        } else if (entry.id == e2.id) {
-            try std.testing.expectEqual(@as(i32, 20), entry.component.value);
-            found[1] = true;
-        } else {
-            try std.testing.expect(false);
-        }
-    }
-    try std.testing.expect(found[0] and found[1]);
+    sparseSet.remove(e3);
 }

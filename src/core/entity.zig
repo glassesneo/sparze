@@ -1,217 +1,200 @@
 const std = @import("std");
 
-pub const Entity = struct {
-    pub const EntityId = usize;
+pub const Entity = u32;
+pub const entity_id_limit = std.math.pow(Entity, 2, 16);
 
-    id: EntityId,
-    generation: usize,
-    pub fn init(id: EntityId, generation: usize) Entity {
-        return Entity{ .id = id, .generation = generation };
-    }
-};
+pub const index_bits: u5 = 16;
+pub const version_bits: u5 = 16;
+pub const index_mask: u32 = (1 << index_bits) - 1;
+pub const version_mask: u32 = (1 << version_bits) - 1;
 
-pub const EntityManager = struct {
-    next_id: Entity.EntityId,
-    free_ids: std.ArrayList(Entity.EntityId),
-    generations: std.ArrayList(usize),
-    entities: std.ArrayList(Entity),
-    /// Maps entity IDs to their indices in the entities array for O(1) access.
-    /// Invariant: For each entry (id, index), entities.items[index].id == id
-    /// Must be updated whenever entities array is modified.
-    entity_indices: std.AutoHashMap(Entity.EntityId, usize),
-    allocator: std.mem.Allocator,
+/// Extracts the 16-bit index from an Entity identifier.
+/// Complexity: O(1).
+pub fn getIndex(entity: Entity) u16 {
+    return @intCast(entity & index_mask);
+}
 
-    pub fn init(allocator: std.mem.Allocator) EntityManager {
-        return EntityManager{
-            .next_id = 0,
-            .free_ids = .init(allocator),
-            .generations = .init(allocator),
-            .entities = .init(allocator),
-            .entity_indices = .init(allocator),
-            .allocator = allocator,
+/// Extracts the 16-bit version from an Entity identifier.
+/// Complexity: O(1).
+pub fn getVersion(entity: Entity) u16 {
+    return @intCast((entity >> index_bits) & version_mask);
+}
+
+pub const EntityRegistry = struct {
+    entities: [entity_id_limit]Entity,
+    next_index: u16,
+    available: u16,
+    next_index_to_recycle: Entity,
+
+    /// Initializes an empty entity registry backed by a fixed-size array.
+    pub fn init() EntityRegistry {
+        return .{
+            .entities = undefined,
+            .next_index = 0,
+            .available = 0,
+            .next_index_to_recycle = undefined,
         };
     }
 
-    pub fn deinit(self: *EntityManager) void {
-        self.free_ids.deinit();
-        self.generations.deinit();
-        self.entities.deinit();
-        self.entity_indices.deinit();
-    }
+    /// Returns a new Entity identifier, recycling a previously destroyed one if available.
+    /// Creates new indices sequentially when no recycled entities are available.
+    /// Complexity: O(1).
+    pub fn create(self: *EntityRegistry) Entity {
+        const index, const version = if (self.available > 0) recycle: {
+            // Recycle from the implicit free list.
+            const head_index: u16 = getIndex(self.next_index_to_recycle);
+            const head_value: Entity = self.entities[head_index];
+            const version: u16 = getVersion(head_value);
+            const next_index: u16 = getIndex(head_value);
 
-    pub fn create(self: *EntityManager) !Entity {
-        const entity = if (self.free_ids.pop()) |id| recycle: {
-            self.generations.items[id] += 1;
-            break :recycle Entity.init(id, self.generations.items[id]);
-        } else generate: {
-            defer self.next_id += 1;
-            try self.generations.append(0);
-            break :generate Entity.init(self.next_id, 0);
+            // Advance the head and decrease available count.
+            self.next_index_to_recycle = next_index;
+            self.available -= 1;
+            break :recycle .{ head_index, version };
+        } else new: {
+            // Create a new identifier with version 0.
+            std.debug.assert(self.next_index < entity_id_limit);
+            const index: u16 = @intCast(self.next_index);
+            self.next_index += 1;
+            break :new .{ index, 0 };
         };
 
-        const index = self.entities.items.len;
-        try self.entities.append(entity);
-        try self.entity_indices.put(entity.id, index);
+        const entity = makeEntity(index, version);
+        self.entities[index] = entity;
         return entity;
     }
 
-    pub fn destroy(self: *EntityManager, id: Entity.EntityId) !void {
-        if (self.entity_indices.get(id)) |index| {
-            // Use swapRemove for O(1) removal
-            _ = self.entities.swapRemove(index);
-            _ = self.entity_indices.remove(id);
-            try self.free_ids.append(id);
+    /// Destroys an Entity and adds its index to the implicit free list.
+    /// Increments the version so stale identifiers can be detected.
+    /// Complexity: O(1).
+    pub fn destroy(self: *EntityRegistry, entity: Entity) void {
+        const index: u16 = getIndex(entity);
+        const current: Entity = self.entities[index];
+        const new_version: u16 = getVersion(current) + 1;
 
-            // Update lookup table for the swapped entity (if any)
-            if (index < self.entities.items.len) {
-                const swapped_entity = self.entities.items[index];
-                try self.entity_indices.put(swapped_entity.id, index);
-            }
-        }
+        // Link this index to the previous head of the free list.
+        const prev_head_index: u16 = if (self.available == 0)
+            index
+        else
+            getIndex(self.next_index_to_recycle);
+
+        // Store mixed identifier: upper bits = new version, lower bits = next index in free list.
+        self.entities[index] = makeEntity(prev_head_index, new_version);
+
+        // Update head and counters.
+        self.next_index_to_recycle = index;
+        self.available += 1;
     }
 
-    pub fn exists(self: *const EntityManager, entity: Entity) bool {
-        if (self.entity_indices.get(entity.id)) |index| {
-            const stored_entity = self.entities.items[index];
-            return stored_entity.generation == entity.generation;
-        }
-        return false;
+    /// Returns whether the given entity handle refers to a currently alive entity.
+    /// Performs bounds and version checks; stale or never-allocated handles return false.
+    /// Complexity: O(1).
+    pub fn isAlive(self: *const EntityRegistry, entity: Entity) bool {
+        const index: u16 = getIndex(entity);
+        // If index was never allocated, it's not alive.
+        if (index >= self.next_index) return false;
+        const i: usize = index;
+        const current = self.entities[i];
+        // Alive iff the stored slot matches its own index and the version matches.
+        return getIndex(current) == index and getVersion(current) == getVersion(entity);
     }
 
-    pub fn count(self: *const EntityManager) usize {
-        return self.entities.items.len;
+    /// Returns the number of currently alive entities.
+    /// Complexity: O(1).
+    pub fn aliveCount(self: *const EntityRegistry) usize {
+        return @as(usize, self.next_index - self.available);
     }
 
-    pub fn getEntityById(self: *const EntityManager, id: Entity.EntityId) ?Entity {
-        if (self.entity_indices.get(id)) |index| {
-            return self.entities.items[index];
-        }
-        return null;
+    fn makeEntity(index: u16, version: u16) Entity {
+        return (@as(u32, version) << index_bits) | (@as(u32, index) & index_mask);
     }
 
-    pub fn getAllEntities(self: *const EntityManager) []const Entity {
-        return self.entities.items;
+    test "makeEntity packs index and version correctly" {
+        const index: u16 = 12345;
+        const version: u16 = 42;
+        const e = makeEntity(index, version);
+        try std.testing.expect(getIndex(e) == index);
+        try std.testing.expect(getVersion(e) == version);
+    }
+
+    test "getId and getVersion extract correct values" {
+        const e = makeEntity(65535, 65535);
+        try std.testing.expect(getIndex(e) == 65535);
+        try std.testing.expect(getVersion(e) == 65535);
+
+        const e2 = makeEntity(0, 0);
+        try std.testing.expect(getIndex(e2) == 0);
+        try std.testing.expect(getVersion(e2) == 0);
     }
 };
 
-test "Entity basics" {
-    const e1 = Entity.init(123, 0);
-    try std.testing.expectEqual(@as(Entity.EntityId, 123), e1.id);
+test "Entity basic operations" {
+    var registry = EntityRegistry.init();
+
+    const e1 = registry.create();
+    const e2 = registry.create();
+    const e3 = registry.create();
+    try std.testing.expect(getIndex(e1) == 0 and getVersion(e1) == 0);
+    try std.testing.expect(getIndex(e2) == 1 and getVersion(e2) == 0);
+    try std.testing.expect(getIndex(e3) == 2 and getVersion(e3) == 0);
+    try std.testing.expect(registry.aliveCount() == 3);
+    try std.testing.expect(registry.isAlive(e1));
+    try std.testing.expect(registry.isAlive(e2));
+    try std.testing.expect(registry.isAlive(e3));
+
+    registry.destroy(e2);
+    const e4 = registry.create();
+    try std.testing.expect(getIndex(e4) == 1);
+    try std.testing.expect(getVersion(e4) == getVersion(e2) + 1);
+    try std.testing.expect(!registry.isAlive(e2));
+    try std.testing.expect(registry.isAlive(e4));
+    try std.testing.expect(registry.aliveCount() == 3);
+
+    registry.destroy(e1);
+    registry.destroy(e3);
+    const e5 = registry.create();
+    try std.testing.expect(getIndex(e5) == 2 and getVersion(e5) == getVersion(e3) + 1);
+
+    const e6 = registry.create();
+    try std.testing.expect(getIndex(e6) == 0 and getVersion(e6) == getVersion(e1) + 1);
+    try std.testing.expect(registry.isAlive(e5));
+    try std.testing.expect(registry.isAlive(e6));
+    try std.testing.expect(registry.aliveCount() == 3);
 }
 
-test "EntityManager operations" {
-    // Setup
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    var manager = EntityManager.init(arena.allocator());
-    defer manager.deinit();
-
-    // Test initial state
-    try std.testing.expectEqual(@as(usize, 0), manager.count());
-
-    // Test entity creation
-    const e1 = try manager.create();
-    const e2 = try manager.create();
-    try std.testing.expectEqual(@as(Entity.EntityId, 0), e1.id);
-    try std.testing.expectEqual(@as(Entity.EntityId, 1), e2.id);
-    try std.testing.expectEqual(@as(usize, 2), manager.count());
-
-    // Test exists check
-    try std.testing.expect(manager.exists(e1));
-    try std.testing.expect(manager.exists(e2));
-    try std.testing.expect(!manager.exists(Entity.init(99, 0)));
-
-    // Test get by ID
-    try std.testing.expectEqual(e1.id, manager.getEntityById(0).?.id);
-    try std.testing.expect(manager.getEntityById(99) == null);
-
-    // Test getAllEntities
-    const all = manager.getAllEntities();
-    try std.testing.expectEqual(@as(usize, 2), all.len);
-    try std.testing.expectEqual(e1.id, all[0].id);
-    try std.testing.expectEqual(e2.id, all[1].id);
-
-    // Test entity destruction
-    try manager.destroy(e1.id);
-    try std.testing.expect(!manager.exists(e1));
-    try std.testing.expectEqual(@as(usize, 1), manager.count());
-
-    // Test getEntityById after destruction
-    try std.testing.expect(manager.getEntityById(0) == null);
-
-    // Test destroying non-existent entity (should not crash)
-    try manager.destroy(Entity.init(99, 0).id);
-    try std.testing.expectEqual(@as(usize, 1), manager.count());
+test "Entity recycle twice bumps version twice" {
+    var registry = EntityRegistry.init();
+    const e0 = registry.create();
+    const idx = getIndex(e0);
+    const v0 = getVersion(e0);
+    registry.destroy(e0);
+    const e1 = registry.create();
+    try std.testing.expect(getIndex(e1) == idx);
+    try std.testing.expect(getVersion(e1) == v0 + 1);
+    registry.destroy(e1);
+    const e2 = registry.create();
+    try std.testing.expect(getIndex(e2) == idx);
+    try std.testing.expect(getVersion(e2) == v0 + 2);
 }
 
-test "EntityManager recycles entity IDs after destruction" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var manager = EntityManager.init(arena.allocator());
-    defer manager.deinit();
-
-    const e1 = try manager.create();
-    const e2 = try manager.create();
-    try manager.destroy(e1.id);
-    const e3 = try manager.create();
-    try std.testing.expectEqual(e1.id, e3.id); // ID should be recycled
-    try std.testing.expect(manager.exists(e3));
-    try std.testing.expect(!manager.exists(e1));
-    try std.testing.expect(manager.exists(e2));
-}
-
-// Test that validates O(1) performance characteristics and correctness at scale.
-// This test ensures that operations remain efficient even with many entities,
-// and verifies that the entity_indices invariant is maintained.
-test "EntityManager O(1) operations performance and correctness" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var manager = EntityManager.init(arena.allocator());
-    defer manager.deinit();
-
-    // Test with a substantial number of entities to validate scalability
-    const num_entities = 1000;
-    var entities: [num_entities]Entity = undefined;
-
-    // Test O(1) creation and immediate lookup validation
-    for (0..num_entities) |i| {
-        entities[i] = try manager.create();
-
-        // Validate entity_indices invariant: entities[index].id == id
-        if (manager.entity_indices.get(entities[i].id)) |index| {
-            try std.testing.expectEqual(entities[i].id, manager.entities.items[index].id);
-        } else {
-            try std.testing.expect(false); // entity_indices should contain the new entity
-        }
-
-        // Validate O(1) operations work correctly
-        try std.testing.expect(manager.exists(entities[i]));
-        try std.testing.expectEqual(entities[i].id, manager.getEntityById(entities[i].id).?.id);
-    }
-
-    try std.testing.expectEqual(@as(usize, num_entities), manager.count());
-    try std.testing.expectEqual(@as(usize, num_entities), manager.entity_indices.count());
-
-    // Test O(1) destruction with invariant validation
-    for (0..num_entities / 2) |i| {
-        const entity_id = entities[i].id;
-        try manager.destroy(entity_id);
-
-        // Validate entity is properly removed
-        try std.testing.expect(!manager.exists(entities[i]));
-        try std.testing.expect(manager.getEntityById(entity_id) == null);
-        try std.testing.expect(!manager.entity_indices.contains(entity_id));
-    }
-
-    try std.testing.expectEqual(@as(usize, num_entities / 2), manager.count());
-    try std.testing.expectEqual(@as(usize, num_entities / 2), manager.entity_indices.count());
-
-    // Validate entity_indices invariant still holds for remaining entities
-    var indices_iter = manager.entity_indices.iterator();
-    while (indices_iter.next()) |entry| {
-        const entity_id = entry.key_ptr.*;
-        const index = entry.value_ptr.*;
-        try std.testing.expectEqual(entity_id, manager.entities.items[index].id);
-    }
+test "Destroy all then reuse LIFO then grow" {
+    var registry = EntityRegistry.init();
+    const a = registry.create(); // 0|0
+    const b = registry.create(); // 1|0
+    const c = registry.create(); // 2|0
+    const d = registry.create(); // 3|0
+    registry.destroy(a);
+    registry.destroy(b);
+    registry.destroy(c);
+    registry.destroy(d);
+    const r0 = registry.create();
+    const r1 = registry.create();
+    const r2 = registry.create();
+    const r3 = registry.create();
+    try std.testing.expect(getIndex(r0) == 3 and getVersion(r0) == 1);
+    try std.testing.expect(getIndex(r1) == 2 and getVersion(r1) == 1);
+    try std.testing.expect(getIndex(r2) == 1 and getVersion(r2) == 1);
+    try std.testing.expect(getIndex(r3) == 0 and getVersion(r3) == 1);
+    const e4 = registry.create();
+    try std.testing.expect(getIndex(e4) == 4 and getVersion(e4) == 0);
 }
