@@ -107,14 +107,14 @@ pub fn SparseSet(comptime Component: type) type {
 
         /// Check whether the set contains a component for the given entity.
         /// Complexity: O(1).
-        fn contains(self: Self, entity: Entity) bool {
+        pub fn contains(self: Self, entity: Entity) bool {
             const sparse_index = getIndex(entity);
             return self.hasIndex(sparse_index);
         }
 
         /// Retrieve the component associated with an entity, if present.
         /// Complexity: O(1).
-        fn get(self: Self, entity: Entity) ?Component {
+        pub fn get(self: Self, entity: Entity) ?Component {
             const sparse_index = getIndex(entity);
             if (!self.hasIndex(sparse_index)) return null;
             const dense_index = self.sparse_array[sparse_index].?;
@@ -123,7 +123,7 @@ pub fn SparseSet(comptime Component: type) type {
 
         /// Insert or replace a component for the given entity.
         /// Complexity: O(1) amortized (ArrayList may reallocate).
-        fn insert(self: *Self, entity: Entity, component: Component) !void {
+        pub fn insert(self: *Self, entity: Entity, component: Component) !void {
             const sparse_index = getIndex(entity);
             if (self.hasIndex(sparse_index)) {
                 const dense_index = self.sparse_array[sparse_index].?;
@@ -140,7 +140,7 @@ pub fn SparseSet(comptime Component: type) type {
 
         /// Remove the component associated with an entity, if it exists.
         /// Complexity: O(1).
-        fn remove(self: *Self, entity: Entity) void {
+        pub fn remove(self: *Self, entity: Entity) void {
             const sparse_index = getIndex(entity);
             if (!self.hasIndex(sparse_index)) return;
             const dense_index = self.sparse_array[sparse_index].?;
@@ -164,7 +164,7 @@ pub fn SparseSet(comptime Component: type) type {
             return index == self.packed_array.items[dense_index];
         }
 
-        fn abstract(self: *Self) AbstractSparseSet {
+        pub fn abstract(self: *Self) AbstractSparseSet {
             return AbstractSparseSet.init(Component, self);
         }
     };
