@@ -1,6 +1,8 @@
 const std = @import("std");
 
-const examples = [_]Example{};
+const examples = [_]Example{
+    .{ .name = "basic" },
+};
 
 const Example = struct {
     name: []const u8,
