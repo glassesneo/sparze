@@ -3,19 +3,22 @@ const sparze = @import("sparze");
 
 const App = struct {
     allocator: std.mem.Allocator,
+    component_arena: std.heap.ArenaAllocator,
     plugins: std.ArrayList(Plugin),
     world: sparze.World,
 
     fn init(allocator: std.mem.Allocator) App {
         return .{
             .allocator = allocator,
+            .component_arena = .init(allocator),
             .world = .init(allocator),
             .plugins = .{},
         };
     }
 
     fn registerPlugin(self: *App, comptime P: type) !void {
-        try self.plugins.append(self.allocator, Plugin.init(P, self.allocator));
+        const arena_allocator = self.component_arena.allocator();
+        try self.plugins.append(self.allocator, Plugin.init(P, arena_allocator));
     }
 
     fn start(self: *App) !void {
@@ -30,6 +33,7 @@ const App = struct {
         }
         self.plugins.deinit(self.allocator);
         self.world.deinit();
+        self.component_arena.deinit();
     }
 };
 

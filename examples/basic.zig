@@ -2,7 +2,9 @@ const std = @import("std");
 const sparze = @import("sparze");
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
     var registry = sparze.EntityRegistry.init();
 
     // Create entities
