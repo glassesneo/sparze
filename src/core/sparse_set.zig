@@ -81,9 +81,10 @@ pub const AbstractSparseSet = struct {
 
 /// SparseSet creates a new sparse set type for the given component type.
 /// Complexity: O(1) for type generation (compile-time).
-pub fn SparseSet(comptime Component: type) type {
+pub fn SparseSet(comptime C: type) type {
     return struct {
         const Self = @This();
+        pub const Component = C;
         allocator: Allocator,
         sparse_array: [max_entities]?u16, // index: entity index, element: index of components
         packed_array: ArrayList(EntityIndex),

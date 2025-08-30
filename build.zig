@@ -2,6 +2,8 @@ const std = @import("std");
 
 const examples = [_]Example{
     .{ .name = "basic" },
+    .{ .name = "world_operations" },
+    .{ .name = "plugin_architecture" },
 };
 
 const Example = struct {
