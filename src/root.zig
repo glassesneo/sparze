@@ -8,6 +8,9 @@ const sparse_set_module = @import("core/sparse_set.zig");
 pub const SparseSet = sparse_set_module.SparseSet;
 pub const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 
+const world_module = @import("core/world.zig");
+pub const World = world_module.World;
+
 test {
     std.testing.refAllDecls(@This());
 }
