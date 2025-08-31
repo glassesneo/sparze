@@ -1,6 +1,8 @@
 const entity_module = @import("core/entity.zig");
 pub const EntityRegistry = entity_module.EntityRegistry;
 pub const Entity = entity_module.Entity;
+pub const EntityIndex = entity_module.EntityIndex;
+pub const max_entities = entity_module.max_entities;
 pub const getIndex = entity_module.getIndex;
 pub const getVersion = entity_module.getVersion;
 

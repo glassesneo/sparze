@@ -9,6 +9,19 @@ const EntityIndex = entity_module.EntityIndex;
 const EntityVersion = entity_module.EntityVersion;
 const getIndex = entity_module.getIndex;
 
+// Pagination configuration
+const page_size: u16 = 4096; // Entities per page
+const max_pages: u16 = @intCast((@as(u32, max_entities) + @as(u32, page_size) - 1) / @as(u32, page_size));
+
+/// A single page in the sparse array
+const SparsePage = struct {
+    slots: [page_size]?u16,
+
+    fn init() SparsePage {
+        return .{ .slots = [_]?u16{null} ** page_size };
+    }
+};
+
 pub const AbstractSparseSet = struct {
     vtable: *const VTable,
     instance: *anyopaque,
@@ -48,7 +61,11 @@ pub const AbstractSparseSet = struct {
                 fn get(ptr: *anyopaque, entity: Entity) ?*anyopaque {
                     const self = castTo(SparseSetType, ptr);
                     const sparse_index = getIndex(entity);
-                    const dense_index = self.sparse_array[sparse_index] orelse return null;
+                    const page_idx = sparse_index / page_size;
+                    const slot_idx = sparse_index % page_size;
+
+                    const page = self.sparse_pages[page_idx] orelse return null;
+                    const dense_index = page.slots[slot_idx] orelse return null;
                     return @ptrCast(&self.components.items[dense_index]);
                 }
             }.get,
@@ -86,7 +103,7 @@ pub fn SparseSet(comptime C: type) type {
         const Self = @This();
         pub const Component = C;
         allocator: Allocator,
-        sparse_array: [max_entities]?u16, // index: entity index, element: index of components
+        sparse_pages: [max_pages]?*SparsePage, // Paginated sparse array
         packed_array: ArrayList(EntityIndex),
         components: ArrayList(Component),
 
@@ -94,7 +111,7 @@ pub fn SparseSet(comptime C: type) type {
         pub fn init(allocator: Allocator) Self {
             return .{
                 .allocator = allocator,
-                .sparse_array = [_]?u16{null} ** max_entities,
+                .sparse_pages = [_]?*SparsePage{null} ** max_pages,
                 .packed_array = .{},
                 .components = .{},
             };
@@ -102,8 +119,36 @@ pub fn SparseSet(comptime C: type) type {
 
         /// Deinitialize the SparseSet, freeing internal buffers.
         pub fn deinit(self: *Self) void {
+            // Free all allocated pages
+            for (self.sparse_pages) |maybe_page| {
+                const page = maybe_page orelse continue;
+                self.allocator.destroy(page);
+            }
             self.packed_array.deinit(self.allocator);
             self.components.deinit(self.allocator);
+        }
+
+        /// Get or create a sparse page for the given entity
+        fn getOrCreatePage(self: *Self, entity: Entity) !*SparsePage {
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index / page_size;
+
+            if (self.sparse_pages[page_idx]) |page| {
+                return page;
+            }
+
+            // Allocate new page
+            const new_page = try self.allocator.create(SparsePage);
+            new_page.* = SparsePage.init();
+            self.sparse_pages[page_idx] = new_page;
+            return new_page;
+        }
+
+        /// Get sparse page if it exists
+        fn getPage(self: *const Self, entity: Entity) ?*SparsePage {
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index / page_size;
+            return self.sparse_pages[page_idx];
         }
 
         /// Check whether the set contains a component for the given entity.
@@ -118,7 +163,12 @@ pub fn SparseSet(comptime C: type) type {
         pub fn get(self: Self, entity: Entity) ?Component {
             const sparse_index = getIndex(entity);
             if (!self.hasIndex(sparse_index)) return null;
-            const dense_index = self.sparse_array[sparse_index].?;
+
+            const page_idx = sparse_index / page_size;
+            const slot_idx = sparse_index % page_size;
+            const page = self.sparse_pages[page_idx].?; // hasIndex already checked this exists
+            const dense_index = page.slots[slot_idx].?; // hasIndex already checked this exists
+
             return self.components.items[dense_index];
         }
 
@@ -126,17 +176,26 @@ pub fn SparseSet(comptime C: type) type {
         /// Complexity: O(1) amortized (ArrayList may reallocate).
         pub fn insert(self: *Self, entity: Entity, component: Component) !void {
             const sparse_index = getIndex(entity);
+            const page_idx = sparse_index / page_size;
+            const slot_idx = sparse_index % page_size;
+
+            // Check if entity already has a component
             if (self.hasIndex(sparse_index)) {
-                const dense_index = self.sparse_array[sparse_index].?;
+                const page = self.sparse_pages[page_idx].?;
+                const dense_index = page.slots[slot_idx].?;
                 self.components.items[dense_index] = component;
                 self.packed_array.items[dense_index] = sparse_index;
                 return;
             }
 
+            // Get or create the page for this entity
+            const page = try self.getOrCreatePage(entity);
+
+            // Add new component
             const dense_index: u16 = @intCast(self.components.items.len);
             try self.components.append(self.allocator, component);
             try self.packed_array.append(self.allocator, sparse_index);
-            self.sparse_array[sparse_index] = dense_index;
+            page.slots[slot_idx] = dense_index;
         }
 
         /// Remove the component associated with an entity, if it exists.
@@ -144,23 +203,39 @@ pub fn SparseSet(comptime C: type) type {
         pub fn remove(self: *Self, entity: Entity) void {
             const sparse_index = getIndex(entity);
             if (!self.hasIndex(sparse_index)) return;
-            const dense_index = self.sparse_array[sparse_index].?;
+
+            const page_idx = sparse_index / page_size;
+            const slot_idx = sparse_index % page_size;
+            const page = self.sparse_pages[page_idx].?;
+            const dense_index = page.slots[slot_idx].?;
+
             const last_dense: u16 = @intCast(self.components.items.len - 1);
             const last_entity = self.packed_array.items[last_dense];
+
             // Remove from packed (dense) entity array
             _ = self.packed_array.swapRemove(dense_index);
             self.components.items[dense_index] = self.components.items[last_dense];
             _ = self.components.swapRemove(last_dense);
+
             // Update sparse array for the entity that moved into the vacated slot
-            self.sparse_array[last_entity] = dense_index;
+            const last_page_idx = last_entity / page_size;
+            const last_slot_idx = last_entity % page_size;
+            const last_page = self.sparse_pages[last_page_idx].?;
+            last_page.slots[last_slot_idx] = dense_index;
+
             // Clear the removed entity's entry
-            self.sparse_array[sparse_index] = null;
+            page.slots[slot_idx] = null;
         }
 
         /// Internal helper: check whether a sparse index maps to a valid dense entry.
         /// Complexity: O(1).
         fn hasIndex(self: Self, index: EntityIndex) bool {
-            const dense_index = self.sparse_array[index] orelse return false;
+            const page_idx = index / page_size;
+            const slot_idx = index % page_size;
+
+            const page = self.sparse_pages[page_idx] orelse return false;
+            const dense_index = page.slots[slot_idx] orelse return false;
+
             if (dense_index >= self.packed_array.items.len) return false;
             return index == self.packed_array.items[dense_index];
         }
@@ -199,7 +274,7 @@ test "SparseSet basic operations" {
     try std.testing.expect(sparseSet.contains(e2));
     try std.testing.expect(!sparseSet.contains(e3));
 
-    // Test component retrieval through indexTable
+    // Test component retrieval
     if (sparseSet.get(e1)) |component| {
         try std.testing.expectEqual(@as(i32, 10), component.value);
     } else {
@@ -251,6 +326,56 @@ test "SparseSet removal consistency" {
     }
 
     try std.testing.expectEqual(@as(usize, total - 1), set.components.items.len);
+}
+
+test "SparseSet pagination with sparse entities" {
+    const TestComp = struct { v: usize };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var set = SparseSet(TestComp).init(allocator);
+    defer set.deinit();
+
+    var registry = EntityRegistry.init();
+
+    // Create entities in different pages
+    // Force entities into different pages by creating gaps
+    var entities: [3]Entity = undefined;
+
+    // Entity 0 (page 0)
+    entities[0] = registry.create();
+
+    // Skip to get entity in different page (around entity 4096)
+    for (0..4096) |_| _ = registry.create();
+    entities[1] = registry.create(); // This should be in page 1
+
+    // Skip to get entity in another page (around entity 8192)
+    for (0..4095) |_| _ = registry.create();
+    entities[2] = registry.create(); // This should be in page 2
+
+    // Insert components
+    try set.insert(entities[0], .{ .v = 100 });
+    try set.insert(entities[1], .{ .v = 200 });
+    try set.insert(entities[2], .{ .v = 300 });
+
+    // Verify all components are accessible
+    try std.testing.expect(set.contains(entities[0]));
+    try std.testing.expect(set.contains(entities[1]));
+    try std.testing.expect(set.contains(entities[2]));
+
+    try std.testing.expectEqual(@as(usize, 100), set.get(entities[0]).?.v);
+    try std.testing.expectEqual(@as(usize, 200), set.get(entities[1]).?.v);
+    try std.testing.expectEqual(@as(usize, 300), set.get(entities[2]).?.v);
+
+    // Remove middle entity and verify others remain
+    set.remove(entities[1]);
+    try std.testing.expect(set.contains(entities[0]));
+    try std.testing.expect(!set.contains(entities[1]));
+    try std.testing.expect(set.contains(entities[2]));
+
+    try std.testing.expectEqual(@as(usize, 100), set.get(entities[0]).?.v);
+    try std.testing.expectEqual(@as(usize, 300), set.get(entities[2]).?.v);
 }
 
 test "AbstractSparseSet dynamic dispatch" {
