@@ -12,6 +12,7 @@ pub const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 
 const world_module = @import("core/world.zig");
 pub const World = world_module.World;
+pub const SingleView = world_module.SingleView;
 
 test {
     std.testing.refAllDecls(@This());
