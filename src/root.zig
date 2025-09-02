@@ -10,6 +10,10 @@ const sparse_set_module = @import("core/sparse_set.zig");
 pub const SparseSet = sparse_set_module.SparseSet;
 pub const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 
+const system_module = @import("core/system.zig");
+pub const SingleQuery = system_module.SingleQuery;
+// pub const Query = system_module.Query;
+
 const world_module = @import("core/world.zig");
 pub const World = world_module.World;
 pub const SingleView = world_module.SingleView;

@@ -66,7 +66,7 @@ pub const AbstractSparseSet = struct {
         return self.vtable.removeFn(self.instance, entity);
     }
 
-    fn castTo(comptime T: type, ptr: *anyopaque) *T {
+    pub fn castTo(comptime T: type, ptr: *anyopaque) *T {
         return @ptrCast(@alignCast(ptr));
     }
 

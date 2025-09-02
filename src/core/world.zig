@@ -138,66 +138,15 @@ pub const World = struct {
         return entity;
     }
 
-    fn getSparseSet(self: *World, comptime C: type) !AbstractSparseSet {
+    pub fn getSparseSet(self: *World, comptime C: type) !*SparseSet(C) {
         const type_id = self.getTypeId(C) orelse return error.ComponentNotRegistered;
-        return self.component_pool.items[type_id];
+        return AbstractSparseSet.castTo(SparseSet(C), self.component_pool.items[type_id].instance);
     }
 
     fn getTypeId(self: *const World, comptime C: type) ?TypeId {
         return self.sparse_type_ids[typeId(C)];
     }
 };
-
-pub fn SingleView(comptime ComponentRef: type) type {
-    // Extract the actual component type and determine mutability
-    const ComponentType, const is_mutable = switch (@typeInfo(ComponentRef)) {
-        .pointer => |ptr_info| switch (ptr_info.size) {
-            .one => .{ ptr_info.child, true }, // *T -> mutable
-            else => @compileError("SingleView only supports single-item pointers (*T) or types (T)"),
-        },
-        else => .{ ComponentRef, false }, // T -> immutable
-    };
-
-    return struct {
-        const Self = @This();
-        sparse_set: AbstractSparseSet,
-
-        pub fn init(world: *World) !Self {
-            return .{
-                .sparse_set = try world.getSparseSet(ComponentType),
-            };
-        }
-
-        pub fn iter(self: *const Self) Iterator {
-            const entities = self.sparse_set.getEntities();
-            const components = self.sparse_set.getComponents(ComponentType);
-            return .{
-                .entities = entities,
-                .components = components,
-                .index = 0,
-                .len = @min(entities.len, components.len),
-            };
-        }
-
-        pub const Iterator = struct {
-            entities: []const Entity,
-            components: if (is_mutable) []ComponentType else []const ComponentType,
-            index: usize,
-            len: usize,
-
-            pub fn next(self: *Iterator) ?struct { Entity, ComponentRef } {
-                if (self.index >= self.len) return null;
-                const entity = self.entities[self.index];
-                const component = if (is_mutable)
-                    &self.components[self.index]
-                else
-                    self.components[self.index];
-                self.index += 1;
-                return .{ entity, component };
-            }
-        };
-    };
-}
 
 test "World entity creation and destruction" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -448,79 +397,4 @@ test "World createEntityWith batch creation" {
     try std.testing.expectEqual(@as(f32, 10.0), pos.y);
     try std.testing.expectEqual(@as(f32, 2.0), vel.dx);
     try std.testing.expectEqual(@as(f32, -1.0), vel.dy);
-}
-
-test "SingleView mutable iteration" {
-    const Position = struct { x: f32, y: f32 };
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = World.init(allocator);
-    defer world.deinit();
-
-    var pos_set = SparseSet(Position).init(allocator);
-    defer pos_set.deinit();
-
-    try world.registerComponent(Position, &pos_set);
-
-    for (0..5) |_| {
-        const entity = world.createEntity();
-        try world.addComponent(entity, Position, .{ .x = 10.0, .y = 20.0 });
-    }
-
-    // Mutable view using *Position
-    var mutable_view = try SingleView(*Position).init(&world);
-    var mutable_iter = mutable_view.iter();
-
-    while (mutable_iter.next()) |item| {
-        const entity, const pos = item;
-        try std.testing.expect(world.isAlive(entity));
-        pos.x += 1.0; // Can modify through pointer
-    }
-
-    // Verify changes were applied
-    for (pos_set.components.items) |pos| {
-        try std.testing.expectEqual(@as(f32, 11.0), pos.x);
-        try std.testing.expectEqual(@as(f32, 20.0), pos.y);
-    }
-}
-
-test "SingleView immutable iteration" {
-    const Position = struct { x: f32, y: f32 };
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = World.init(allocator);
-    defer world.deinit();
-
-    var pos_set = SparseSet(Position).init(allocator);
-    defer pos_set.deinit();
-
-    try world.registerComponent(Position, &pos_set);
-
-    for (0..5) |_| {
-        const entity = world.createEntity();
-        try world.addComponent(entity, Position, .{ .x = 10.0, .y = 20.0 });
-    }
-
-    // Immutable view using Position (not *Position)
-    var immutable_view = try SingleView(Position).init(&world);
-    var immutable_iter = immutable_view.iter();
-
-    while (immutable_iter.next()) |item| {
-        const entity, const pos = item;
-        try std.testing.expect(world.isAlive(entity));
-        // pos is a value copy, cannot modify original
-        // pos.x += 1.0; // This would be a compile error
-        try std.testing.expectEqual(@as(f32, 10.0), pos.x);
-        try std.testing.expectEqual(@as(f32, 20.0), pos.y);
-    }
-
-    // Original data unchanged
-    for (pos_set.components.items) |pos| {
-        try std.testing.expectEqual(@as(f32, 10.0), pos.x);
-        try std.testing.expectEqual(@as(f32, 20.0), pos.y);
-    }
 }
