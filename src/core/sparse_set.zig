@@ -25,21 +25,21 @@ pub const AbstractSparseSet = struct {
         removeFn: *const fn (*anyopaque, Entity) void,
     };
 
-    pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?T {
+    pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime C: type) ?C {
         const component = self.vtable.getFn(self.instance, entity) orelse return null;
-        const typed_ptr = castTo(T, component);
+        const typed_ptr = castTo(C, component);
         return typed_ptr.*;
     }
 
-    pub fn getPtr(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?*const T {
+    pub fn getPtr(self: *const AbstractSparseSet, entity: Entity, comptime C: type) ?*const C {
         const component = self.vtable.getPtrFn(self.instance, entity) orelse return null;
-        const typed_ptr: *const T = @ptrCast(@alignCast(component));
+        const typed_ptr: *const C = @ptrCast(@alignCast(component));
         return typed_ptr;
     }
 
-    pub fn getPtrMut(self: *const AbstractSparseSet, entity: Entity, comptime T: type) ?*T {
+    pub fn getPtrMut(self: *const AbstractSparseSet, entity: Entity, comptime C: type) ?*C {
         const component = self.vtable.getPtrMutFn(self.instance, entity) orelse return null;
-        const typed_ptr = castTo(T, component);
+        const typed_ptr = castTo(C, component);
         return typed_ptr;
     }
 
@@ -47,11 +47,10 @@ pub const AbstractSparseSet = struct {
         return self.vtable.getEntities(self.instance);
     }
 
-    pub fn getComponents(self: *const AbstractSparseSet, comptime T: type) []T {
+    pub fn getComponents(self: *const AbstractSparseSet, comptime C: type) []C {
         const components = self.vtable.getComponentsFn(self.instance);
-        const typed_ptr = castTo([]T, components);
+        const typed_ptr = castTo([]C, components);
         return typed_ptr.*;
-        // return @ptrCast(&components);
     }
 
     pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) !void {
@@ -66,7 +65,11 @@ pub const AbstractSparseSet = struct {
         return self.vtable.removeFn(self.instance, entity);
     }
 
-    pub fn castTo(comptime T: type, ptr: *anyopaque) *T {
+    pub fn incarnate(self: *const AbstractSparseSet, comptime C: type) *SparseSet(C) {
+        return castTo(SparseSet(C), self.instance);
+    }
+
+    fn castTo(comptime T: type, ptr: *anyopaque) *T {
         return @ptrCast(@alignCast(ptr));
     }
 

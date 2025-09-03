@@ -140,10 +140,10 @@ pub const World = struct {
 
     pub fn getSparseSet(self: *World, comptime C: type) !*SparseSet(C) {
         const type_id = self.getTypeId(C) orelse return error.ComponentNotRegistered;
-        return AbstractSparseSet.castTo(SparseSet(C), self.component_pool.items[type_id].instance);
+        return self.component_pool.items[type_id].incarnate(C);
     }
 
-    fn getTypeId(self: *const World, comptime C: type) ?TypeId {
+    pub fn getTypeId(self: *const World, comptime C: type) ?TypeId {
         return self.sparse_type_ids[typeId(C)];
     }
 };

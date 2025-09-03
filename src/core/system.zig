@@ -60,9 +60,9 @@ test "SingleQuery" {
         y: f32,
     };
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var world = World.init(allocator);
     defer world.deinit();
@@ -83,8 +83,8 @@ test "SingleQuery" {
     var count: usize = 0;
     while (iter.next()) |entry| {
         count += 1;
-        const entity, const pos = entry;
-        std.debug.print("entity: {any}, position: {any}\n", .{ entity, pos });
+        const entity, _ = entry;
+        try std.testing.expect(world.entity_registry.isAlive(entity));
     }
     try std.testing.expect(count == 2);
 }
