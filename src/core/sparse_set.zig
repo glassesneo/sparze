@@ -10,6 +10,15 @@ const EntityVersion = entity_module.EntityVersion;
 const getIndex = entity_module.getIndex;
 const getVersion = entity_module.getVersion;
 
+/// Group information for sparse sets
+pub const GroupInfo = struct {
+    size: u32 = 0, // Number of entities in the group at the start of packed array
+
+    pub fn empty(self: GroupInfo) bool {
+        return self.size == 0;
+    }
+};
+
 pub const AbstractSparseSet = struct {
     // entities: []const Entity,
     vtable: *const VTable,
@@ -23,6 +32,10 @@ pub const AbstractSparseSet = struct {
         insertFn: *const fn (*anyopaque, Entity, *anyopaque) anyerror!void,
         containsFn: *const fn (*anyopaque, Entity) bool,
         removeFn: *const fn (*anyopaque, Entity) void,
+        moveToGroupFn: *const fn (*anyopaque, Entity) void,
+        moveFromGroupFn: *const fn (*anyopaque, Entity) void,
+        getGroupSizeFn: *const fn (*anyopaque) u32,
+        getGroupEntitiesFn: *const fn (*anyopaque) []const Entity,
     };
 
     pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime C: type) ?C {
@@ -63,6 +76,22 @@ pub const AbstractSparseSet = struct {
 
     pub fn remove(self: *const AbstractSparseSet, entity: Entity) void {
         return self.vtable.removeFn(self.instance, entity);
+    }
+
+    pub fn moveToGroup(self: *const AbstractSparseSet, entity: Entity) void {
+        return self.vtable.moveToGroupFn(self.instance, entity);
+    }
+
+    pub fn moveFromGroup(self: *const AbstractSparseSet, entity: Entity) void {
+        return self.vtable.moveFromGroupFn(self.instance, entity);
+    }
+
+    pub fn getGroupSize(self: *const AbstractSparseSet) u32 {
+        return self.vtable.getGroupSizeFn(self.instance);
+    }
+
+    pub fn getGroupEntities(self: *const AbstractSparseSet) []const Entity {
+        return self.vtable.getGroupEntitiesFn(self.instance);
     }
 
     pub fn incarnate(self: *const AbstractSparseSet, comptime C: type) *SparseSet(C) {
@@ -131,6 +160,30 @@ pub const AbstractSparseSet = struct {
                     self.remove(entity);
                 }
             }.remove,
+            .moveToGroupFn = struct {
+                fn moveToGroup(ptr: *anyopaque, entity: Entity) void {
+                    const self = castTo(SparseSetType, ptr);
+                    self.moveToGroup(entity);
+                }
+            }.moveToGroup,
+            .moveFromGroupFn = struct {
+                fn moveFromGroup(ptr: *anyopaque, entity: Entity) void {
+                    const self = castTo(SparseSetType, ptr);
+                    self.moveFromGroup(entity);
+                }
+            }.moveFromGroup,
+            .getGroupSizeFn = struct {
+                fn getGroupSize(ptr: *anyopaque) u32 {
+                    const self = castTo(SparseSetType, ptr);
+                    return self.group_info.size;
+                }
+            }.getGroupSize,
+            .getGroupEntitiesFn = struct {
+                fn getGroupEntities(ptr: *anyopaque) []const Entity {
+                    const self = castTo(SparseSetType, ptr);
+                    return self.getGroupEntities();
+                }
+            }.getGroupEntities,
         };
         return .{
             // .entities = instance.packed_array.items,
@@ -163,6 +216,7 @@ pub fn SparseSet(comptime C: type) type {
         sparse_pages: [max_pages]?*SparsePage, // Paginated sparse array
         packed_array: ArrayList(Entity),
         components: ArrayList(Component),
+        group_info: GroupInfo = .{},
 
         /// Initialize a new SparseSet with the given allocator.
         pub fn init(allocator: Allocator) Self {
@@ -317,6 +371,81 @@ pub fn SparseSet(comptime C: type) type {
 
             if (dense_index >= self.packed_array.items.len) return false;
             return entity == self.packed_array.items[dense_index];
+        }
+
+        /// Move entity to group area (at the beginning of packed array)
+        pub fn moveToGroup(self: *Self, entity: Entity) void {
+            if (!self.contains(entity)) return;
+
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index / page_size;
+            const slot_idx = sparse_index % page_size;
+            const page = self.sparse_pages[page_idx].?;
+            const dense_index = page.slots[slot_idx].?;
+
+            // If already in group area, nothing to do
+            if (dense_index < self.group_info.size) return;
+
+            // Swap with first element outside group
+            const swap_index: u16 = @intCast(self.group_info.size);
+            self.swapElements(dense_index, swap_index);
+            self.group_info.size += 1;
+        }
+
+        /// Move entity out of group area
+        pub fn moveFromGroup(self: *Self, entity: Entity) void {
+            if (!self.contains(entity)) return;
+
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index / page_size;
+            const slot_idx = sparse_index % page_size;
+            const page = self.sparse_pages[page_idx].?;
+            const dense_index = page.slots[slot_idx].?;
+
+            // If not in group area, nothing to do
+            if (dense_index >= self.group_info.size) return;
+
+            // Swap with last element in group
+            const swap_index: u16 = @intCast(self.group_info.size - 1);
+            self.swapElements(dense_index, swap_index);
+            self.group_info.size -= 1;
+        }
+
+        fn swapElements(self: *Self, idx1: u16, idx2: u16) void {
+            if (idx1 == idx2) return;
+
+            // Swap in packed array
+            const entity1 = self.packed_array.items[idx1];
+            const entity2 = self.packed_array.items[idx2];
+            self.packed_array.items[idx1] = entity2;
+            self.packed_array.items[idx2] = entity1;
+
+            // Swap components
+            const temp = self.components.items[idx1];
+            self.components.items[idx1] = self.components.items[idx2];
+            self.components.items[idx2] = temp;
+
+            // Update sparse arrays
+            self.updateSparseIndex(entity1, idx2);
+            self.updateSparseIndex(entity2, idx1);
+        }
+
+        fn updateSparseIndex(self: *Self, entity: Entity, new_index: EntityIndex) void {
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index / page_size;
+            const slot_idx = sparse_index % page_size;
+            const page = self.sparse_pages[page_idx].?;
+            page.slots[slot_idx] = new_index;
+        }
+
+        /// Get entities in group (at start of packed array)
+        pub fn getGroupEntities(self: *const Self) []const Entity {
+            return self.packed_array.items[0..self.group_info.size];
+        }
+
+        /// Get components in group (at start of components array)
+        pub fn getGroupComponents(self: *const Self) []const Component {
+            return self.components.items[0..self.group_info.size];
         }
 
         pub fn abstract(self: *Self) AbstractSparseSet {

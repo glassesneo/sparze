@@ -21,10 +21,21 @@ const Query = system_module.Query;
 
 const TypeId = u16;
 const max_type_id = std.math.maxInt(TypeId);
+pub const GroupId = u32;
 
 fn typeId(comptime T: type) TypeId {
     return @intFromError(@field(anyerror, @typeName(T)));
 }
+
+/// Information about a full-owning group
+pub const GroupInfo = struct {
+    id: GroupId,
+    component_types: []TypeId,
+
+    pub fn deinit(self: *GroupInfo, allocator: Allocator) void {
+        allocator.free(self.component_types);
+    }
+};
 
 /// World manages entities and their components in an Entity Component System.
 /// Uses sparse sets for efficient component storage and iteration.
@@ -35,6 +46,8 @@ pub const World = struct {
     dense_type_ids: ArrayList(TypeId),
     component_pool: ArrayList(AbstractSparseSet),
     system_scheduler: SystemScheduler,
+    groups: ArrayList(GroupInfo),
+    next_group_id: GroupId = 0,
 
     /// Initializes a new empty World with the given allocator.
     pub fn init(allocator: Allocator) World {
@@ -45,12 +58,18 @@ pub const World = struct {
             .dense_type_ids = .{},
             .component_pool = .{},
             .system_scheduler = .init(),
+            .groups = .{},
+            .next_group_id = 0,
         };
     }
 
     /// Deinitializes the World, freeing internal dynamic arrays.
     /// Component sparse sets must be deinitialized separately by their owners.
     pub fn deinit(self: *World) void {
+        for (self.groups.items) |*group| {
+            group.deinit(self.allocator);
+        }
+        self.groups.deinit(self.allocator);
         self.dense_type_ids.deinit(self.allocator);
         self.component_pool.deinit(self.allocator);
     }
@@ -97,6 +116,9 @@ pub const World = struct {
         const type_id = self.getTypeId(C) orelse return error.ComponentNotRegistered;
         var component_copy = component;
         try self.component_pool.items[type_id].insert(entity, &component_copy);
+
+        // Update groups when component is added
+        try self.updateGroupsOnAdd(entity, type_id);
     }
 
     /// Adds multiple components to an entity in a single call.
@@ -137,6 +159,10 @@ pub const World = struct {
     /// Complexity: O(1).
     pub fn removeComponent(self: *World, entity: Entity, comptime C: type) void {
         const type_id = self.getTypeId(C) orelse return;
+
+        // Update groups before removing component
+        self.updateGroupsOnRemove(entity, type_id);
+
         self.component_pool.items[type_id].remove(entity);
     }
 
@@ -211,6 +237,154 @@ pub const World = struct {
         }.run;
 
         self.system_scheduler.register(system, stage);
+    }
+
+    /// Create a full-owning group for the given component types
+    pub fn createGroup(self: *World, comptime ComponentTypes: type) !GroupId {
+        const component_fields = std.meta.fields(ComponentTypes);
+        if (component_fields.len == 0) return error.EmptyGroup;
+
+        var component_types = try self.allocator.alloc(TypeId, component_fields.len);
+
+        inline for (component_fields, 0..) |field, i| {
+            const ComponentType = field.type;
+            const type_id = self.getTypeId(ComponentType) orelse return error.ComponentNotRegistered;
+            component_types[i] = type_id;
+        }
+
+        const group_id = self.next_group_id;
+        self.next_group_id += 1;
+
+        try self.groups.append(self.allocator, GroupInfo{
+            .id = group_id,
+            .component_types = component_types,
+        });
+
+        // Populate the group with existing entities that have all components
+        try self.populateGroup(group_id);
+
+        return group_id;
+    }
+
+    /// Get group information by ID
+    pub fn getGroup(self: *const World, group_id: GroupId) ?*const GroupInfo {
+        for (self.groups.items) |*group| {
+            if (group.id == group_id) return group;
+        }
+        return null;
+    }
+
+    /// Get entities in a group (fast iteration)
+    pub fn getGroupEntities(self: *const World, group_id: GroupId) ?[]const Entity {
+        const group = self.getGroup(group_id) orelse return null;
+        if (group.component_types.len == 0) return null;
+
+        const first_type_id = group.component_types[0];
+        return self.component_pool.items[first_type_id].getGroupEntities();
+    }
+
+    /// Get components of a specific type in a group (fast iteration)
+    pub fn getGroupComponents(self: *const World, group_id: GroupId, comptime C: type) ?[]const C {
+        const group = self.getGroup(group_id) orelse return null;
+        const type_id = self.getTypeId(C) orelse return null;
+
+        // Check if this component type is part of the group
+        for (group.component_types) |group_type_id| {
+            if (group_type_id == type_id) {
+                const sparse_set = self.component_pool.items[type_id].incarnate(C);
+                return sparse_set.getGroupComponents();
+            }
+        }
+        return null;
+    }
+
+    /// Populate group with existing entities that have all required components
+    fn populateGroup(self: *World, group_id: GroupId) !void {
+        const group = self.getGroup(group_id) orelse return;
+        if (group.component_types.len == 0) return;
+
+        // Find the shortest sparse set to minimize iterations
+        var min_size: usize = std.math.maxInt(usize);
+        var shortest_type_id: TypeId = group.component_types[0];
+
+        for (group.component_types) |type_id| {
+            const sparse_set = &self.component_pool.items[type_id];
+            const entities = sparse_set.getEntities();
+            if (entities.len < min_size) {
+                min_size = entities.len;
+                shortest_type_id = type_id;
+            }
+        }
+
+        // Iterate through shortest set and check if entities have all components
+        const shortest_set = &self.component_pool.items[shortest_type_id];
+        const entities = shortest_set.getEntities();
+
+        for (entities) |entity| {
+            if (self.entityHasAllComponents(entity, group.component_types)) {
+                self.addEntityToGroup(entity, group);
+            }
+        }
+    }
+
+    /// Check if entity has all required components for a group
+    fn entityHasAllComponents(self: *const World, entity: Entity, component_types: []const TypeId) bool {
+        for (component_types) |type_id| {
+            if (!self.component_pool.items[type_id].contains(entity)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Update groups when component is added to entity
+    fn updateGroupsOnAdd(self: *World, entity: Entity, component_type_id: TypeId) !void {
+        for (self.groups.items) |*group| {
+            // Check if this component type is part of the group
+            var is_group_component = false;
+            for (group.component_types) |type_id| {
+                if (type_id == component_type_id) {
+                    is_group_component = true;
+                    break;
+                }
+            }
+
+            if (is_group_component and self.entityHasAllComponents(entity, group.component_types)) {
+                self.addEntityToGroup(entity, group);
+            }
+        }
+    }
+
+    /// Update groups when component is removed from entity
+    fn updateGroupsOnRemove(self: *World, entity: Entity, component_type_id: TypeId) void {
+        for (self.groups.items) |*group| {
+            // Check if this component type is part of the group
+            var is_group_component = false;
+            for (group.component_types) |type_id| {
+                if (type_id == component_type_id) {
+                    is_group_component = true;
+                    break;
+                }
+            }
+
+            if (is_group_component) {
+                self.removeEntityFromGroup(entity, group);
+            }
+        }
+    }
+
+    /// Add entity to a group (move to group area in all component sparse sets)
+    fn addEntityToGroup(self: *World, entity: Entity, group: *const GroupInfo) void {
+        for (group.component_types) |type_id| {
+            self.component_pool.items[type_id].moveToGroup(entity);
+        }
+    }
+
+    /// Remove entity from a group (move from group area in all component sparse sets)
+    fn removeEntityFromGroup(self: *World, entity: Entity, group: *const GroupInfo) void {
+        for (group.component_types) |type_id| {
+            self.component_pool.items[type_id].moveFromGroup(entity);
+        }
     }
 
     pub fn runSystems(self: *World) !void {
