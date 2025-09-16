@@ -197,7 +197,7 @@ pub const World = struct {
 
                         switch (filter_type) {
                             .single_query => {
-                                system_args[i] = ArgType.init(world);
+                                system_args[i] = try ArgType.init(world);
                             },
                             else => @compileError("Unsupported argument"),
                         }

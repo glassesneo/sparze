@@ -58,28 +58,6 @@ pub const Stage = enum {
     post_process,
 };
 
-// pub const System = struct {
-
-// vtable: *const VTable,
-// const VTable = struct {
-// runFn: SystemType,
-// };
-
-// pub fn run(self: System, world: *World) !void {
-// try self.vtable.runFn(world);
-// }
-
-// pub fn init(f: SystemType) System {
-// const vtable = VTable{
-// .runFn = f,
-// };
-
-// return .{
-// .vtable = &vtable,
-// };
-// }
-// };
-
 pub const FilterType = enum {
     single_query,
     group,
@@ -91,36 +69,15 @@ pub fn SingleQuery(comptime QueryParam: type) type {
 
         pub const filter_type: FilterType = .single_query;
 
-        pub const Iterator = struct {
-            sparse_set: *SparseSet(QueryParam),
-            current_index: Entity,
-
-            pub fn next(self: *Iterator) ?struct { Entity, QueryParam } {
-                while (self.current_index < self.sparse_set.components.items.len) {
-                    const entity = self.sparse_set.packed_array.items[self.current_index];
-                    const component = self.sparse_set.components.items[self.current_index];
-
-                    self.current_index += 1;
-                    return .{ entity, component };
-                }
-                return null;
-            }
-        };
-
         pub const Component = QueryParam;
-        world: *World,
+        entities: []Entity,
+        components: []Component,
 
-        pub fn init(world: *World) Self {
+        pub fn init(world: *World) !Self {
+            const sparse_set = try world.getSparseSet(Component);
             return .{
-                .world = world,
-            };
-        }
-
-        pub fn iterator(self: Self) !Iterator {
-            const sparse_set = try self.world.getSparseSet(QueryParam);
-            return .{
-                .sparse_set = sparse_set,
-                .current_index = 0,
+                .entities = sparse_set.packed_array.items,
+                .components = sparse_set.components.items,
             };
         }
     };
@@ -149,13 +106,12 @@ test "SingleQuery" {
     try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
 
     const MyQuery = SingleQuery(Position);
-    const query = MyQuery.init(&world);
-    var iter = try query.iterator();
+    const query = try MyQuery.init(&world);
 
     var count: usize = 0;
-    while (iter.next()) |entry| {
+    for (query.entities, query.components) |entity, component| {
         count += 1;
-        const entity, _ = entry;
+        _ = component;
         try std.testing.expect(world.entity_registry.isAlive(entity));
     }
     try std.testing.expect(count == 2);

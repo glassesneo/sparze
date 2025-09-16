@@ -13,10 +13,7 @@ const Velocity = struct {
 
 fn exampleSystem(query1: sparze.SingleQuery(Position), query2: sparze.SingleQuery(Velocity)) !void {
     _ = query2;
-    var iter = try query1.iterator();
-
-    while (iter.next()) |entry| {
-        const entity, const pos = entry;
+    for (query1.entities, query1.components) |entity, pos| {
         std.debug.print("entity: {any}, pos: {any}\n", .{ entity, pos });
     }
 }
