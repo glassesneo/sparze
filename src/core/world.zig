@@ -1,4 +1,6 @@
 const std = @import("std");
+const Struct = std.builtin.Type.Struct;
+const StructField = std.builtin.Type.StructField;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
@@ -9,6 +11,13 @@ const Entity = entity_module.Entity;
 const sparse_set_module = @import("sparse_set.zig");
 const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 const SparseSet = sparse_set_module.SparseSet;
+
+const system_module = @import("system.zig");
+const SystemScheduler = system_module.SystemScheduler;
+const Stage = system_module.Stage;
+const FilterType = system_module.FilterType;
+const SingleQuery = system_module.SingleQuery;
+const Query = system_module.Query;
 
 const TypeId = u16;
 const max_type_id = std.math.maxInt(TypeId);
@@ -25,6 +34,7 @@ pub const World = struct {
     sparse_type_ids: [max_type_id]?TypeId,
     dense_type_ids: ArrayList(TypeId),
     component_pool: ArrayList(AbstractSparseSet),
+    system_scheduler: SystemScheduler,
 
     /// Initializes a new empty World with the given allocator.
     pub fn init(allocator: Allocator) World {
@@ -34,6 +44,7 @@ pub const World = struct {
             .sparse_type_ids = [_]?TypeId{null} ** max_type_id,
             .dense_type_ids = .{},
             .component_pool = .{},
+            .system_scheduler = .init(),
         };
     }
 
@@ -145,6 +156,65 @@ pub const World = struct {
 
     pub fn getTypeId(self: *const World, comptime C: type) ?TypeId {
         return self.sparse_type_ids[typeId(C)];
+    }
+
+    pub fn registerSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
+        const SystemType = @TypeOf(system_fn);
+        const system_type_info = switch (@typeInfo(SystemType)) {
+            .@"fn" => |f| f,
+            else => @compileError("Not a function"),
+        };
+
+        const SystemArgsType = comptime construct_type: {
+            var fields: [system_type_info.params.len]StructField = undefined;
+            for (system_type_info.params, 0..) |param, i| {
+                const ArgType = param.type orelse @compileError("Unsupported argument");
+                fields[i] = StructField{
+                    .name = std.fmt.comptimePrint("{d}", .{i}),
+                    .type = ArgType,
+                    .is_comptime = false,
+                    .alignment = @alignOf(ArgType),
+                    .default_value_ptr = null,
+                };
+            }
+            break :construct_type @Type(.{ .@"struct" = .{
+                .layout = .auto,
+                .is_tuple = true,
+                .decls = &.{},
+                .fields = &fields,
+            } });
+        };
+
+        const system = struct {
+            fn run(world: *World) !void {
+                const system_args = construct_system_args: {
+                    var system_args: SystemArgsType = undefined;
+                    inline for (system_type_info.params, 0..) |param, i| {
+                        const ArgType = param.type.?;
+                        if (!@hasDecl(ArgType, "filter_type")) @compileError("Unsupported argument");
+
+                        const filter_type: FilterType = ArgType.filter_type;
+
+                        switch (filter_type) {
+                            .single_query => {
+                                system_args[i] = ArgType.init(world);
+                            },
+                            else => @compileError("Unsupported argument"),
+                        }
+                    }
+
+                    break :construct_system_args system_args;
+                };
+
+                try @call(.auto, system_fn, system_args);
+            }
+        }.run;
+
+        self.system_scheduler.register(system, stage);
+    }
+
+    pub fn runSystems(self: *World) !void {
+        try self.system_scheduler.run(self);
     }
 };
 
