@@ -17,11 +17,9 @@ const SystemScheduler = system_module.SystemScheduler;
 const Stage = system_module.Stage;
 const FilterType = system_module.FilterType;
 const SingleQuery = system_module.SingleQuery;
-const Query = system_module.Query;
 
 const TypeId = u16;
 const max_type_id = std.math.maxInt(TypeId);
-pub const GroupId = u32;
 
 fn typeId(comptime T: type) TypeId {
     return @intFromError(@field(anyerror, @typeName(T)));
@@ -29,7 +27,7 @@ fn typeId(comptime T: type) TypeId {
 
 /// Information about a full-owning group
 pub const GroupInfo = struct {
-    id: GroupId,
+    group_type_id: TypeId, // Unique identifier based on component types tuple
     component_types: []TypeId,
 
     pub fn deinit(self: *GroupInfo, allocator: Allocator) void {
@@ -47,7 +45,6 @@ pub const World = struct {
     component_pool: ArrayList(AbstractSparseSet),
     system_scheduler: SystemScheduler,
     groups: ArrayList(GroupInfo),
-    next_group_id: GroupId = 0,
 
     /// Initializes a new empty World with the given allocator.
     pub fn init(allocator: Allocator) World {
@@ -59,7 +56,6 @@ pub const World = struct {
             .component_pool = .{},
             .system_scheduler = .init(),
             .groups = .{},
-            .next_group_id = 0,
         };
     }
 
@@ -225,7 +221,9 @@ pub const World = struct {
                             .single_query => {
                                 system_args[i] = try ArgType.init(world);
                             },
-                            else => @compileError("Unsupported argument"),
+                            .group => {
+                                system_args[i] = ArgType.init(world);
+                            },
                         }
                     }
 
@@ -240,9 +238,16 @@ pub const World = struct {
     }
 
     /// Create a full-owning group for the given component types
-    pub fn createGroup(self: *World, comptime ComponentTypes: type) !GroupId {
+    pub fn createGroup(self: *World, comptime ComponentTypes: type) !void {
         const component_fields = std.meta.fields(ComponentTypes);
         if (component_fields.len == 0) return error.EmptyGroup;
+
+        const group_type_id = comptime typeId(ComponentTypes);
+
+        // Check if group already exists
+        if (self.getGroupByTypeId(group_type_id) != null) {
+            return; // Group already exists
+        }
 
         var component_types = try self.allocator.alloc(TypeId, component_fields.len);
 
@@ -252,40 +257,40 @@ pub const World = struct {
             component_types[i] = type_id;
         }
 
-        const group_id = self.next_group_id;
-        self.next_group_id += 1;
-
         try self.groups.append(self.allocator, GroupInfo{
-            .id = group_id,
+            .group_type_id = group_type_id,
             .component_types = component_types,
         });
 
         // Populate the group with existing entities that have all components
-        try self.populateGroup(group_id);
-
-        return group_id;
+        try self.populateGroup(ComponentTypes);
     }
 
-    /// Get group information by ID
-    pub fn getGroup(self: *const World, group_id: GroupId) ?*const GroupInfo {
+    /// Get group information by component types
+    fn getGroupByTypeId(self: *const World, group_type_id: TypeId) ?*const GroupInfo {
         for (self.groups.items) |*group| {
-            if (group.id == group_id) return group;
+            if (group.group_type_id == group_type_id) return group;
         }
         return null;
     }
 
+    /// Get group information by component types
+    pub fn getGroup(self: *const World, comptime ComponentTypes: type) ?*const GroupInfo {
+        const group_type_id = comptime typeId(ComponentTypes);
+        return self.getGroupByTypeId(group_type_id);
+    }
+
     /// Get entities in a group (fast iteration)
-    pub fn getGroupEntities(self: *const World, group_id: GroupId) ?[]const Entity {
-        const group = self.getGroup(group_id) orelse return null;
-        if (group.component_types.len == 0) return null;
+    pub fn getGroupEntities(self: *const World, comptime ComponentTypes: type) ?[]const Entity {
+        const group = self.getGroup(ComponentTypes) orelse return null;
 
         const first_type_id = group.component_types[0];
         return self.component_pool.items[first_type_id].getGroupEntities();
     }
 
     /// Get components of a specific type in a group (fast iteration)
-    pub fn getGroupComponents(self: *const World, group_id: GroupId, comptime C: type) ?[]const C {
-        const group = self.getGroup(group_id) orelse return null;
+    pub fn getGroupComponents(self: *const World, comptime ComponentTypes: type, comptime C: type) ?[]const C {
+        const group = self.getGroup(ComponentTypes) orelse return null;
         const type_id = self.getTypeId(C) orelse return null;
 
         // Check if this component type is part of the group
@@ -299,8 +304,8 @@ pub const World = struct {
     }
 
     /// Populate group with existing entities that have all required components
-    fn populateGroup(self: *World, group_id: GroupId) !void {
-        const group = self.getGroup(group_id) orelse return;
+    fn populateGroup(self: *World, comptime ComponentTypes: type) !void {
+        const group = self.getGroup(ComponentTypes) orelse return;
         if (group.component_types.len == 0) return;
 
         // Find the shortest sparse set to minimize iterations

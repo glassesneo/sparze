@@ -43,12 +43,12 @@ pub fn main() !void {
 
     // Create a group for entities with both Position and Velocity
     const MovingEntitiesGroup = struct { Position, Velocity };
-    const group_id = try world.createGroup(MovingEntitiesGroup);
+    try world.createGroup(MovingEntitiesGroup);
 
-    std.debug.print("Created group with ID: {}\n", .{group_id});
+    std.debug.print("Created group for MovingEntitiesGroup\n", .{});
 
     // Get entities in the group (fast iteration)
-    if (world.getGroupEntities(group_id)) |entities| {
+    if (world.getGroupEntities(MovingEntitiesGroup)) |entities| {
         std.debug.print("Group has {} entities\n", .{entities.len});
         for (entities) |entity| {
             std.debug.print("Entity in group: {}\n", .{entity});
@@ -56,14 +56,14 @@ pub fn main() !void {
     }
 
     // Get components from the group (fast iteration)
-    if (world.getGroupComponents(group_id, Position)) |positions| {
+    if (world.getGroupComponents(MovingEntitiesGroup, Position)) |positions| {
         std.debug.print("Positions in group:\n", .{});
         for (positions) |pos| {
             std.debug.print("  ({d}, {d})\n", .{ pos.x, pos.y });
         }
     }
 
-    if (world.getGroupComponents(group_id, Velocity)) |velocities| {
+    if (world.getGroupComponents(MovingEntitiesGroup, Velocity)) |velocities| {
         std.debug.print("Velocities in group:\n", .{});
         for (velocities) |vel| {
             std.debug.print("  ({d}, {d})\n", .{ vel.x, vel.y });
@@ -74,7 +74,7 @@ pub fn main() !void {
     try world.addComponent(e2, Velocity, .{ .x = 5.0, .y = 6.0 });
 
     std.debug.print("\nAfter adding velocity to e2:\n", .{});
-    if (world.getGroupEntities(group_id)) |entities| {
+    if (world.getGroupEntities(MovingEntitiesGroup)) |entities| {
         std.debug.print("Group now has {} entities\n", .{entities.len});
         for (entities) |entity| {
             std.debug.print("Entity in group: {}\n", .{entity});
@@ -85,7 +85,7 @@ pub fn main() !void {
     world.removeComponent(e1, Velocity);
 
     std.debug.print("\nAfter removing velocity from e1:\n", .{});
-    if (world.getGroupEntities(group_id)) |entities| {
+    if (world.getGroupEntities(MovingEntitiesGroup)) |entities| {
         std.debug.print("Group now has {} entities\n", .{entities.len});
         for (entities) |entity| {
             std.debug.print("Entity in group: {}\n", .{entity});

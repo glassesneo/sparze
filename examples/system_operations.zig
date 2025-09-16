@@ -11,10 +11,18 @@ const Velocity = struct {
     y: f32,
 };
 
+const MyGroup = struct { Position, Velocity };
+
 fn exampleSystem(query1: sparze.SingleQuery(Position), query2: sparze.SingleQuery(Velocity)) !void {
     _ = query2;
     for (query1.entities, query1.components) |entity, pos| {
         std.debug.print("entity: {any}, pos: {any}\n", .{ entity, pos });
+    }
+}
+
+fn systemWithGroup(group: sparze.Group(MyGroup)) !void {
+    for (group.getEntities(), group.getArrayOf(Position), group.getArrayOf(Velocity)) |e, pos, vel| {
+        std.debug.print("entity: {any}, pos: {any}, vel: {any}\n", .{ e, pos, vel });
     }
 }
 
@@ -46,7 +54,11 @@ pub fn main() !void {
 
     try world.registerComponent(Velocity, &velocity_sparse_set);
     try world.addComponent(e1, Velocity, .{ .x = 10.0, .y = 30.0 });
+    try world.addComponent(e3, Velocity, .{ .x = 50.0, .y = 60.0 });
 
+    try world.createGroup(MyGroup);
+
+    world.registerSystem(systemWithGroup, .first);
     world.registerSystem(exampleSystem, .update);
     world.registerSystem(systemWithNoQuery, .last);
 

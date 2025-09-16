@@ -13,12 +13,12 @@ pub const GroupInfo = sparse_set_module.GroupInfo;
 
 const system_module = @import("core/system.zig");
 pub const SingleQuery = system_module.SingleQuery;
+pub const Group = system_module.Group;
 pub const Query = system_module.Query;
 pub const Stage = system_module.Stage;
 
 const world_module = @import("core/world.zig");
 pub const World = world_module.World;
-pub const GroupId = world_module.GroupId;
 pub const WorldGroupInfo = world_module.GroupInfo;
 
 test {

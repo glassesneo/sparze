@@ -117,85 +117,14 @@ test "SingleQuery" {
     try std.testing.expect(count == 2);
 }
 
-pub fn Query(comptime QueryParams: type) type {
-    // const Components = @TypeOf(types);
-    const query_fields: []const StructField = std.meta.fields(QueryParams);
-    // @TypeOf(types) makes a comptime type, so create another one for runtime
-    // const Components = runtime_query_types: {
-    // var runtime_type_fields: [query_fields.len]StructField = undefined;
-    // inline for (types, 0..) |Component, i| {
-    // runtime_type_fields[i] = StructField{
-    // .name = std.fmt.comptimePrint("{d}", .{i}),
-    // .type = Component,
-    // .is_comptime = false,
-    // .alignment = @alignOf(Component),
-    // .default_value_ptr = null,
-    // };
-    // }
-    // break :runtime_query_types @Type(.{ .@"struct" = .{
-    // .layout = .auto,
-    // .is_tuple = true,
-    // .decls = &.{},
-    // .fields = &runtime_type_fields,
-    // } });
-    // };
-    // @compileLog(Components);
-
+pub fn Group(comptime GroupQueryParams: type) type {
     return struct {
         const Self = @This();
-        pub const Components = QueryParams;
-        pub const Iterator = struct {
-            // const ReturnParams = @Type(.{ .@"struct" = Struct{
-            // .layout = .auto,
-            // .fields = (&[_]StructField{.{
-            // .name = "0",
-            // .type = Entity,
-            // .is_comptime = false,
-            // .alignment = @alignOf(Entity),
-            // .default_value_ptr = null,
-            // }} ++ params_info.fields),
-            // .is_tuple = true,
-            // .backing_integer = params_info.backing_integer,
-            // .decls = params_info.decls,
-            // } });
-            const SparseSetsType = construct_type: {
-                var fields: [query_fields.len]StructField = undefined;
-                for (query_fields, 0..) |component_struct_field, i| {
-                    const Component = component_struct_field.type;
-                    const SparseSetType = SparseSet(Component);
-                    fields[i] = StructField{
-                        .name = std.fmt.comptimePrint("{d}", .{i}),
-                        .type = *SparseSetType,
-                        .is_comptime = false,
-                        .alignment = @alignOf(*SparseSetType),
-                        .default_value_ptr = null,
-                    };
-                }
-                break :construct_type @Type(.{ .@"struct" = .{
-                    .layout = .auto,
-                    .is_tuple = true,
-                    .decls = &.{},
-                    .fields = &fields,
-                } });
-            };
 
-            sparse_sets: SparseSetsType,
-            max_index: Entity,
-            current_index: Entity,
+        pub const filter_type: FilterType = .group;
 
-            pub fn next(self: *Iterator) ?struct { entity: Entity, components: Components } {
-                while (self.current_index < self.max_index) {
-                    defer self.current_index += 1;
-                    const entity: Entity = 0;
-                    var components: QueryParams = undefined;
-                    inline for (0..query_fields.len) |i| {
-                        components[i] = self.sparse_sets[i].get(entity).?;
-                    }
-                    return .{ .entity = entity, .components = components };
-                }
-                return null;
-            }
-        };
+        pub const Components = GroupQueryParams;
+
         world: *World,
 
         pub fn init(world: *World) Self {
@@ -204,20 +133,12 @@ pub fn Query(comptime QueryParams: type) type {
             };
         }
 
-        pub fn iter(self: Self) !Iterator {
-            var sparse_sets: Iterator.SparseSetsType = undefined;
-            var min_len: usize = entity_module.max_entities;
-            inline for (query_fields, 0..) |component_struct_field, i| {
-                const Component = component_struct_field.type;
-                const sparse_set = try self.world.getSparseSet(Component);
-                sparse_sets[i] = sparse_set;
-                if (sparse_set.components.items.len < min_len) min_len = sparse_set.components.items.len;
-            }
-            return .{
-                .sparse_sets = sparse_sets,
-                .max_index = @intCast(min_len),
-                .current_index = 0,
-            };
+        pub fn getEntities(self: Self) []const Entity {
+            return self.world.getGroupEntities(Components).?;
+        }
+
+        pub fn getArrayOf(self: Self, comptime Component: type) []const Component {
+            return self.world.getGroupComponents(Components, Component).?;
         }
     };
 }
