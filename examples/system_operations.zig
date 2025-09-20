@@ -25,14 +25,16 @@ fn terminationSystem() !void {
 
 fn systemWithNormalQueries(query1: sparze.SingleQuery(Position), query2: sparze.SingleQuery(Velocity)) !void {
     _ = query2;
-    for (query1.entities, query1.components) |entity, pos| {
-        std.debug.print("entity: {any}, pos: {any}\n", .{ entity, pos });
+    for (query1.entities, query1.components) |entity, *pos| {
+        std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y });
+        pos.y -= 1;
     }
 }
 
 fn systemWithGroup(group: sparze.Group(MyGroup)) !void {
-    for (group.getEntities(), group.getArrayOf(Position), group.getArrayOf(Velocity)) |e, pos, vel| {
-        std.debug.print("entity: {any}, pos: {any}, vel: {any}\n", .{ e, pos, vel });
+    for (group.getEntities(), group.getMutArrayOf(Position), group.getArrayOf(Velocity)) |e, *pos, vel| {
+        pos.x += vel.x * 0.02;
+        std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}, vel: {any}\n", .{ e, pos.x, pos.y, vel });
     }
 }
 

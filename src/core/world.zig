@@ -323,6 +323,20 @@ pub const World = struct {
         return null;
     }
 
+    pub fn getGroupComponentsMut(self: *const World, comptime ComponentTypes: type, comptime C: type) ?[]C {
+        const group = self.getGroup(ComponentTypes) orelse return null;
+        const type_id = self.getTypeId(C) orelse return null;
+
+        // Check if this component type is part of the group
+        for (group.component_types) |group_type_id| {
+            if (group_type_id == type_id) {
+                const sparse_set = self.component_pool.items[type_id].incarnate(C);
+                return sparse_set.getGroupComponentsMut();
+            }
+        }
+        return null;
+    }
+
     /// Populate group with existing entities that have all required components
     fn populateGroup(self: *World, comptime ComponentTypes: type) !void {
         const group = self.getGroup(ComponentTypes) orelse return;

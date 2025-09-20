@@ -70,7 +70,7 @@ pub fn SingleQuery(comptime QueryParam: type) type {
         pub const filter_type: FilterType = .single_query;
 
         pub const Component = QueryParam;
-        entities: []Entity,
+        entities: []const Entity,
         components: []Component,
 
         pub fn init(world: *World) !Self {
@@ -139,6 +139,10 @@ pub fn Group(comptime GroupQueryParams: type) type {
 
         pub fn getArrayOf(self: Self, comptime Component: type) []const Component {
             return self.world.getGroupComponents(Components, Component).?;
+        }
+
+        pub fn getMutArrayOf(self: Self, comptime Component: type) []Component {
+            return self.world.getGroupComponentsMut(Components, Component).?;
         }
     };
 }

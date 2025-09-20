@@ -448,6 +448,10 @@ pub fn SparseSet(comptime C: type) type {
             return self.components.items[0..self.group_info.size];
         }
 
+        pub fn getGroupComponentsMut(self: *const Self) []Component {
+            return self.components.items[0..self.group_info.size];
+        }
+
         pub fn abstract(self: *Self) AbstractSparseSet {
             return AbstractSparseSet.init(Component, self);
         }
