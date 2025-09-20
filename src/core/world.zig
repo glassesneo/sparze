@@ -44,6 +44,9 @@ pub const World = struct {
     dense_type_ids: ArrayList(TypeId),
     component_pool: ArrayList(AbstractSparseSet),
     system_scheduler: SystemScheduler,
+    startup_system_scheduler: SystemScheduler,
+    terminate_system_scheduler: SystemScheduler,
+
     groups: ArrayList(GroupInfo),
 
     /// Initializes a new empty World with the given allocator.
@@ -55,6 +58,8 @@ pub const World = struct {
             .dense_type_ids = .{},
             .component_pool = .{},
             .system_scheduler = .init(),
+            .startup_system_scheduler = .init(),
+            .terminate_system_scheduler = .init(),
             .groups = .{},
         };
     }
@@ -180,34 +185,36 @@ pub const World = struct {
         return self.sparse_type_ids[typeId(C)];
     }
 
-    pub fn registerSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
+    fn constructSystemArgsType(comptime info: std.builtin.Type.Fn) type {
+        var fields: [info.params.len]StructField = undefined;
+        for (info.params, 0..) |param, i| {
+            const ArgType = param.type orelse @compileError("Unsupported argument");
+            fields[i] = StructField{
+                .name = std.fmt.comptimePrint("{d}", .{i}),
+                .type = ArgType,
+                .is_comptime = false,
+                .alignment = @alignOf(ArgType),
+                .default_value_ptr = null,
+            };
+        }
+        return @Type(.{ .@"struct" = .{
+            .layout = .auto,
+            .is_tuple = true,
+            .decls = &.{},
+            .fields = &fields,
+        } });
+    }
+
+    fn createSystemFunction(comptime system_fn: anytype) (fn (*World) anyerror!void) {
         const SystemType = @TypeOf(system_fn);
         const system_type_info = switch (@typeInfo(SystemType)) {
             .@"fn" => |f| f,
             else => @compileError("Not a function"),
         };
 
-        const SystemArgsType = comptime construct_type: {
-            var fields: [system_type_info.params.len]StructField = undefined;
-            for (system_type_info.params, 0..) |param, i| {
-                const ArgType = param.type orelse @compileError("Unsupported argument");
-                fields[i] = StructField{
-                    .name = std.fmt.comptimePrint("{d}", .{i}),
-                    .type = ArgType,
-                    .is_comptime = false,
-                    .alignment = @alignOf(ArgType),
-                    .default_value_ptr = null,
-                };
-            }
-            break :construct_type @Type(.{ .@"struct" = .{
-                .layout = .auto,
-                .is_tuple = true,
-                .decls = &.{},
-                .fields = &fields,
-            } });
-        };
+        const SystemArgsType = constructSystemArgsType(system_type_info);
 
-        const system = struct {
+        return struct {
             fn run(world: *World) !void {
                 const system_args = construct_system_args: {
                     var system_args: SystemArgsType = undefined;
@@ -233,8 +240,21 @@ pub const World = struct {
                 try @call(.auto, system_fn, system_args);
             }
         }.run;
+    }
 
+    pub fn registerSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
+        const system = createSystemFunction(system_fn);
         self.system_scheduler.register(system, stage);
+    }
+
+    pub fn registerStartupSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
+        const system = createSystemFunction(system_fn);
+        self.startup_system_scheduler.register(system, stage);
+    }
+
+    pub fn registerTerminateSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
+        const system = createSystemFunction(system_fn);
+        self.terminate_system_scheduler.register(system, stage);
     }
 
     /// Create a full-owning group for the given component types
@@ -394,6 +414,14 @@ pub const World = struct {
 
     pub fn runSystems(self: *World) !void {
         try self.system_scheduler.run(self);
+    }
+
+    pub fn runStartupSystems(self: *World) !void {
+        try self.startup_system_scheduler.run(self);
+    }
+
+    pub fn runTerminateSystems(self: *World) !void {
+        try self.terminate_system_scheduler.run(self);
     }
 };
 

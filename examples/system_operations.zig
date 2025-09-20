@@ -13,7 +13,17 @@ const Velocity = struct {
 
 const MyGroup = struct { Position, Velocity };
 
-fn exampleSystem(query1: sparze.SingleQuery(Position), query2: sparze.SingleQuery(Velocity)) !void {
+const PositionQuery = sparze.SingleQuery(Position);
+
+fn startupSystem() !void {
+    std.debug.print("Startup system called!\n", .{});
+}
+
+fn terminationSystem() !void {
+    std.debug.print("Termination system called!\n", .{});
+}
+
+fn systemWithNormalQueries(query1: sparze.SingleQuery(Position), query2: sparze.SingleQuery(Velocity)) !void {
     _ = query2;
     for (query1.entities, query1.components) |entity, pos| {
         std.debug.print("entity: {any}, pos: {any}\n", .{ entity, pos });
@@ -58,9 +68,16 @@ pub fn main() !void {
 
     try world.createGroup(MyGroup);
 
+    world.registerStartupSystem(startupSystem, .first);
     world.registerSystem(systemWithGroup, .first);
-    world.registerSystem(exampleSystem, .update);
+    world.registerSystem(systemWithNormalQueries, .update);
     world.registerSystem(systemWithNoQuery, .last);
+    world.registerTerminateSystem(terminationSystem, .first);
 
-    try world.runSystems();
+    try world.runStartupSystems();
+
+    for (0..10) |_|
+        try world.runSystems();
+
+    try world.runTerminateSystems();
 }
