@@ -20,43 +20,43 @@ const max_systems_per_stage = 1024;
 
 const SystemType = *const fn (*World) anyerror!void;
 
-pub const SystemScheduler = struct {
-    systemsByStages: EnumArray(Stage, [max_systems_per_stage]SystemType),
-    systemCounts: EnumArray(Stage, u5),
+// pub const SystemScheduler = struct {
+// systemsByStages: EnumArray(Stage, [max_systems_per_stage]SystemType),
+// systemCounts: EnumArray(Stage, u5),
 
-    pub fn init() SystemScheduler {
-        return .{
-            .systemsByStages = .initFill([_]SystemType{undefined} ** max_systems_per_stage),
-            .systemCounts = .initFill(0),
-        };
-    }
+// pub fn init() SystemScheduler {
+// return .{
+// .systemsByStages = .initFill([_]SystemType{undefined} ** max_systems_per_stage),
+// .systemCounts = .initFill(0),
+// };
+// }
 
-    pub fn register(self: *SystemScheduler, system: SystemType, stage: Stage) void {
-        const count_ptr = self.systemCounts.getPtr(stage);
-        self.systemsByStages.getPtr(stage)[count_ptr.*] = system;
-        count_ptr.* += 1;
-    }
+// pub fn register(self: *SystemScheduler, system: SystemType, stage: Stage) void {
+// const count_ptr = self.systemCounts.getPtr(stage);
+// self.systemsByStages.getPtr(stage)[count_ptr.*] = system;
+// count_ptr.* += 1;
+// }
 
-    pub fn run(self: *SystemScheduler, world: *World) !void {
-        for (self.systemsByStages.values, self.systemCounts.values) |systems, count| {
-            for (0..count) |i| {
-                try systems[i](world);
-            }
-        }
-    }
-};
+// pub fn run(self: *SystemScheduler, world: *World) !void {
+// for (self.systemsByStages.values, self.systemCounts.values) |systems, count| {
+// for (0..count) |i| {
+// try systems[i](world);
+// }
+// }
+// }
+// };
 
-pub const Stage = enum {
-    first,
-    pre_update,
-    update,
-    post_update,
-    pre_render,
-    render,
-    post_render,
-    last,
-    post_process,
-};
+// pub const Stage = enum {
+// first,
+// pre_update,
+// update,
+// post_update,
+// pre_render,
+// render,
+// post_render,
+// last,
+// post_process,
+// };
 
 pub const FilterType = enum {
     single_query,

@@ -70,16 +70,16 @@ pub fn main() !void {
 
     try world.createGroup(MyGroup);
 
-    world.registerStartupSystem(startupSystem, .first);
-    world.registerSystem(systemWithGroup, .first);
-    world.registerSystem(systemWithNormalQueries, .update);
-    world.registerSystem(systemWithNoQuery, .last);
-    world.registerTerminateSystem(terminationSystem, .first);
+    // world.registerStartupSystem(startupSystem, .first);
+    // world.registerSystem(systemWithGroup, .first);
+    // world.registerSystem(systemWithNormalQueries, .update);
+    // world.registerSystem(systemWithNoQuery, .last);
+    // world.registerTerminateSystem(terminationSystem, .first);
 
-    try world.runStartupSystems();
+    // try world.runStartupSystems();
 
-    for (0..10) |_|
-        try world.runSystems();
+    // for (0..10) |_|
+    // try world.runSystems();
 
-    try world.runTerminateSystems();
+    // try world.runTerminateSystems();
 }

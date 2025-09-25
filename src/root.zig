@@ -14,7 +14,7 @@ pub const GroupInfo = sparse_set_module.GroupInfo;
 const system_module = @import("core/system.zig");
 pub const SingleQuery = system_module.SingleQuery;
 pub const Group = system_module.Group;
-pub const Stage = system_module.Stage;
+// pub const Stage = system_module.Stage;
 
 const world_module = @import("core/world.zig");
 pub const World = world_module.World;

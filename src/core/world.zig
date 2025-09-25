@@ -13,7 +13,7 @@ const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 const SparseSet = sparse_set_module.SparseSet;
 
 const system_module = @import("system.zig");
-const SystemScheduler = system_module.SystemScheduler;
+// const SystemScheduler = system_module.SystemScheduler;
 const Stage = system_module.Stage;
 const FilterType = system_module.FilterType;
 const SingleQuery = system_module.SingleQuery;
@@ -43,9 +43,9 @@ pub const World = struct {
     sparse_type_ids: [max_type_id]?TypeId,
     dense_type_ids: ArrayList(TypeId),
     component_pool: ArrayList(AbstractSparseSet),
-    system_scheduler: SystemScheduler,
-    startup_system_scheduler: SystemScheduler,
-    terminate_system_scheduler: SystemScheduler,
+    // system_scheduler: SystemScheduler,
+    // startup_system_scheduler: SystemScheduler,
+    // terminate_system_scheduler: SystemScheduler,
 
     groups: ArrayList(GroupInfo),
 
@@ -57,9 +57,9 @@ pub const World = struct {
             .sparse_type_ids = [_]?TypeId{null} ** max_type_id,
             .dense_type_ids = .{},
             .component_pool = .{},
-            .system_scheduler = .init(),
-            .startup_system_scheduler = .init(),
-            .terminate_system_scheduler = .init(),
+            // .system_scheduler = .init(),
+            // .startup_system_scheduler = .init(),
+            // .terminate_system_scheduler = .init(),
             .groups = .{},
         };
     }
@@ -242,20 +242,20 @@ pub const World = struct {
         }.run;
     }
 
-    pub fn registerSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
-        const system = createSystemFunction(system_fn);
-        self.system_scheduler.register(system, stage);
-    }
+    // pub fn registerSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
+    // const system = createSystemFunction(system_fn);
+    // self.system_scheduler.register(system, stage);
+    // }
 
-    pub fn registerStartupSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
-        const system = createSystemFunction(system_fn);
-        self.startup_system_scheduler.register(system, stage);
-    }
+    // pub fn registerStartupSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
+    // const system = createSystemFunction(system_fn);
+    // self.startup_system_scheduler.register(system, stage);
+    // }
 
-    pub fn registerTerminateSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
-        const system = createSystemFunction(system_fn);
-        self.terminate_system_scheduler.register(system, stage);
-    }
+    // pub fn registerTerminateSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
+    // const system = createSystemFunction(system_fn);
+    // self.terminate_system_scheduler.register(system, stage);
+    // }
 
     /// Create a full-owning group for the given component types
     pub fn createGroup(self: *World, comptime ComponentTypes: type) !void {
@@ -426,17 +426,17 @@ pub const World = struct {
         }
     }
 
-    pub fn runSystems(self: *World) !void {
-        try self.system_scheduler.run(self);
-    }
+    // pub fn runSystems(self: *World) !void {
+    // try self.system_scheduler.run(self);
+    // }
 
-    pub fn runStartupSystems(self: *World) !void {
-        try self.startup_system_scheduler.run(self);
-    }
+    // pub fn runStartupSystems(self: *World) !void {
+    // try self.startup_system_scheduler.run(self);
+    // }
 
-    pub fn runTerminateSystems(self: *World) !void {
-        try self.terminate_system_scheduler.run(self);
-    }
+    // pub fn runTerminateSystems(self: *World) !void {
+    // try self.terminate_system_scheduler.run(self);
+    // }
 };
 
 test "World entity creation and destruction" {
