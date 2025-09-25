@@ -16,47 +16,8 @@ const SparseSet = sparse_set_module.SparseSet;
 const world_module = @import("world.zig");
 const World = world_module.World;
 
-const max_systems_per_stage = 1024;
-
-const SystemType = *const fn (*World) anyerror!void;
-
-// pub const SystemScheduler = struct {
-// systemsByStages: EnumArray(Stage, [max_systems_per_stage]SystemType),
-// systemCounts: EnumArray(Stage, u5),
-
-// pub fn init() SystemScheduler {
-// return .{
-// .systemsByStages = .initFill([_]SystemType{undefined} ** max_systems_per_stage),
-// .systemCounts = .initFill(0),
-// };
-// }
-
-// pub fn register(self: *SystemScheduler, system: SystemType, stage: Stage) void {
-// const count_ptr = self.systemCounts.getPtr(stage);
-// self.systemsByStages.getPtr(stage)[count_ptr.*] = system;
-// count_ptr.* += 1;
-// }
-
-// pub fn run(self: *SystemScheduler, world: *World) !void {
-// for (self.systemsByStages.values, self.systemCounts.values) |systems, count| {
-// for (0..count) |i| {
-// try systems[i](world);
-// }
-// }
-// }
-// };
-
-// pub const Stage = enum {
-// first,
-// pre_update,
-// update,
-// post_update,
-// pre_render,
-// render,
-// post_render,
-// last,
-// post_process,
-// };
+pub const SystemType = fn (*World) anyerror!void;
+pub const SystemPointerType = *const SystemType;
 
 pub const FilterType = enum {
     single_query,
@@ -145,4 +106,60 @@ pub fn Group(comptime GroupQueryParams: type) type {
             return self.world.getGroupComponentsMut(Components, Component).?;
         }
     };
+}
+
+fn constructSystemArgsType(comptime info: std.builtin.Type.Fn) type {
+    var fields: [info.params.len]StructField = undefined;
+    for (info.params, 0..) |param, i| {
+        const ArgType = param.type orelse @compileError("Unsupported argument");
+        fields[i] = StructField{
+            .name = std.fmt.comptimePrint("{d}", .{i}),
+            .type = ArgType,
+            .is_comptime = false,
+            .alignment = @alignOf(ArgType),
+            .default_value_ptr = null,
+        };
+    }
+    return @Type(.{ .@"struct" = .{
+        .layout = .auto,
+        .is_tuple = true,
+        .decls = &.{},
+        .fields = &fields,
+    } });
+}
+
+pub fn createSystemFunction(comptime system_fn: anytype) SystemType {
+    const system_type_info = switch (@typeInfo(@TypeOf(system_fn))) {
+        .@"fn" => |f| f,
+        else => @compileError("Not a function"),
+    };
+
+    const SystemArgsType = constructSystemArgsType(system_type_info);
+
+    return struct {
+        fn run(world: *World) !void {
+            const system_args = construct_system_args: {
+                var system_args: SystemArgsType = undefined;
+                inline for (system_type_info.params, 0..) |param, i| {
+                    const ArgType = param.type.?;
+                    if (!@hasDecl(ArgType, "filter_type")) @compileError("Unsupported argument");
+
+                    const filter_type: FilterType = ArgType.filter_type;
+
+                    switch (filter_type) {
+                        .single_query => {
+                            system_args[i] = try ArgType.init(world);
+                        },
+                        .group => {
+                            system_args[i] = ArgType.init(world);
+                        },
+                    }
+                }
+
+                break :construct_system_args system_args;
+            };
+
+            try @call(.auto, system_fn, system_args);
+        }
+    }.run;
 }

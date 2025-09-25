@@ -11,6 +11,14 @@ const Velocity = struct {
     y: f32,
 };
 
+const SystemScheduler = std.ArrayList(sparze.SystemPointerType);
+
+fn run(scheduler: SystemScheduler, world: *sparze.World) !void {
+    for (scheduler.items) |system| {
+        try system(world);
+    }
+}
+
 const MyGroup = struct { Position, Velocity };
 
 const PositionQuery = sparze.SingleQuery(Position);
@@ -70,16 +78,23 @@ pub fn main() !void {
 
     try world.createGroup(MyGroup);
 
-    // world.registerStartupSystem(startupSystem, .first);
-    // world.registerSystem(systemWithGroup, .first);
-    // world.registerSystem(systemWithNormalQueries, .update);
-    // world.registerSystem(systemWithNoQuery, .last);
-    // world.registerTerminateSystem(terminationSystem, .first);
+    var systems: SystemScheduler = .{};
+    defer systems.deinit(allocator);
 
-    // try world.runStartupSystems();
+    var startup_systems: SystemScheduler = .{};
+    defer startup_systems.deinit(allocator);
+    var terminate_systems: SystemScheduler = .{};
+    defer terminate_systems.deinit(allocator);
 
-    // for (0..10) |_|
-    // try world.runSystems();
+    try startup_systems.append(allocator, sparze.createSystemFunction(startupSystem));
+    try systems.append(allocator, sparze.createSystemFunction(systemWithGroup));
+    try systems.append(allocator, sparze.createSystemFunction(systemWithNormalQueries));
+    try systems.append(allocator, sparze.createSystemFunction(systemWithNoQuery));
+    try terminate_systems.append(allocator, sparze.createSystemFunction(terminationSystem));
 
-    // try world.runTerminateSystems();
+    try run(startup_systems, &world);
+    for (0..10) |_| {
+        try run(systems, &world);
+    }
+    try run(terminate_systems, &world);
 }

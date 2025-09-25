@@ -43,9 +43,6 @@ pub const World = struct {
     sparse_type_ids: [max_type_id]?TypeId,
     dense_type_ids: ArrayList(TypeId),
     component_pool: ArrayList(AbstractSparseSet),
-    // system_scheduler: SystemScheduler,
-    // startup_system_scheduler: SystemScheduler,
-    // terminate_system_scheduler: SystemScheduler,
 
     groups: ArrayList(GroupInfo),
 
@@ -57,9 +54,6 @@ pub const World = struct {
             .sparse_type_ids = [_]?TypeId{null} ** max_type_id,
             .dense_type_ids = .{},
             .component_pool = .{},
-            // .system_scheduler = .init(),
-            // .startup_system_scheduler = .init(),
-            // .terminate_system_scheduler = .init(),
             .groups = .{},
         };
     }
@@ -184,78 +178,6 @@ pub const World = struct {
     pub fn getTypeId(self: *const World, comptime C: type) ?TypeId {
         return self.sparse_type_ids[typeId(C)];
     }
-
-    fn constructSystemArgsType(comptime info: std.builtin.Type.Fn) type {
-        var fields: [info.params.len]StructField = undefined;
-        for (info.params, 0..) |param, i| {
-            const ArgType = param.type orelse @compileError("Unsupported argument");
-            fields[i] = StructField{
-                .name = std.fmt.comptimePrint("{d}", .{i}),
-                .type = ArgType,
-                .is_comptime = false,
-                .alignment = @alignOf(ArgType),
-                .default_value_ptr = null,
-            };
-        }
-        return @Type(.{ .@"struct" = .{
-            .layout = .auto,
-            .is_tuple = true,
-            .decls = &.{},
-            .fields = &fields,
-        } });
-    }
-
-    fn createSystemFunction(comptime system_fn: anytype) (fn (*World) anyerror!void) {
-        const SystemType = @TypeOf(system_fn);
-        const system_type_info = switch (@typeInfo(SystemType)) {
-            .@"fn" => |f| f,
-            else => @compileError("Not a function"),
-        };
-
-        const SystemArgsType = constructSystemArgsType(system_type_info);
-
-        return struct {
-            fn run(world: *World) !void {
-                const system_args = construct_system_args: {
-                    var system_args: SystemArgsType = undefined;
-                    inline for (system_type_info.params, 0..) |param, i| {
-                        const ArgType = param.type.?;
-                        if (!@hasDecl(ArgType, "filter_type")) @compileError("Unsupported argument");
-
-                        const filter_type: FilterType = ArgType.filter_type;
-
-                        switch (filter_type) {
-                            .single_query => {
-                                system_args[i] = try ArgType.init(world);
-                            },
-                            .group => {
-                                system_args[i] = ArgType.init(world);
-                            },
-                        }
-                    }
-
-                    break :construct_system_args system_args;
-                };
-
-                try @call(.auto, system_fn, system_args);
-            }
-        }.run;
-    }
-
-    // pub fn registerSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
-    // const system = createSystemFunction(system_fn);
-    // self.system_scheduler.register(system, stage);
-    // }
-
-    // pub fn registerStartupSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
-    // const system = createSystemFunction(system_fn);
-    // self.startup_system_scheduler.register(system, stage);
-    // }
-
-    // pub fn registerTerminateSystem(self: *World, comptime system_fn: anytype, stage: Stage) void {
-    // const system = createSystemFunction(system_fn);
-    // self.terminate_system_scheduler.register(system, stage);
-    // }
 
     /// Create a full-owning group for the given component types
     pub fn createGroup(self: *World, comptime ComponentTypes: type) !void {
