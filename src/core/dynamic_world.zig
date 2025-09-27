@@ -37,7 +37,7 @@ pub const GroupInfo = struct {
 
 /// World manages entities and their components in an Entity Component System.
 /// Uses sparse sets for efficient component storage and iteration.
-pub const World = struct {
+pub const DynamicWorld = struct {
     allocator: Allocator,
     entity_registry: EntityRegistry,
     sparse_type_ids: [max_type_id]?TypeId,
@@ -47,7 +47,7 @@ pub const World = struct {
     groups: ArrayList(GroupInfo),
 
     /// Initializes a new empty World with the given allocator.
-    pub fn init(allocator: Allocator) World {
+    pub fn init(allocator: Allocator) DynamicWorld {
         return .{
             .allocator = allocator,
             .entity_registry = .init(),
@@ -60,7 +60,7 @@ pub const World = struct {
 
     /// Deinitializes the World, freeing internal dynamic arrays.
     /// Component sparse sets must be deinitialized separately by their owners.
-    pub fn deinit(self: *World) void {
+    pub fn deinit(self: *DynamicWorld) void {
         for (self.groups.items) |*group| {
             group.deinit(self.allocator);
         }
@@ -71,14 +71,14 @@ pub const World = struct {
 
     /// Creates a new Entity identifier, recycling destroyed entities when available.
     /// Complexity: O(1).
-    pub fn createEntity(self: *World) Entity {
+    pub fn createEntity(self: *DynamicWorld) Entity {
         return self.entity_registry.create();
     }
 
     /// Destroys an Entity and removes it from all registered component pools.
     /// The entity identifier becomes invalid and may be recycled for future entities.
     /// Complexity: O(c) where c = number of registered component types.
-    pub fn destroyEntity(self: *World, entity: Entity) void {
+    pub fn destroyEntity(self: *DynamicWorld, entity: Entity) void {
         self.entity_registry.destroy(entity);
         for (self.component_pool.items) |component| {
             component.remove(entity);
@@ -89,7 +89,7 @@ pub const World = struct {
     /// Re-registering the same type replaces the previous sparse set.
     /// The sparse set lifetime must exceed the World's lifetime.
     /// Complexity: O(1) amortized (ArrayList may reallocate).
-    pub fn registerComponent(self: *World, comptime C: type, component_sparse_set: *SparseSet(C)) !void {
+    pub fn registerComponent(self: *DynamicWorld, comptime C: type, component_sparse_set: *SparseSet(C)) !void {
         const sparse_index = comptime typeId(C);
         const abstract_sparse_set = component_sparse_set.abstract();
         if (self.sparse_type_ids[sparse_index]) |dense_index| {
@@ -107,7 +107,7 @@ pub const World = struct {
     /// Adds or replaces a component for the given entity.
     /// Returns ComponentNotRegistered if the component type is not registered.
     /// Complexity: O(1) amortized (SparseSet may reallocate).
-    pub fn addComponent(self: *World, entity: Entity, comptime C: type, component: C) !void {
+    pub fn addComponent(self: *DynamicWorld, entity: Entity, comptime C: type, component: C) !void {
         const type_id = self.getTypeId(C) orelse return error.ComponentNotRegistered;
         var component_copy = component;
         try self.component_pool.items[type_id].insert(entity, &component_copy);
@@ -119,7 +119,7 @@ pub const World = struct {
     /// Adds multiple components to an entity in a single call.
     /// Each component type must be registered before calling this function.
     /// Complexity: O(n) where n = number of components in the tuple.
-    pub fn addComponents(self: *World, entity: Entity, comptime types: anytype) !void {
+    pub fn addComponents(self: *DynamicWorld, entity: Entity, comptime types: anytype) !void {
         inline for (types) |component| {
             const C = @TypeOf(component);
             try self.addComponent(entity, C, component);
@@ -129,7 +129,7 @@ pub const World = struct {
     /// Retrieves a component for the given entity, if present.
     /// Returns null if the entity doesn't have the component or the type is not registered.
     /// Complexity: O(1).
-    pub fn getComponent(self: *World, entity: Entity, comptime C: type) ?C {
+    pub fn getComponent(self: *DynamicWorld, entity: Entity, comptime C: type) ?C {
         const type_id = self.getTypeId(C) orelse return null;
         return self.component_pool.items[type_id].get(entity, C);
     }
@@ -137,14 +137,14 @@ pub const World = struct {
     /// Checks if an entity is currently alive and valid.
     /// Returns false for destroyed or never-allocated entities.
     /// Complexity: O(1).
-    pub fn isAlive(self: *const World, entity: Entity) bool {
+    pub fn isAlive(self: *const DynamicWorld, entity: Entity) bool {
         return self.entity_registry.isAlive(entity);
     }
 
     /// Checks if an entity has a specific component type.
     /// Returns false if the entity doesn't have the component or the type is not registered.
     /// Complexity: O(1).
-    pub fn hasComponent(self: *const World, entity: Entity, comptime C: type) bool {
+    pub fn hasComponent(self: *const DynamicWorld, entity: Entity, comptime C: type) bool {
         const type_id = self.getTypeId(C) orelse return false;
         return self.component_pool.items[type_id].contains(entity);
     }
@@ -152,7 +152,7 @@ pub const World = struct {
     /// Removes a component from an entity if it exists.
     /// Does nothing if the entity doesn't have the component or the type is not registered.
     /// Complexity: O(1).
-    pub fn removeComponent(self: *World, entity: Entity, comptime C: type) void {
+    pub fn removeComponent(self: *DynamicWorld, entity: Entity, comptime C: type) void {
         const type_id = self.getTypeId(C) orelse return;
 
         // Update groups before removing component
@@ -164,23 +164,23 @@ pub const World = struct {
     /// Creates an entity and adds multiple components in one call.
     /// Each component type must be registered before calling this function.
     /// Complexity: O(n) where n = number of components in the tuple.
-    pub fn createEntityWith(self: *World, comptime components: anytype) !Entity {
+    pub fn createEntityWith(self: *DynamicWorld, comptime components: anytype) !Entity {
         const entity = self.createEntity();
         try self.addComponents(entity, components);
         return entity;
     }
 
-    pub fn getSparseSet(self: *World, comptime C: type) !*SparseSet(C) {
+    pub fn getSparseSet(self: *DynamicWorld, comptime C: type) !*SparseSet(C) {
         const type_id = self.getTypeId(C) orelse return error.ComponentNotRegistered;
         return self.component_pool.items[type_id].incarnate(C);
     }
 
-    pub fn getTypeId(self: *const World, comptime C: type) ?TypeId {
+    pub fn getTypeId(self: *const DynamicWorld, comptime C: type) ?TypeId {
         return self.sparse_type_ids[typeId(C)];
     }
 
     /// Create a full-owning group for the given component types
-    pub fn createGroup(self: *World, comptime ComponentTypes: type) !void {
+    pub fn createGroup(self: *DynamicWorld, comptime ComponentTypes: type) !void {
         const component_fields = std.meta.fields(ComponentTypes);
         if (component_fields.len == 0) return error.EmptyGroup;
 
@@ -209,7 +209,7 @@ pub const World = struct {
     }
 
     /// Get group information by component types
-    fn getGroupByTypeId(self: *const World, group_type_id: TypeId) ?*const GroupInfo {
+    fn getGroupByTypeId(self: *const DynamicWorld, group_type_id: TypeId) ?*const GroupInfo {
         for (self.groups.items) |*group| {
             if (group.group_type_id == group_type_id) return group;
         }
@@ -217,13 +217,13 @@ pub const World = struct {
     }
 
     /// Get group information by component types
-    pub fn getGroup(self: *const World, comptime ComponentTypes: type) ?*const GroupInfo {
+    pub fn getGroup(self: *const DynamicWorld, comptime ComponentTypes: type) ?*const GroupInfo {
         const group_type_id = comptime typeId(ComponentTypes);
         return self.getGroupByTypeId(group_type_id);
     }
 
     /// Get entities in a group (fast iteration)
-    pub fn getGroupEntities(self: *const World, comptime ComponentTypes: type) ?[]const Entity {
+    pub fn getGroupEntities(self: *const DynamicWorld, comptime ComponentTypes: type) ?[]const Entity {
         const group = self.getGroup(ComponentTypes) orelse return null;
 
         const first_type_id = group.component_types[0];
@@ -231,7 +231,7 @@ pub const World = struct {
     }
 
     /// Get components of a specific type in a group (fast iteration)
-    pub fn getGroupComponents(self: *const World, comptime ComponentTypes: type, comptime C: type) ?[]const C {
+    pub fn getGroupComponents(self: *const DynamicWorld, comptime ComponentTypes: type, comptime C: type) ?[]const C {
         const group = self.getGroup(ComponentTypes) orelse return null;
         const type_id = self.getTypeId(C) orelse return null;
 
@@ -245,7 +245,7 @@ pub const World = struct {
         return null;
     }
 
-    pub fn getGroupComponentsMut(self: *const World, comptime ComponentTypes: type, comptime C: type) ?[]C {
+    pub fn getGroupComponentsMut(self: *const DynamicWorld, comptime ComponentTypes: type, comptime C: type) ?[]C {
         const group = self.getGroup(ComponentTypes) orelse return null;
         const type_id = self.getTypeId(C) orelse return null;
 
@@ -260,7 +260,7 @@ pub const World = struct {
     }
 
     /// Populate group with existing entities that have all required components
-    fn populateGroup(self: *World, comptime ComponentTypes: type) !void {
+    fn populateGroup(self: *DynamicWorld, comptime ComponentTypes: type) !void {
         const group = self.getGroup(ComponentTypes) orelse return;
         if (group.component_types.len == 0) return;
 
@@ -289,7 +289,7 @@ pub const World = struct {
     }
 
     /// Check if entity has all required components for a group
-    fn entityHasAllComponents(self: *const World, entity: Entity, component_types: []const TypeId) bool {
+    fn entityHasAllComponents(self: *const DynamicWorld, entity: Entity, component_types: []const TypeId) bool {
         for (component_types) |type_id| {
             if (!self.component_pool.items[type_id].contains(entity)) {
                 return false;
@@ -299,7 +299,7 @@ pub const World = struct {
     }
 
     /// Update groups when component is added to entity
-    fn updateGroupsOnAdd(self: *World, entity: Entity, component_type_id: TypeId) !void {
+    fn updateGroupsOnAdd(self: *DynamicWorld, entity: Entity, component_type_id: TypeId) !void {
         for (self.groups.items) |*group| {
             // Check if this component type is part of the group
             var is_group_component = false;
@@ -317,7 +317,7 @@ pub const World = struct {
     }
 
     /// Update groups when component is removed from entity
-    fn updateGroupsOnRemove(self: *World, entity: Entity, component_type_id: TypeId) void {
+    fn updateGroupsOnRemove(self: *DynamicWorld, entity: Entity, component_type_id: TypeId) void {
         for (self.groups.items) |*group| {
             // Check if this component type is part of the group
             var is_group_component = false;
@@ -335,30 +335,18 @@ pub const World = struct {
     }
 
     /// Add entity to a group (move to group area in all component sparse sets)
-    fn addEntityToGroup(self: *World, entity: Entity, group: *const GroupInfo) void {
+    fn addEntityToGroup(self: *DynamicWorld, entity: Entity, group: *const GroupInfo) void {
         for (group.component_types) |type_id| {
             self.component_pool.items[type_id].moveToGroup(entity);
         }
     }
 
     /// Remove entity from a group (move from group area in all component sparse sets)
-    fn removeEntityFromGroup(self: *World, entity: Entity, group: *const GroupInfo) void {
+    fn removeEntityFromGroup(self: *DynamicWorld, entity: Entity, group: *const GroupInfo) void {
         for (group.component_types) |type_id| {
             self.component_pool.items[type_id].moveFromGroup(entity);
         }
     }
-
-    // pub fn runSystems(self: *World) !void {
-    // try self.system_scheduler.run(self);
-    // }
-
-    // pub fn runStartupSystems(self: *World) !void {
-    // try self.startup_system_scheduler.run(self);
-    // }
-
-    // pub fn runTerminateSystems(self: *World) !void {
-    // try self.terminate_system_scheduler.run(self);
-    // }
 };
 
 test "World entity creation and destruction" {
@@ -366,7 +354,7 @@ test "World entity creation and destruction" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     const e1 = world.createEntity();
@@ -389,7 +377,7 @@ test "World component registration and operations" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     var comp_set = SparseSet(TestComp).init(allocator);
@@ -416,7 +404,7 @@ test "World multiple components and batch operations" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     var pos_set = SparseSet(Position).init(allocator);
@@ -449,7 +437,7 @@ test "World unregistered component error" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     const entity = world.createEntity();
@@ -469,7 +457,7 @@ test "World component re-registration" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     var comp_set1 = SparseSet(TestComp).init(allocator);
@@ -498,7 +486,7 @@ test "World isAlive entity validation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     const entity = world.createEntity();
@@ -519,7 +507,7 @@ test "World hasComponent queries" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     var comp_set = SparseSet(TestComp).init(allocator);
@@ -548,7 +536,7 @@ test "World removeComponent operation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     var comp_set = SparseSet(TestComp).init(allocator);
@@ -581,7 +569,7 @@ test "World createEntityWith batch creation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
 
     var pos_set = SparseSet(Position).init(allocator);

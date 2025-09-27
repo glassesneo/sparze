@@ -92,7 +92,7 @@ pub const EntityRegistry = struct {
     /// Returns whether the given entity handle refers to a currently alive entity.
     /// Performs bounds and version checks; stale or never-allocated handles return false.
     /// Complexity: O(1).
-    pub fn isAlive(self: *const EntityRegistry, entity: Entity) bool {
+    pub fn isAlive(self: EntityRegistry, entity: Entity) bool {
         const index = getIndex(entity);
         // If index was never allocated, it's not alive.
         if (index >= self.next_index) return false;

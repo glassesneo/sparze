@@ -5,6 +5,7 @@ const examples = [_]Example{
     .{ .name = "world_operations" },
     .{ .name = "plugin_architecture" },
     .{ .name = "system_operations" },
+    .{ .name = "fixed_plugin_architecture" },
 };
 
 const Example = struct {

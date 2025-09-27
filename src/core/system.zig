@@ -13,10 +13,10 @@ const sparse_set_module = @import("sparse_set.zig");
 const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 const SparseSet = sparse_set_module.SparseSet;
 
-const world_module = @import("world.zig");
-const World = world_module.World;
+const world_module = @import("dynamic_world.zig");
+const DynamicWorld = world_module.DynamicWorld;
 
-pub const SystemType = fn (*World) anyerror!void;
+pub const SystemType = fn (*DynamicWorld) anyerror!void;
 pub const SystemPointerType = *const SystemType;
 
 pub const FilterType = enum {
@@ -34,7 +34,7 @@ pub fn SingleQuery(comptime QueryParam: type) type {
         entities: []const Entity,
         components: []Component,
 
-        pub fn init(world: *World) !Self {
+        pub fn init(world: *DynamicWorld) !Self {
             const sparse_set = try world.getSparseSet(Component);
             return .{
                 .entities = sparse_set.packed_array.items,
@@ -54,7 +54,7 @@ test "SingleQuery" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = DynamicWorld.init(allocator);
     defer world.deinit();
     const e1 = world.createEntity();
     const e2 = world.createEntity();
@@ -86,9 +86,9 @@ pub fn Group(comptime GroupQueryParams: type) type {
 
         pub const Components = GroupQueryParams;
 
-        world: *World,
+        world: *DynamicWorld,
 
-        pub fn init(world: *World) Self {
+        pub fn init(world: *DynamicWorld) Self {
             return .{
                 .world = world,
             };
@@ -137,7 +137,7 @@ pub fn createSystemFunction(comptime system_fn: anytype) SystemType {
     const SystemArgsType = constructSystemArgsType(system_type_info);
 
     return struct {
-        fn run(world: *World) !void {
+        fn run(world: *DynamicWorld) !void {
             const system_args = construct_system_args: {
                 var system_args: SystemArgsType = undefined;
                 inline for (system_type_info.params, 0..) |param, i| {

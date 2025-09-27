@@ -18,9 +18,12 @@ pub const SingleQuery = system_module.SingleQuery;
 pub const Group = system_module.Group;
 pub const createSystemFunction = system_module.createSystemFunction;
 
-const world_module = @import("core/world.zig");
-pub const World = world_module.World;
+const world_module = @import("core/dynamic_world.zig");
+pub const DynamicWorld = world_module.DynamicWorld;
 pub const WorldGroupInfo = world_module.GroupInfo;
+
+const fixed_world_module = @import("core/fixed_world.zig");
+pub const FixedWorld = fixed_world_module.FixedWorld;
 
 test {
     std.testing.refAllDecls(@This());
