@@ -4,11 +4,11 @@ const StructField = std.builtin.Type.StructField;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const entity_module = @import("entity.zig");
+const entity_module = @import("../core/entity.zig");
 const EntityRegistry = entity_module.EntityRegistry;
 const Entity = entity_module.Entity;
 
-const sparse_set_module = @import("sparse_set.zig");
+const sparse_set_module = @import("../core/sparse_set.zig");
 const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 const SparseSet = sparse_set_module.SparseSet;
 

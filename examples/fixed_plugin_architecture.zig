@@ -58,10 +58,28 @@ const CombatPlugin = struct {
     const Components = .{ Health, Armor };
 };
 
+const World = build_world: {
+    break :build_world App.buildWorld(.{ MovementPlugin, PhysicsPlugin, CombatPlugin });
+};
+
+// Define systems as regular functions
+fn movementSystem(group: World.Group(struct { Position, Velocity })) !void {
+    const positions = group.getMutArrayOf(Position);
+    const velocities = group.getArrayOf(Velocity);
+
+    std.debug.print("Movement system - processing {} entities\n", .{positions.len});
+    for (positions, velocities) |*pos, vel| {
+        pos.x += vel.x;
+        pos.y += vel.y;
+    }
+}
+
+fn combatSystem(group: World.Group(struct { Health, Armor })) !void {
+    const entities = group.getEntities();
+    std.debug.print("Combat system - processing {} entities\n", .{entities.len});
+}
+
 pub fn main() !void {
-    const World = comptime build_world: {
-        break :build_world App.buildWorld(.{ MovementPlugin, PhysicsPlugin, CombatPlugin });
-    };
 
     // Validate groups at compile time - errors if components overlap
     World.validateGroups(.{
@@ -91,21 +109,9 @@ pub fn main() !void {
     try world.addComponent(enemy, Velocity, .{ .x = -0.5, .y = 0.0 });
     try world.addComponent(enemy, Health, .{ .hp = 50 });
 
-    // Fast iteration over movement group (cache-friendly)
-    const movement_entities = world.getGroupEntities(struct { Position, Velocity }) orelse &[_]sparze.Entity{};
-    if (world.getGroupComponentsMut(struct { Position, Velocity }, Position)) |positions| {
-        const velocities = world.getGroupComponents(struct { Position, Velocity }, Velocity).?;
-
-        std.debug.print("Movement system - processing {} entities\n", .{movement_entities.len});
-        for (positions, velocities) |*pos, vel| {
-            pos.x += vel.x;
-            pos.y += vel.y;
-        }
-    }
-
-    // Fast iteration over combat group
-    const combat_entities = world.getGroupEntities(struct { Health, Armor }) orelse &[_]sparze.Entity{};
-    std.debug.print("Combat system - processing {} entities\n", .{combat_entities.len});
+    // Run systems
+    try world.runSystem(movementSystem);
+    try world.runSystem(combatSystem);
 
     std.debug.print("Player position after update: ({d}, {d})\n", .{
         world.getComponent(player, Position).?.x,

@@ -5,15 +5,15 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const EnumArray = std.EnumArray;
 
-const entity_module = @import("entity.zig");
+const entity_module = @import("../core/entity.zig");
 const EntityRegistry = entity_module.EntityRegistry;
 const Entity = entity_module.Entity;
 
-const sparse_set_module = @import("sparse_set.zig");
+const sparse_set_module = @import("../core/sparse_set.zig");
 const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 const SparseSet = sparse_set_module.SparseSet;
 
-const world_module = @import("dynamic_world.zig");
+const world_module = @import("world.zig");
 const DynamicWorld = world_module.DynamicWorld;
 
 pub const SystemType = fn (*DynamicWorld) anyerror!void;
