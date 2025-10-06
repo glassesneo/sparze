@@ -16,7 +16,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var world = sparze.World.init(allocator);
+    var world = sparze.DynamicWorld.init(allocator);
     defer world.deinit();
 
     // Create sparse sets

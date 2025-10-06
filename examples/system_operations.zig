@@ -13,7 +13,7 @@ const Velocity = struct {
 
 const SystemScheduler = std.ArrayList(sparze.SystemPointerType);
 
-fn run(scheduler: SystemScheduler, world: *sparze.World) !void {
+fn run(scheduler: SystemScheduler, world: *sparze.DynamicWorld) !void {
     for (scheduler.items) |system| {
         try system(world);
     }
@@ -55,7 +55,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var world = sparze.World.init(allocator);
+    var world = sparze.DynamicWorld.init(allocator);
     defer world.deinit();
     const e1 = world.createEntity();
     const e2 = world.createEntity();
