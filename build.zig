@@ -4,6 +4,8 @@ const examples = [_]Example{
     .{ .name = "basic" },
     .{ .name = "plugin_architecture" },
     .{ .name = "system_operations" },
+    .{ .name = "movement_example" },
+    .{ .name = "multiple_groups" },
 };
 
 const Example = struct {

@@ -124,6 +124,71 @@ try world.runSystem(combatSystem);
 - **Group** has pre-organized memory layout with entities stored at start of all component arrays
 - **Group** requires upfront `createGroup()` call and validation; **Query** has no setup overhead
 
+## Best Practices
+
+### 1. Declare Group Type Constants
+
+Always declare a constant for group types before using them. This improves readability, maintainability, and reduces duplication since group types appear in multiple places (validation, creation, and system parameters).
+
+```zig
+// Recommended: Declare group constants
+const MovementGroup = struct { Position, Velocity };
+const CombatGroup = struct { Health, Armor };
+
+World.validateGroups(.{
+    MovementGroup,
+    CombatGroup,
+});
+
+try world.createGroup(MovementGroup);
+try world.createGroup(CombatGroup);
+
+fn movementSystem(group: Group(World, MovementGroup)) !void {
+    // System implementation
+}
+
+fn combatSystem(group: Group(World, CombatGroup)) !void {
+    // System implementation
+}
+```
+
+**Why use constants?**
+- Reduces duplication (group types appear 3+ times: validation, creation, system parameter)
+- Improves readability with semantic names
+- Simplifies refactoring (change in one place)
+- Self-documenting code
+
+### 2. Define Systems as Plain Functions
+
+Systems should be defined as plain functions that accept query parameters. This pattern is simple, idiomatic, and works seamlessly with `world.runSystem()`.
+
+```zig
+// Recommended: Plain function
+fn movementSystem(group: Group(World, MovementGroup)) !void {
+    const positions = group.getMutArrayOf(Position);
+    const velocities = group.getArrayOf(Velocity);
+    for (positions, velocities) |*pos, vel| {
+        pos.x += vel.x;
+        pos.y += vel.y;
+    }
+}
+
+// Usage
+try world.runSystem(movementSystem);
+```
+
+Systems can accept multiple query parameters:
+
+```zig
+fn complexSystem(
+    movement: Group(World, MovementGroup),
+    health: SingleQuery(World, Health),
+    combat: Query(World, struct { Position, Armor }),
+) !void {
+    // Use multiple query types in one system
+}
+```
+
 ## Important Notes
 
 - **Group ownership**: Groups use "full-owning" model where entities in the group are stored at the start of the packed array in all component sparse sets. This enables cache-friendly iteration but means groups cannot overlap (enforced at compile time).

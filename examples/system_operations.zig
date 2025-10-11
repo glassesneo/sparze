@@ -20,6 +20,9 @@ const Group = sparze.Group;
 const SingleQuery = sparze.SingleQuery;
 const Query = sparze.Query;
 
+// Declare group type constant for better readability and maintainability
+const MovementGroup = struct { Position, Velocity };
+
 // Define systems as regular functions
 fn startupSystem() !void {
     std.debug.print("Startup system called!\n", .{});
@@ -29,7 +32,7 @@ fn terminationSystem() !void {
     std.debug.print("Termination system called!\n", .{});
 }
 
-fn movementSystem(group: Group(World, struct { Position, Velocity })) !void {
+fn movementSystem(group: Group(World, MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -58,7 +61,7 @@ fn noQuerySystem() !void {
 }
 
 fn multiQuerySystem(
-    movement_group: Group(World, struct { Position, Velocity }),
+    movement_group: Group(World, MovementGroup),
     health_query: SingleQuery(World, Health),
 ) !void {
     std.debug.print("Multi-query system:\n", .{});
@@ -97,9 +100,9 @@ pub fn main() !void {
 
     // Validate and create groups at compile time
     World.validateGroups(.{
-        struct { Position, Velocity },
+        MovementGroup,
     });
-    try world.createGroup(struct { Position, Velocity });
+    try world.createGroup(MovementGroup);
 
     // Create entities
     const e1 = world.createEntity();

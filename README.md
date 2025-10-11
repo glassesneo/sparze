@@ -52,14 +52,17 @@ exe.root_module.addImport("sparze", sparze.module("sparze"));
 const std = @import("std");
 const sparze = @import("sparze");
 
+// Define component types
 const Position = struct { x: f32, y: f32 };
 const Velocity = struct { x: f32, y: f32 };
 
+// Define World with all component types
 const World = sparze.World(struct { Position, Velocity });
 
+// Declare group type constant (recommended best practice)
 const MovementGroup = struct { Position, Velocity };
 
-// Define system
+// Define system as plain function
 fn movementSystem(group: sparze.Group(World, MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
@@ -132,7 +135,10 @@ fn combatSystem(query: sparze.Query(World, struct { Position, Health })) !void {
 #### Group - Optimized Multi-Component Iteration
 
 ```zig
-fn movementSystem(group: sparze.Group(World, struct { Position, Velocity })) !void {
+// Best practice: Declare group type constant
+const MovementGroup = struct { Position, Velocity };
+
+fn movementSystem(group: sparze.Group(World, MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -143,7 +149,7 @@ fn movementSystem(group: sparze.Group(World, struct { Position, Velocity })) !vo
 }
 
 // In main():
-try world.createGroup(struct { Position, Velocity }); // Required setup
+try world.createGroup(MovementGroup); // Required setup
 try world.runSystem(movementSystem);
 ```
 

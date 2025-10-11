@@ -61,8 +61,12 @@ const CombatPlugin = struct {
 
 const World = App.buildWorld(.{ MovementPlugin, PhysicsPlugin, CombatPlugin });
 
+// Declare group type constants for better readability and maintainability
+const MovementGroup = struct { Position, Velocity };
+const CombatGroup = struct { Health, Armor };
+
 // Define systems as regular functions
-fn movementSystem(group: Group(World, struct { Position, Velocity })) !void {
+fn movementSystem(group: Group(World, MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -73,7 +77,7 @@ fn movementSystem(group: Group(World, struct { Position, Velocity })) !void {
     }
 }
 
-fn combatSystem(group: Group(World, struct { Health, Armor })) !void {
+fn combatSystem(group: Group(World, CombatGroup)) !void {
     const entities = group.getEntities();
     std.debug.print("Combat system - processing {} entities\n", .{entities.len});
 }
@@ -82,8 +86,8 @@ pub fn main() !void {
 
     // Validate groups at compile time - errors if components overlap
     World.validateGroups(.{
-        struct { Position, Velocity }, // Movement group
-        struct { Health, Armor }, // Combat group
+        MovementGroup,
+        CombatGroup,
     });
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -93,8 +97,8 @@ pub fn main() !void {
     defer world.deinit();
 
     // Create groups for fast iteration
-    try world.createGroup(struct { Position, Velocity });
-    try world.createGroup(struct { Health, Armor });
+    try world.createGroup(MovementGroup);
+    try world.createGroup(CombatGroup);
 
     // Create entities with different component combinations
     const player = world.createEntity();
