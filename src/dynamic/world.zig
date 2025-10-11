@@ -13,10 +13,12 @@ const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 const SparseSet = sparse_set_module.SparseSet;
 
 const system_module = @import("system.zig");
-// const SystemScheduler = system_module.SystemScheduler;
-const Stage = system_module.Stage;
-const FilterType = system_module.FilterType;
-const SingleQuery = system_module.SingleQuery;
+pub const FilterType = system_module.FilterType;
+pub const SystemType = system_module.SystemType;
+pub const SystemPointerType = system_module.SystemPointerType;
+pub const SingleQuery = system_module.SingleQuery;
+pub const Group = system_module.Group;
+pub const createSystemFunction = system_module.createSystemFunction;
 
 const TypeId = u16;
 const max_type_id = std.math.maxInt(TypeId);

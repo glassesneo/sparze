@@ -1,11 +1,12 @@
 const std = @import("std");
 const sparze = @import("sparze");
+const World = sparze.dynamic.DynamicWorld;
 
 const App = struct {
     allocator: std.mem.Allocator,
     component_arena: std.heap.ArenaAllocator,
     plugins: std.ArrayList(Plugin),
-    world: sparze.DynamicWorld,
+    world: World,
 
     fn init(allocator: std.mem.Allocator) App {
         return .{
@@ -42,11 +43,11 @@ const Plugin = struct {
     instance: *anyopaque,
     allocator: std.mem.Allocator,
     const VTable = struct {
-        buildFn: *const fn (*anyopaque, *sparze.DynamicWorld) anyerror!void,
+        buildFn: *const fn (*anyopaque, *World) anyerror!void,
         deinitFn: *const fn (*anyopaque) void,
     };
 
-    fn build(self: Plugin, world: *sparze.DynamicWorld) !void {
+    fn build(self: Plugin, world: *World) !void {
         try self.vtable.buildFn(self.instance, world);
     }
 
@@ -57,7 +58,7 @@ const Plugin = struct {
     fn init(comptime T: type, allocator: std.mem.Allocator) Plugin {
         const vtable = comptime VTable{
             .buildFn = struct {
-                fn build(ptr: *anyopaque, world: *sparze.DynamicWorld) anyerror!void {
+                fn build(ptr: *anyopaque, world: *World) anyerror!void {
                     const self = castTo(T, ptr);
                     try self.build(world);
                 }
@@ -106,7 +107,7 @@ const ExamplePlugin = struct {
         self.position_set.deinit();
     }
 
-    fn build(self: *ExamplePlugin, world: *sparze.DynamicWorld) !void {
+    fn build(self: *ExamplePlugin, world: *World) !void {
         try world.registerComponent(Position, &self.position_set);
     }
 };

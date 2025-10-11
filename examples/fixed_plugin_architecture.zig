@@ -2,6 +2,7 @@ const std = @import("std");
 const Struct = std.builtin.Type.Struct;
 const StructField = std.builtin.Type.StructField;
 const sparze = @import("sparze");
+const Group = sparze.fixed.Group;
 
 comptime plugin_types: [1024]type = undefined,
 comptime plugin_count: u10 = 0,
@@ -24,7 +25,7 @@ const App = struct {
             }
         }
         const Components = std.meta.Tuple(&components);
-        return sparze.FixedWorld(Components);
+        return sparze.fixed.FixedWorld(Components);
     }
 };
 
@@ -58,12 +59,10 @@ const CombatPlugin = struct {
     const Components = .{ Health, Armor };
 };
 
-const World = build_world: {
-    break :build_world App.buildWorld(.{ MovementPlugin, PhysicsPlugin, CombatPlugin });
-};
+const World = App.buildWorld(.{ MovementPlugin, PhysicsPlugin, CombatPlugin });
 
 // Define systems as regular functions
-fn movementSystem(group: World.Group(struct { Position, Velocity })) !void {
+fn movementSystem(group: Group(World, struct { Position, Velocity })) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -74,7 +73,7 @@ fn movementSystem(group: World.Group(struct { Position, Velocity })) !void {
     }
 }
 
-fn combatSystem(group: World.Group(struct { Health, Armor })) !void {
+fn combatSystem(group: Group(World, struct { Health, Armor })) !void {
     const entities = group.getEntities();
     std.debug.print("Combat system - processing {} entities\n", .{entities.len});
 }

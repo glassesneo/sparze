@@ -15,7 +15,9 @@ const Health = struct {
     hp: i32,
 };
 
-const World = sparze.FixedWorld(struct { Position, Velocity, Health });
+const World = sparze.fixed.FixedWorld(struct { Position, Velocity, Health });
+const Group = sparze.fixed.Group;
+const SingleQuery = sparze.fixed.SingleQuery;
 
 // Define systems as regular functions
 fn startupSystem() !void {
@@ -26,7 +28,7 @@ fn terminationSystem() !void {
     std.debug.print("Termination system called!\n", .{});
 }
 
-fn movementSystem(group: World.Group(struct { Position, Velocity })) !void {
+fn movementSystem(group: Group(World, struct { Position, Velocity })) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -37,13 +39,13 @@ fn movementSystem(group: World.Group(struct { Position, Velocity })) !void {
     }
 }
 
-fn healthSystem(query: World.SingleQuery(Health)) !void {
+fn healthSystem(query: SingleQuery(World, Health)) !void {
     for (query.entities, query.components) |entity, health| {
         std.debug.print("entity: {any}, health: {d} hp\n", .{ entity, health.hp });
     }
 }
 
-fn positionSystem(query: World.SingleQuery(Position)) !void {
+fn positionSystem(query: SingleQuery(World, Position)) !void {
     for (query.entities, query.components) |entity, *pos| {
         std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y });
         pos.y -= 1;
@@ -55,8 +57,8 @@ fn noQuerySystem() !void {
 }
 
 fn multiQuerySystem(
-    movement_group: World.Group(struct { Position, Velocity }),
-    health_query: World.SingleQuery(Health),
+    movement_group: Group(World, struct { Position, Velocity }),
+    health_query: SingleQuery(World, Health),
 ) !void {
     std.debug.print("Multi-query system:\n", .{});
     std.debug.print("  Movement entities: {}\n", .{movement_group.getEntities().len});

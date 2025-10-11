@@ -1,5 +1,10 @@
 const std = @import("std");
 const sparze = @import("sparze");
+const World = sparze.dynamic.DynamicWorld;
+const SingleQuery = sparze.dynamic.SingleQuery;
+const Group = sparze.dynamic.Group;
+const SystemPointerType = sparze.dynamic.SystemPointerType;
+const createSystemFunction = sparze.dynamic.createSystemFunction;
 
 const Position = struct {
     x: f32,
@@ -11,9 +16,9 @@ const Velocity = struct {
     y: f32,
 };
 
-const SystemScheduler = std.ArrayList(sparze.SystemPointerType);
+const SystemScheduler = std.ArrayList(SystemPointerType);
 
-fn run(scheduler: SystemScheduler, world: *sparze.DynamicWorld) !void {
+fn run(scheduler: SystemScheduler, world: *World) !void {
     for (scheduler.items) |system| {
         try system(world);
     }
@@ -21,7 +26,7 @@ fn run(scheduler: SystemScheduler, world: *sparze.DynamicWorld) !void {
 
 const MyGroup = struct { Position, Velocity };
 
-const PositionQuery = sparze.SingleQuery(Position);
+const PositionQuery = SingleQuery(Position);
 
 fn startupSystem() !void {
     std.debug.print("Startup system called!\n", .{});
@@ -31,7 +36,7 @@ fn terminationSystem() !void {
     std.debug.print("Termination system called!\n", .{});
 }
 
-fn systemWithNormalQueries(query1: sparze.SingleQuery(Position), query2: sparze.SingleQuery(Velocity)) !void {
+fn systemWithNormalQueries(query1: SingleQuery(Position), query2: SingleQuery(Velocity)) !void {
     _ = query2;
     for (query1.entities, query1.components) |entity, *pos| {
         std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y });
@@ -39,7 +44,7 @@ fn systemWithNormalQueries(query1: sparze.SingleQuery(Position), query2: sparze.
     }
 }
 
-fn systemWithGroup(group: sparze.Group(MyGroup)) !void {
+fn systemWithGroup(group: Group(MyGroup)) !void {
     for (group.getEntities(), group.getMutArrayOf(Position), group.getArrayOf(Velocity)) |e, *pos, vel| {
         pos.x += vel.x * 0.02;
         std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}, vel: {any}\n", .{ e, pos.x, pos.y, vel });
@@ -55,7 +60,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var world = sparze.DynamicWorld.init(allocator);
+    var world = World.init(allocator);
     defer world.deinit();
     const e1 = world.createEntity();
     const e2 = world.createEntity();
@@ -86,11 +91,11 @@ pub fn main() !void {
     var terminate_systems: SystemScheduler = .{};
     defer terminate_systems.deinit(allocator);
 
-    try startup_systems.append(allocator, sparze.createSystemFunction(startupSystem));
-    try systems.append(allocator, sparze.createSystemFunction(systemWithGroup));
-    try systems.append(allocator, sparze.createSystemFunction(systemWithNormalQueries));
-    try systems.append(allocator, sparze.createSystemFunction(systemWithNoQuery));
-    try terminate_systems.append(allocator, sparze.createSystemFunction(terminationSystem));
+    try startup_systems.append(allocator, createSystemFunction(startupSystem));
+    try systems.append(allocator, createSystemFunction(systemWithGroup));
+    try systems.append(allocator, createSystemFunction(systemWithNormalQueries));
+    try systems.append(allocator, createSystemFunction(systemWithNoQuery));
+    try terminate_systems.append(allocator, createSystemFunction(terminationSystem));
 
     try run(startup_systems, &world);
     for (0..10) |_| {
