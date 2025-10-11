@@ -18,8 +18,10 @@ A high-performance Entity Component System (ECS) library for Zig, offering both 
   - Automatic entity recycling with stale reference detection
   - Support for up to 65,535 concurrent entities
 
-- **Flexible System Design**
-  - Query single components or groups of components
+- **Flexible Query System**
+  - **SingleQuery**: Iterate over entities with a single component
+  - **Query**: Runtime intersection queries for multiple components (no setup required)
+  - **Group**: Optimized multi-component iteration with cache-friendly layout
   - Automatic query resolution and dependency injection
   - Support for multiple query parameters per system
 
@@ -141,6 +143,78 @@ pub fn main() !void {
 }
 ```
 
+### Query Types Comparison (Fixed World)
+
+Sparze provides three query types for different use cases:
+
+#### SingleQuery - Single Component Iteration
+
+```zig
+fn healthSystem(query: sparze.fixed.SingleQuery(World, Health)) !void {
+    for (query.entities, query.components) |entity, health| {
+        std.debug.print("Entity {} has {} HP\n", .{ entity, health.hp });
+    }
+}
+```
+
+#### Query - Runtime Intersection (No Setup)
+
+```zig
+fn combatSystem(query: sparze.fixed.Query(World, struct { Position, Health })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            const pos = query.getComponent(entity, Position).?;
+            if (query.getComponentMut(entity, Health)) |health| {
+                // Apply damage based on position
+                const distance = @sqrt(pos.x * pos.x + pos.y * pos.y);
+                if (distance > 50.0) {
+                    health.hp -= 5;
+                }
+            }
+        }
+    }
+}
+```
+
+**Use Query when:**
+- You need multi-component queries without setup overhead
+- Query patterns are dynamic or one-off
+- Flexibility is more important than raw performance
+
+#### Group - Optimized Multi-Component Iteration
+
+```zig
+fn movementSystem(group: sparze.fixed.Group(World, struct { Position, Velocity })) !void {
+    const positions = group.getMutArrayOf(Position);
+    const velocities = group.getArrayOf(Velocity);
+
+    for (positions, velocities) |*pos, vel| {
+        pos.x += vel.x * 0.016;
+        pos.y += vel.y * 0.016;
+    }
+}
+
+// In main():
+try world.createGroup(struct { Position, Velocity }); // Required setup
+try world.runSystem(movementSystem);
+```
+
+**Use Group when:**
+- Query runs frequently (every frame)
+- Maximum iteration performance is critical
+- Component combination is known upfront
+
+#### Comparison Table
+
+| Feature | SingleQuery | Query | Group |
+|---------|------------|-------|-------|
+| **Component Count** | 1 | 2+ | 2+ |
+| **Setup Required** | ❌ None | ❌ None | ✅ `createGroup()` |
+| **Manual Filtering** | ❌ No | ✅ Yes (`hasAllComponents`) | ❌ No |
+| **Iteration Speed** | ⚡ Fast | ⚠️ Moderate | ⚡⚡ Fastest |
+| **Memory Layout** | Packed | Sparse set | Cache-optimized |
+| **Use Case** | Single component | Ad-hoc multi-component | Hot path iteration |
+
 ## Architecture Overview
 
 ### Fixed World vs Dynamic World
@@ -164,9 +238,10 @@ pub fn main() !void {
 
 **Systems**: Functions that operate on entities with specific component combinations
 
-**Groups**: Optimized multi-component queries with cache-friendly memory layout
-
-**Queries**: Single-component iteration over entities
+**Query Types**:
+- **SingleQuery**: Fast iteration over entities with a single component type
+- **Query**: Flexible runtime intersection for multiple components without setup overhead
+- **Group**: Optimized multi-component iteration requiring upfront `createGroup()` call for maximum performance
 
 ## Examples
 

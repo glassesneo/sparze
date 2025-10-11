@@ -18,6 +18,7 @@ const Health = struct {
 const World = sparze.fixed.FixedWorld(struct { Position, Velocity, Health });
 const Group = sparze.fixed.Group;
 const SingleQuery = sparze.fixed.SingleQuery;
+const Query = sparze.fixed.Query;
 
 // Define systems as regular functions
 fn startupSystem() !void {
@@ -65,6 +66,27 @@ fn multiQuerySystem(
     std.debug.print("  Health entities: {}\n", .{health_query.entities.len});
 }
 
+// Query example: Multi-component query without requiring a group
+fn combatQuerySystem(query: Query(World, struct { Position, Health })) !void {
+    std.debug.print("Combat query (no group needed):\n", .{});
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            const pos = query.getComponent(entity, Position).?;
+            if (query.getComponentMut(entity, Health)) |health| {
+                // Apply damage if far from origin
+                const dist_sq = pos.x * pos.x + pos.y * pos.y;
+                if (dist_sq > 2500.0) {
+                    health.hp -= 5;
+                    std.debug.print("  Entity {} taking damage! HP: {} (distance: {d:.1})\n", .{ entity, health.hp, @sqrt(dist_sq) });
+                }
+                count += 1;
+            }
+        }
+    }
+    std.debug.print("  Processed {} entities with Position+Health\n", .{count});
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -103,6 +125,7 @@ pub fn main() !void {
         try world.runSystem(healthSystem);
         try world.runSystem(noQuerySystem);
         try world.runSystem(multiQuerySystem);
+        try world.runSystem(combatQuerySystem);
     }
 
     // Run termination systems

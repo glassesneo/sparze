@@ -63,8 +63,9 @@ zig build run-{example-name}
 - Direct sparse set access without dynamic lookup
 
 **Systems** (`src/fixed/system.zig`):
-- `SingleQuery(World, Component)`: requires explicit World type parameter
-- `Group(World, struct { A, B })`: requires explicit World type parameter
+- `SingleQuery(World, Component)`: single component query, requires explicit World type parameter
+- `Query(World, struct { A, B, ... })`: multi-component runtime intersection query (no group setup required)
+- `Group(World, struct { A, B })`: optimized multi-component query with pre-allocated group (requires `createGroup()`)
 - `world.runSystem(systemFn)`: convenience method for inline system execution
 - `createSystemFunction(World, systemFn)`: returns typed function pointer
 
@@ -88,6 +89,27 @@ World.validateGroups(.{
 var world = World.init(allocator);
 try world.createGroup(struct { Position, Velocity });
 
+// System with Group (optimized, requires createGroup)
+fn movementSystem(movement: Group(World, struct { Position, Velocity })) !void {
+    const positions = movement.getMutArrayOf(Position);
+    const velocities = movement.getArrayOf(Velocity);
+    for (positions, velocities) |*pos, vel| {
+        pos.x += vel.x;
+    }
+}
+
+// System with Query (flexible, no group setup required)
+fn combatSystem(query: Query(World, struct { Position, Health })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            const pos = query.getComponent(entity, Position).?;
+            if (query.getComponentMut(entity, Health)) |health| {
+                // Process entity
+            }
+        }
+    }
+}
+
 // System with multiple query types
 fn mySystem(
     movement: Group(World, struct { Position, Velocity }),
@@ -97,7 +119,8 @@ fn mySystem(
     // Use health.entities, health.components
 }
 
-try world.runSystem(mySystem);
+try world.runSystem(movementSystem);
+try world.runSystem(combatSystem);
 ```
 
 ### Dynamic World Pattern
@@ -127,12 +150,31 @@ const systemPtr = createSystemFunction(systemWithGroup);
 try systemPtr(&world);
 ```
 
+## Query Types Comparison (Fixed World)
+
+| Type | Components | Setup Required | Performance | Use Case |
+|------|------------|----------------|-------------|----------|
+| `SingleQuery(World, C)` | 1 | None | O(n) - Fast | Single component iteration |
+| `Query(World, struct { A, B, ... })` | 2+ | None | O(n) - Moderate | Ad-hoc multi-component queries |
+| `Group(World, struct { A, B })` | 2+ | `createGroup()` required | O(n) - Fastest | Frequently used multi-component queries |
+
+**When to use each**:
+- **SingleQuery**: Iterating over entities with one component
+- **Query**: Multi-component queries used occasionally or with varying component combinations
+- **Group**: Hot-path multi-component queries (e.g., movement, rendering) where performance is critical
+
+**Key differences**:
+- **Query** performs runtime intersection, iterating smallest component set and checking for others
+- **Group** has pre-organized memory layout with entities stored at start of all component arrays
+- **Group** requires upfront `createGroup()` call and validation; **Query** has no setup overhead
+
 ## Key Differences Between APIs
 
 | Aspect | Dynamic World | Fixed World |
 |--------|---------------|-------------|
 | Component registration | Runtime (`registerComponent`) | Compile-time (tuple parameter) |
-| Query types | `SingleQuery(C)` | `SingleQuery(World, C)` |
+| Single component query | `SingleQuery(C)` | `SingleQuery(World, C)` |
+| Multi-component query | N/A | `Query(World, struct { A, B, ... })` |
 | Group types | `Group(struct { A, B })` | `Group(World, struct { A, B })` |
 | Component lookup | Dynamic (hash-based typeId) | Direct (compile-time index) |
 | System execution | Function pointer via `createSystemFunction` | `world.runSystem(fn)` or manual |

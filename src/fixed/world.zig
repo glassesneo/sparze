@@ -14,6 +14,7 @@ const SparseSet = sparse_set_module.SparseSet;
 const system_module = @import("system.zig");
 pub const FilterType = system_module.FilterType;
 pub const SingleQuery = system_module.SingleQuery;
+pub const Query = system_module.Query;
 pub const Group = system_module.Group;
 pub const createSystemFunction = system_module.createSystemFunction;
 
