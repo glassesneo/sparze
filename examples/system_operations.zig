@@ -1,10 +1,5 @@
 const std = @import("std");
 const sparze = @import("sparze");
-const World = sparze.dynamic.DynamicWorld;
-const SingleQuery = sparze.dynamic.SingleQuery;
-const Group = sparze.dynamic.Group;
-const SystemPointerType = sparze.dynamic.SystemPointerType;
-const createSystemFunction = sparze.dynamic.createSystemFunction;
 
 const Position = struct {
     x: f32,
@@ -16,18 +11,16 @@ const Velocity = struct {
     y: f32,
 };
 
-const SystemScheduler = std.ArrayList(SystemPointerType);
+const Health = struct {
+    hp: i32,
+};
 
-fn run(scheduler: SystemScheduler, world: *World) !void {
-    for (scheduler.items) |system| {
-        try system(world);
-    }
-}
+const World = sparze.World(struct { Position, Velocity, Health });
+const Group = sparze.Group;
+const SingleQuery = sparze.SingleQuery;
+const Query = sparze.Query;
 
-const MyGroup = struct { Position, Velocity };
-
-const PositionQuery = SingleQuery(Position);
-
+// Define systems as regular functions
 fn startupSystem() !void {
     std.debug.print("Startup system called!\n", .{});
 }
@@ -36,23 +29,62 @@ fn terminationSystem() !void {
     std.debug.print("Termination system called!\n", .{});
 }
 
-fn systemWithNormalQueries(query1: SingleQuery(Position), query2: SingleQuery(Velocity)) !void {
-    _ = query2;
-    for (query1.entities, query1.components) |entity, *pos| {
+fn movementSystem(group: Group(World, struct { Position, Velocity })) !void {
+    const positions = group.getMutArrayOf(Position);
+    const velocities = group.getArrayOf(Velocity);
+
+    for (group.getEntities(), positions, velocities) |entity, *pos, vel| {
+        pos.x += vel.x * 0.02;
+        pos.y += vel.y * 0.02;
+        std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}, vel: {any}\n", .{ entity, pos.x, pos.y, vel });
+    }
+}
+
+fn healthSystem(query: SingleQuery(World, Health)) !void {
+    for (query.entities, query.components) |entity, health| {
+        std.debug.print("entity: {any}, health: {d} hp\n", .{ entity, health.hp });
+    }
+}
+
+fn positionSystem(query: SingleQuery(World, Position)) !void {
+    for (query.entities, query.components) |entity, *pos| {
         std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y });
         pos.y -= 1;
     }
 }
 
-fn systemWithGroup(group: Group(MyGroup)) !void {
-    for (group.getEntities(), group.getMutArrayOf(Position), group.getArrayOf(Velocity)) |e, *pos, vel| {
-        pos.x += vel.x * 0.02;
-        std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}, vel: {any}\n", .{ e, pos.x, pos.y, vel });
-    }
+fn noQuerySystem() !void {
+    std.debug.print("This system has no queries!\n", .{});
 }
 
-fn systemWithNoQuery() !void {
-    std.debug.print("This system has no queries!\n", .{});
+fn multiQuerySystem(
+    movement_group: Group(World, struct { Position, Velocity }),
+    health_query: SingleQuery(World, Health),
+) !void {
+    std.debug.print("Multi-query system:\n", .{});
+    std.debug.print("  Movement entities: {}\n", .{movement_group.getEntities().len});
+    std.debug.print("  Health entities: {}\n", .{health_query.entities.len});
+}
+
+// Query example: Multi-component query without requiring a group
+fn combatQuerySystem(query: Query(World, struct { Position, Health })) !void {
+    std.debug.print("Combat query (no group needed):\n", .{});
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            const pos = query.getComponent(entity, Position).?;
+            if (query.getComponentMut(entity, Health)) |health| {
+                // Apply damage if far from origin
+                const dist_sq = pos.x * pos.x + pos.y * pos.y;
+                if (dist_sq > 2500.0) {
+                    health.hp -= 5;
+                    std.debug.print("  Entity {} taking damage! HP: {} (distance: {d:.1})\n", .{ entity, health.hp, @sqrt(dist_sq) });
+                }
+                count += 1;
+            }
+        }
+    }
+    std.debug.print("  Processed {} entities with Position+Health\n", .{count});
 }
 
 pub fn main() !void {
@@ -62,44 +94,40 @@ pub fn main() !void {
 
     var world = World.init(allocator);
     defer world.deinit();
+
+    // Validate and create groups at compile time
+    World.validateGroups(.{
+        struct { Position, Velocity },
+    });
+    try world.createGroup(struct { Position, Velocity });
+
+    // Create entities
     const e1 = world.createEntity();
-    const e2 = world.createEntity();
-    const e3 = world.createEntity();
-
-    var position_sparse_set = sparze.SparseSet(Position).init(allocator);
-    defer position_sparse_set.deinit();
-
-    var velocity_sparse_set = sparze.SparseSet(Velocity).init(allocator);
-    defer velocity_sparse_set.deinit();
-
-    try world.registerComponent(Position, &position_sparse_set);
     try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
+    try world.addComponent(e1, Velocity, .{ .x = 1.0, .y = 2.0 });
+    try world.addComponent(e1, Health, .{ .hp = 100 });
+
+    const e2 = world.createEntity();
     try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
+    try world.addComponent(e2, Velocity, .{ .x = -1.0, .y = 0.5 });
+
+    const e3 = world.createEntity();
     try world.addComponent(e3, Position, .{ .x = 50.0, .y = 60.0 });
 
-    try world.registerComponent(Velocity, &velocity_sparse_set);
-    try world.addComponent(e1, Velocity, .{ .x = 10.0, .y = 30.0 });
-    try world.addComponent(e3, Velocity, .{ .x = 50.0, .y = 60.0 });
+    // Run startup systems
+    try world.runSystem(startupSystem);
 
-    try world.createGroup(MyGroup);
-
-    var systems: SystemScheduler = .{};
-    defer systems.deinit(allocator);
-
-    var startup_systems: SystemScheduler = .{};
-    defer startup_systems.deinit(allocator);
-    var terminate_systems: SystemScheduler = .{};
-    defer terminate_systems.deinit(allocator);
-
-    try startup_systems.append(allocator, createSystemFunction(startupSystem));
-    try systems.append(allocator, createSystemFunction(systemWithGroup));
-    try systems.append(allocator, createSystemFunction(systemWithNormalQueries));
-    try systems.append(allocator, createSystemFunction(systemWithNoQuery));
-    try terminate_systems.append(allocator, createSystemFunction(terminationSystem));
-
-    try run(startup_systems, &world);
-    for (0..10) |_| {
-        try run(systems, &world);
+    // Run main game loop
+    for (0..3) |frame| {
+        std.debug.print("\n--- Running frame {} ---\n", .{frame + 1});
+        try world.runSystem(movementSystem);
+        try world.runSystem(positionSystem);
+        try world.runSystem(healthSystem);
+        try world.runSystem(noQuerySystem);
+        try world.runSystem(multiQuerySystem);
+        try world.runSystem(combatQuerySystem);
     }
-    try run(terminate_systems, &world);
+
+    // Run termination systems
+    try world.runSystem(terminationSystem);
 }

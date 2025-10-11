@@ -2,11 +2,8 @@ const std = @import("std");
 
 const examples = [_]Example{
     .{ .name = "basic" },
-    .{ .name = "world_operations" },
     .{ .name = "plugin_architecture" },
     .{ .name = "system_operations" },
-    .{ .name = "fixed_plugin_architecture" },
-    .{ .name = "fixed_system_operations" },
 };
 
 const Example = struct {

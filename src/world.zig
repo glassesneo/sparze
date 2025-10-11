@@ -4,11 +4,11 @@ const StructField = std.builtin.Type.StructField;
 const Allocator = std.mem.Allocator;
 pub const ArrayList = std.ArrayList;
 
-const entity_module = @import("../core/entity.zig");
+const entity_module = @import("core/entity.zig");
 const EntityRegistry = entity_module.EntityRegistry;
 const Entity = entity_module.Entity;
 
-const sparse_set_module = @import("../core/sparse_set.zig");
+const sparse_set_module = @import("core/sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 
 const system_module = @import("system.zig");
@@ -23,7 +23,7 @@ const GroupInfo = struct {
     component_ids: []const u16, // Component IDs in this world
 };
 
-pub fn FixedWorld(Components: anytype) type {
+pub fn World(Components: anytype) type {
     const info = @typeInfo(Components);
     if (info != .@"struct") @compileError("Invalid form of components");
     const component_fields = info.@"struct".fields;
@@ -455,21 +455,21 @@ pub fn FixedWorld(Components: anytype) type {
     };
 }
 
-test "Create FixedWorld" {
+test "Create World" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = FixedWorld(struct { Position, Velocity });
+    const TestWorld = World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
-    try std.testing.expectEqual(0, World.getComponentId(Position));
-    try std.testing.expectEqual(1, World.getComponentId(Velocity));
+    try std.testing.expectEqual(0, TestWorld.getComponentId(Position));
+    try std.testing.expectEqual(1, TestWorld.getComponentId(Velocity));
 }
 
 test "World entity creation and destruction" {
@@ -477,9 +477,9 @@ test "World entity creation and destruction" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const World = FixedWorld(struct {});
+    const TestWorld = World(struct {});
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     const e1 = world.createEntity();
@@ -502,9 +502,9 @@ test "World component registration and operations" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const World = FixedWorld(struct { TestComp });
+    const TestWorld = World(struct { TestComp });
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     const entity = world.createEntity();
@@ -526,9 +526,9 @@ test "World multiple components and batch operations" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const World = FixedWorld(struct { Position, Velocity });
+    const TestWorld = World(struct { Position, Velocity });
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     const entity = world.createEntity();
@@ -551,9 +551,9 @@ test "World isAlive entity validation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const World = FixedWorld(struct {});
+    const TestWorld = World(struct {});
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     const entity = world.createEntity();
@@ -574,9 +574,9 @@ test "World hasComponent queries" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const World = FixedWorld(struct { TestComp });
+    const TestWorld = World(struct { TestComp });
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     const entity = world.createEntity();
@@ -600,9 +600,9 @@ test "World removeComponent operation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const World = FixedWorld(struct { TestComp });
+    const TestWorld = World(struct { TestComp });
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     const entity = world.createEntity();
@@ -626,13 +626,13 @@ test "World createEntityWith batch creation" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = FixedWorld(struct { Position, Velocity });
+    const TestWorld = World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create entity with multiple components
@@ -655,18 +655,18 @@ test "World createEntityWith batch creation" {
     try std.testing.expectEqual(@as(f32, -1.0), vel.dy);
 }
 
-test "FixedWorld group creation and basic operations" {
+test "World group creation and basic operations" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const World = FixedWorld(struct { Position, Velocity, Health });
+    const TestWorld = World(struct { Position, Velocity, Health });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create group for Position and Velocity
@@ -705,17 +705,17 @@ test "FixedWorld group creation and basic operations" {
     try std.testing.expectEqual(@as(usize, 2), velocities.len);
 }
 
-test "FixedWorld group dynamic membership" {
+test "World group dynamic membership" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = FixedWorld(struct { Position, Velocity });
+    const TestWorld = World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create entities first
@@ -745,17 +745,17 @@ test "FixedWorld group dynamic membership" {
     try std.testing.expectEqual(@as(usize, 1), group_entities.len);
 }
 
-test "FixedWorld group mutable component access" {
+test "World group mutable component access" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = FixedWorld(struct { Position, Velocity });
+    const TestWorld = World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     try world.createGroup(struct { Position, Velocity });
@@ -796,19 +796,19 @@ test "FixedWorld group mutable component access" {
     try std.testing.expectEqual(@as(f32, 2.0), vel1.dy);
 }
 
-test "FixedWorld multiple groups with non-overlapping components" {
+test "World multiple groups with non-overlapping components" {
     const A = struct { value: i32 };
     const B = struct { value: i32 };
     const C = struct { value: i32 };
     const D = struct { value: i32 };
 
-    const World = FixedWorld(struct { A, B, C, D });
+    const TestWorld = World(struct { A, B, C, D });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create two different groups with non-overlapping components
@@ -837,17 +837,17 @@ test "FixedWorld multiple groups with non-overlapping components" {
     try std.testing.expectEqual(@as(usize, 1), group2_entities.len);
 }
 
-test "FixedWorld group with component not in group" {
+test "World group with component not in group" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = FixedWorld(struct { Position, Velocity });
+    const TestWorld = World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     try world.createGroup(struct { Position, Velocity });
@@ -857,17 +857,17 @@ test "FixedWorld group with component not in group" {
     try std.testing.expect(velocities == null);
 }
 
-test "FixedWorld can create identical group twice without error" {
+test "World can create identical group twice without error" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = FixedWorld(struct { Position, Velocity });
+    const TestWorld = World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create group
@@ -880,16 +880,16 @@ test "FixedWorld can create identical group twice without error" {
     try std.testing.expectEqual(@as(usize, 1), world.groups.items.len);
 }
 
-test "FixedWorld compile-time group validation - non-overlapping" {
+test "World compile-time group validation - non-overlapping" {
     const A = struct { value: i32 };
     const B = struct { value: i32 };
     const C = struct { value: i32 };
     const D = struct { value: i32 };
 
-    const World = FixedWorld(struct { A, B, C, D });
+    const TestWorld = World(struct { A, B, C, D });
 
     // Compile-time validation of non-overlapping groups - should compile fine
-    World.validateGroups(.{
+    TestWorld.validateGroups(.{
         struct { A, B },
         struct { C, D },
     });
@@ -898,7 +898,7 @@ test "FixedWorld compile-time group validation - non-overlapping" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Runtime creation should work
@@ -908,16 +908,16 @@ test "FixedWorld compile-time group validation - non-overlapping" {
     try std.testing.expectEqual(@as(usize, 2), world.groups.items.len);
 }
 
-test "FixedWorld recommended usage pattern - validate groups upfront" {
+test "World recommended usage pattern - validate groups upfront" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
     const Armor = struct { value: i32 };
 
-    const World = FixedWorld(struct { Position, Velocity, Health, Armor });
+    const TestWorld = World(struct { Position, Velocity, Health, Armor });
 
     // Recommended: Validate all groups at compile time before creating them
-    World.validateGroups(.{
+    TestWorld.validateGroups(.{
         struct { Position, Velocity }, // Movement entities
         struct { Health, Armor }, // Combat entities
     });
@@ -926,7 +926,7 @@ test "FixedWorld recommended usage pattern - validate groups upfront" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Now create the groups - we know they're valid
@@ -960,10 +960,10 @@ test "FixedWorld recommended usage pattern - validate groups upfront" {
 //     const B = struct { value: i32 };
 //     const C = struct { value: i32 };
 //
-//     const World = FixedWorld(struct { A, B, C });
+//     const TestWorld = World(struct { A, B, C });
 //
 //     // This will cause a compile error: B appears in both groups
-//     World.validateGroups(.{
+//     TestWorld.validateGroups(.{
 //         struct { A, B },
 //         struct { B, C },
 //     });

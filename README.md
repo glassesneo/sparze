@@ -1,12 +1,13 @@
 # Sparze
 
-A high-performance Entity Component System (ECS) library for Zig, offering both compile-time and runtime-flexible architectures.
+A high-performance Entity Component System (ECS) library for Zig with compile-time type safety and zero runtime overhead.
 
 ## Features
 
-- **Dual Architecture Design**
-  - **Fixed World**: Compile-time type safety with zero runtime overhead
-  - **Dynamic World**: Runtime flexibility for dynamic component registration
+- **Compile-Time Type Safety**
+  - All component types known at compile time
+  - Zero runtime overhead for component lookup
+  - Type-safe system definitions
 
 - **Optimized Data Structures**
   - Paginated sparse sets for O(1) component access
@@ -45,7 +46,7 @@ const sparze = b.dependency("sparze", .{
 exe.root_module.addImport("sparze", sparze.module("sparze"));
 ```
 
-### Basic Example (Fixed World)
+### Basic Example
 
 ```zig
 const std = @import("std");
@@ -54,12 +55,12 @@ const sparze = @import("sparze");
 const Position = struct { x: f32, y: f32 };
 const Velocity = struct { x: f32, y: f32 };
 
-const World = sparze.fixed.FixedWorld(struct { Position, Velocity });
+const World = sparze.World(struct { Position, Velocity });
 
 const MovementGroup = struct { Position, Velocity };
 
 // Define system
-fn movementSystem(group: sparze.fixed.Group(World, MovementGroup)) !void {
+fn movementSystem(group: sparze.Group(World, MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -90,67 +91,14 @@ pub fn main() !void {
 }
 ```
 
-### Basic Example (Dynamic World)
-
-```zig
-const std = @import("std");
-const sparze = @import("sparze");
-
-const Position = struct { x: f32, y: f32 };
-const Velocity = struct { x: f32, y: f32 };
-
-const MovementGroup = struct { Position, Velocity };
-
-// Define system
-fn movementSystem(group: sparze.dynamic.Group(MovementGroup)) !void {
-    const positions = group.getMutArrayOf(Position);
-    const velocities = group.getArrayOf(Velocity);
-
-    for (positions, velocities) |*pos, vel| {
-        pos.x += vel.x * 0.016;
-        pos.y += vel.y * 0.016;
-    }
-}
-
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var world = sparze.dynamic.DynamicWorld.init(allocator);
-    defer world.deinit();
-
-    // Register component types
-    var position_set = sparze.SparseSet(Position).init(allocator);
-    defer position_set.deinit();
-    var velocity_set = sparze.SparseSet(Velocity).init(allocator);
-    defer velocity_set.deinit();
-
-    try world.registerComponent(Position, &position_set);
-    try world.registerComponent(Velocity, &velocity_set);
-
-    // Create group
-    try world.createGroup(struct { Position, Velocity });
-
-    // Create entities
-    const entity = world.createEntity();
-    try world.addComponent(entity, Position, .{ .x = 0.0, .y = 0.0 });
-    try world.addComponent(entity, Velocity, .{ .x = 1.0, .y = 2.0 });
-
-    // Run system
-    const systemFn = sparze.dynamic.createSystemFunction(movementSystem);
-    try systemFn(&world);
-}
-```
-
-### Query Types Comparison (Fixed World)
+### Query Types Comparison
 
 Sparze provides three query types for different use cases:
 
 #### SingleQuery - Single Component Iteration
 
 ```zig
-fn healthSystem(query: sparze.fixed.SingleQuery(World, Health)) !void {
+fn healthSystem(query: sparze.SingleQuery(World, Health)) !void {
     for (query.entities, query.components) |entity, health| {
         std.debug.print("Entity {} has {} HP\n", .{ entity, health.hp });
     }
@@ -160,7 +108,7 @@ fn healthSystem(query: sparze.fixed.SingleQuery(World, Health)) !void {
 #### Query - Runtime Intersection (No Setup)
 
 ```zig
-fn combatSystem(query: sparze.fixed.Query(World, struct { Position, Health })) !void {
+fn combatSystem(query: sparze.Query(World, struct { Position, Health })) !void {
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
             const pos = query.getComponent(entity, Position).?;
@@ -184,7 +132,7 @@ fn combatSystem(query: sparze.fixed.Query(World, struct { Position, Health })) !
 #### Group - Optimized Multi-Component Iteration
 
 ```zig
-fn movementSystem(group: sparze.fixed.Group(World, struct { Position, Velocity })) !void {
+fn movementSystem(group: sparze.Group(World, struct { Position, Velocity })) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -215,22 +163,7 @@ try world.runSystem(movementSystem);
 | **Memory Layout** | Packed | Sparse set | Cache-optimized |
 | **Use Case** | Single component | Ad-hoc multi-component | Hot path iteration |
 
-## Architecture Overview
-
-### Fixed World vs Dynamic World
-
-**Fixed World** is recommended for most use cases:
-- All component types known at compile time
-- Zero runtime overhead for component lookup
-- Compile-time validation of group constraints
-- Type-safe system definitions
-
-**Dynamic World** is useful when:
-- Component types need to be loaded from plugins or configuration
-- Runtime flexibility is more important than performance
-- Component types cannot be known at compile time
-
-### Core Concepts
+## Core Concepts
 
 **Entities**: Lightweight 32-bit identifiers (16-bit index + 16-bit version)
 
@@ -248,11 +181,8 @@ try world.runSystem(movementSystem);
 Explore the `examples/` directory for comprehensive demonstrations:
 
 - `basic.zig` - Entity and component basics
-- `world_operations.zig` - Dynamic world operations
-- `system_operations.zig` - Dynamic system patterns
-- `plugin_architecture.zig` - Dynamic plugin-style architecture
-- `fixed_plugin_architecture.zig` - Fixed world plugin pattern
-- `fixed_system_operations.zig` - Fixed world system patterns
+- `plugin_architecture.zig` - Plugin-style architecture
+- `system_operations.zig` - System patterns and multi-query examples
 
 Run all examples:
 ```bash
@@ -284,7 +214,7 @@ Sparze is designed for high-performance game and simulation workloads:
 - **O(1) component access** via paginated sparse sets
 - **Cache-friendly iteration** with packed component arrays
 - **Group optimization** for multi-component queries
-- **Minimal indirection** in Fixed World mode
+- **Zero runtime overhead** with compile-time component registration
 
 ## Requirements
 
@@ -297,4 +227,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues or PRs.
-

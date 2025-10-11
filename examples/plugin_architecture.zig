@@ -1,88 +1,31 @@
 const std = @import("std");
+const Struct = std.builtin.Type.Struct;
+const StructField = std.builtin.Type.StructField;
 const sparze = @import("sparze");
-const World = sparze.dynamic.DynamicWorld;
+const Group = sparze.Group;
+
+comptime plugin_types: [1024]type = undefined,
+comptime plugin_count: u10 = 0,
 
 const App = struct {
-    allocator: std.mem.Allocator,
-    component_arena: std.heap.ArenaAllocator,
-    plugins: std.ArrayList(Plugin),
-    world: World,
-
-    fn init(allocator: std.mem.Allocator) App {
-        return .{
-            .allocator = allocator,
-            .component_arena = .init(allocator),
-            .world = .init(allocator),
-            .plugins = .{},
-        };
-    }
-
-    fn registerPlugin(self: *App, comptime P: type) !void {
-        const arena_allocator = self.component_arena.allocator();
-        try self.plugins.append(self.allocator, Plugin.init(P, arena_allocator));
-    }
-
-    fn start(self: *App) !void {
-        for (self.plugins.items) |plugin| {
-            try plugin.build(&self.world);
+    fn buildWorld(plugins: anytype) type {
+        var length: usize = 0;
+        inline for (plugins) |P| {
+            inline for (P.Components) |_| {
+                length += 1;
+            }
         }
-    }
 
-    fn deinit(self: *App) void {
-        for (self.plugins.items) |plugin| {
-            plugin.deinit();
+        var components: [length]type = undefined;
+        var count: usize = 0;
+        inline for (plugins) |Plugin| {
+            inline for (Plugin.Components) |C| {
+                components[count] = C;
+                count += 1;
+            }
         }
-        self.plugins.deinit(self.allocator);
-        self.world.deinit();
-        self.component_arena.deinit();
-    }
-};
-
-const Plugin = struct {
-    vtable: *const VTable,
-    instance: *anyopaque,
-    allocator: std.mem.Allocator,
-    const VTable = struct {
-        buildFn: *const fn (*anyopaque, *World) anyerror!void,
-        deinitFn: *const fn (*anyopaque) void,
-    };
-
-    fn build(self: Plugin, world: *World) !void {
-        try self.vtable.buildFn(self.instance, world);
-    }
-
-    fn deinit(self: Plugin) void {
-        self.vtable.deinitFn(self.instance);
-    }
-
-    fn init(comptime T: type, allocator: std.mem.Allocator) Plugin {
-        const vtable = comptime VTable{
-            .buildFn = struct {
-                fn build(ptr: *anyopaque, world: *World) anyerror!void {
-                    const self = castTo(T, ptr);
-                    try self.build(world);
-                }
-            }.build,
-            .deinitFn = struct {
-                fn deinit(ptr: *anyopaque) void {
-                    const self = castTo(T, ptr);
-                    self.deinit();
-                    self.allocator.destroy(self);
-                }
-            }.deinit,
-        };
-        const instance = allocator.create(T) catch @panic("Failed to allocate plugin instance");
-        instance.* = T.init(allocator);
-
-        return .{
-            .vtable = &vtable,
-            .instance = instance,
-            .allocator = allocator,
-        };
-    }
-
-    fn castTo(comptime T: type, ptr: *anyopaque) *T {
-        return @ptrCast(@alignCast(ptr));
+        const Components = std.meta.Tuple(&components);
+        return sparze.World(Components);
     }
 };
 
@@ -91,37 +34,86 @@ const Position = struct {
     y: f32,
 };
 
-const ExamplePlugin = struct {
-    const PositionSet = sparze.SparseSet(Position);
-    allocator: std.mem.Allocator,
-    position_set: PositionSet,
-
-    fn init(allocator: std.mem.Allocator) ExamplePlugin {
-        return .{
-            .allocator = allocator,
-            .position_set = .init(allocator),
-        };
-    }
-
-    fn deinit(self: *ExamplePlugin) void {
-        self.position_set.deinit();
-    }
-
-    fn build(self: *ExamplePlugin, world: *World) !void {
-        try world.registerComponent(Position, &self.position_set);
-    }
+const Velocity = struct {
+    x: f32,
+    y: f32,
 };
 
+const Acceleration = struct {
+    x: f32,
+    y: f32,
+};
+
+const Health = struct { hp: i32 };
+const Armor = struct { defense: i32 };
+
+const MovementPlugin = struct {
+    const Components = .{ Position, Velocity };
+};
+
+const PhysicsPlugin = struct {
+    const Components = .{Acceleration};
+};
+
+const CombatPlugin = struct {
+    const Components = .{ Health, Armor };
+};
+
+const World = App.buildWorld(.{ MovementPlugin, PhysicsPlugin, CombatPlugin });
+
+// Define systems as regular functions
+fn movementSystem(group: Group(World, struct { Position, Velocity })) !void {
+    const positions = group.getMutArrayOf(Position);
+    const velocities = group.getArrayOf(Velocity);
+
+    std.debug.print("Movement system - processing {} entities\n", .{positions.len});
+    for (positions, velocities) |*pos, vel| {
+        pos.x += vel.x;
+        pos.y += vel.y;
+    }
+}
+
+fn combatSystem(group: Group(World, struct { Health, Armor })) !void {
+    const entities = group.getEntities();
+    std.debug.print("Combat system - processing {} entities\n", .{entities.len});
+}
+
 pub fn main() !void {
+
+    // Validate groups at compile time - errors if components overlap
+    World.validateGroups(.{
+        struct { Position, Velocity }, // Movement group
+        struct { Health, Armor }, // Combat group
+    });
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+    var world = World.init(allocator);
+    defer world.deinit();
 
-    var app = App.init(allocator);
-    defer app.deinit();
+    // Create groups for fast iteration
+    try world.createGroup(struct { Position, Velocity });
+    try world.createGroup(struct { Health, Armor });
 
-    try app.registerPlugin(ExamplePlugin);
-    try app.start();
+    // Create entities with different component combinations
+    const player = world.createEntity();
+    try world.addComponent(player, Position, .{ .x = 0.0, .y = 0.0 });
+    try world.addComponent(player, Velocity, .{ .x = 1.0, .y = 0.5 });
+    try world.addComponent(player, Health, .{ .hp = 100 });
+    try world.addComponent(player, Armor, .{ .defense = 50 });
 
-    std.debug.print("world: {any}\n", .{app.world.component_pool});
+    const enemy = world.createEntity();
+    try world.addComponent(enemy, Position, .{ .x = 10.0, .y = 5.0 });
+    try world.addComponent(enemy, Velocity, .{ .x = -0.5, .y = 0.0 });
+    try world.addComponent(enemy, Health, .{ .hp = 50 });
+
+    // Run systems
+    try world.runSystem(movementSystem);
+    try world.runSystem(combatSystem);
+
+    std.debug.print("Player position after update: ({d}, {d})\n", .{
+        world.getComponent(player, Position).?.x,
+        world.getComponent(player, Position).?.y,
+    });
 }

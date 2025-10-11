@@ -11,9 +11,15 @@ pub const SparseSet = sparse_set_module.SparseSet;
 pub const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 pub const GroupInfo = sparse_set_module.GroupInfo;
 
-pub const dynamic = @import("dynamic/world.zig");
+const world_module = @import("world.zig");
+pub const World = world_module.World;
 
-pub const fixed = @import("fixed/world.zig");
+const system_module = @import("system.zig");
+pub const FilterType = system_module.FilterType;
+pub const SingleQuery = system_module.SingleQuery;
+pub const Query = system_module.Query;
+pub const Group = system_module.Group;
+pub const createSystemFunction = system_module.createSystemFunction;
 
 test {
     std.testing.refAllDecls(@This());

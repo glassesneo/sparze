@@ -1,7 +1,7 @@
 const std = @import("std");
 const StructField = std.builtin.Type.StructField;
 
-const entity_module = @import("../core/entity.zig");
+const entity_module = @import("core/entity.zig");
 const Entity = entity_module.Entity;
 
 pub const FilterType = enum {
@@ -10,7 +10,7 @@ pub const FilterType = enum {
     group,
 };
 
-/// SingleQuery provides iteration over entities with a specific component for a given FixedWorld type
+/// SingleQuery provides iteration over entities with a specific component for a given World type
 pub fn SingleQuery(comptime World: type, comptime QueryComponent: type) type {
     return struct {
         const Self = @This();
@@ -31,7 +31,7 @@ pub fn SingleQuery(comptime World: type, comptime QueryComponent: type) type {
     };
 }
 
-/// Group provides fast iteration over entities with multiple components for a given FixedWorld type
+/// Group provides fast iteration over entities with multiple components for a given World type
 pub fn Group(comptime World: type, comptime GroupComponents: type) type {
     return struct {
         const Self = @This();
@@ -141,7 +141,7 @@ fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn) type {
     } });
 }
 
-/// Create a system function for a specific FixedWorld type that can be called with world.runSystem(system_fn)
+/// Create a system function for a specific World type that can be called with world.runSystem(system_fn)
 pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) fn (*World) anyerror!void {
     const system_type_info = switch (@typeInfo(@TypeOf(system_fn))) {
         .@"fn" => |f| f,
@@ -185,13 +185,13 @@ test "FixedSingleQuery basic iteration" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create entities with positions
@@ -203,7 +203,7 @@ test "FixedSingleQuery basic iteration" {
     try world.addComponent(e2, Velocity, .{ .dx = 1.0, .dy = 2.0 });
 
     // Query all positions
-    const PositionQuery = SingleQuery(Position);
+    const PositionQuery = SingleQuery(TestWorld, Position);
     const query = PositionQuery.init(&world);
 
     try std.testing.expectEqual(@as(usize, 2), query.entities.len);
@@ -222,17 +222,17 @@ test "FixedGroup query basic usage" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create group first
-    try world.createGroup(World, struct { Position, Velocity });
+    try world.createGroup(struct { Position, Velocity });
 
     // Create entities
     const e1 = world.createEntity();
@@ -244,7 +244,7 @@ test "FixedGroup query basic usage" {
     // e2 has no velocity - not in group
 
     // Use Group query
-    const MovementGroup = Group(World, struct { Position, Velocity });
+    const MovementGroup = Group(TestWorld, struct { Position, Velocity });
     const group = MovementGroup.init(&world);
 
     const entities = group.getEntities();
@@ -262,10 +262,10 @@ test "FixedGroup query basic usage" {
 test "FixedWorld system function with SingleQuery" {
     const Position = struct { x: f32, y: f32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position });
+    const TestWorld = @import("world.zig").World(struct { Position });
 
     const UpdatePositions = struct {
-        fn system(query: SingleQuery(Position)) !void {
+        fn system(query: SingleQuery(TestWorld, Position)) !void {
             for (query.components) |*pos| {
                 pos.x += 1.0;
                 pos.y += 1.0;
@@ -277,7 +277,7 @@ test "FixedWorld system function with SingleQuery" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create entities
@@ -300,10 +300,10 @@ test "FixedWorld system function with Group" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
 
     const MovementSystem = struct {
-        fn system(group: Group(World, struct { Position, Velocity })) !void {
+        fn system(group: Group(TestWorld, struct { Position, Velocity })) !void {
             const positions = group.getMutArrayOf(Position);
             const velocities = group.getArrayOf(Velocity);
 
@@ -318,10 +318,10 @@ test "FixedWorld system function with Group" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
-    try world.createGroup(World, struct { Position, Velocity });
+    try world.createGroup(struct { Position, Velocity });
 
     // Create moving entities
     const e1 = world.createEntity();
@@ -347,12 +347,12 @@ test "FixedWorld system with multiple queries" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
 
     const ComplexSystem = struct {
         fn system(
-            movement: Group(World, struct { Position, Velocity }),
-            health_query: SingleQuery(Health),
+            movement: Group(TestWorld, struct { Position, Velocity }),
+            health_query: SingleQuery(TestWorld, Health),
         ) !void {
             // Update movement
             const positions = movement.getMutArrayOf(Position);
@@ -374,10 +374,10 @@ test "FixedWorld system with multiple queries" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
-    try world.createGroup(World, struct { Position, Velocity });
+    try world.createGroup(struct { Position, Velocity });
 
     const e1 = world.createEntity();
     try world.addComponent(e1, Position, .{ .x = 0.0, .y = 0.0 });
@@ -397,13 +397,13 @@ test "FixedQuery basic iteration" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create entities with different component combinations
@@ -422,7 +422,7 @@ test "FixedQuery basic iteration" {
     // e3 has only position
 
     // Query entities with Position and Velocity (no group setup required)
-    const MovementQuery = Query(World, struct { Position, Velocity });
+    const MovementQuery = Query(TestWorld, struct { Position, Velocity });
     const query = MovementQuery.init(&world);
 
     // Should find e1 and e2 (both have Position and Velocity)
@@ -443,13 +443,13 @@ test "FixedQuery with mutable component access" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     const e1 = world.createEntity();
@@ -461,7 +461,7 @@ test "FixedQuery with mutable component access" {
     try world.addComponent(e2, Velocity, .{ .dx = -1.0, .dy = -2.0 });
 
     // Use query to mutate components
-    const MovementQuery = Query(World, struct { Position, Velocity });
+    const MovementQuery = Query(TestWorld, struct { Position, Velocity });
     const query = MovementQuery.init(&world);
 
     for (query.entities) |entity| {
@@ -486,10 +486,10 @@ test "FixedWorld system function with Query" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
 
     const CombatSystem = struct {
-        fn system(query: Query(World, struct { Position, Health })) !void {
+        fn system(query: Query(TestWorld, struct { Position, Health })) !void {
             for (query.entities) |entity| {
                 if (query.hasAllComponents(entity)) {
                     const pos = query.getComponent(entity, Position).?;
@@ -508,7 +508,7 @@ test "FixedWorld system function with Query" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create entities
@@ -535,13 +535,13 @@ test "FixedQuery three components" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const World = @import("world.zig").FixedWorld(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var world = World.init(allocator);
+    var world = TestWorld.init(allocator);
     defer world.deinit();
 
     // Create entities
@@ -559,7 +559,7 @@ test "FixedQuery three components" {
     try world.addComponent(e3, Velocity, .{ .dx = 1.0, .dy = 2.0 });
 
     // Query for all three components
-    const FullEntityQuery = Query(World, struct { Position, Velocity, Health });
+    const FullEntityQuery = Query(TestWorld, struct { Position, Velocity, Health });
     const query = FullEntityQuery.init(&world);
 
     // Should only find e1
