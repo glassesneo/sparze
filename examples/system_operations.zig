@@ -19,6 +19,7 @@ const World = sparze.World(struct { Position, Velocity, Health });
 const Group = sparze.Group;
 const SingleQuery = sparze.SingleQuery;
 const Query = sparze.Query;
+const Commands = sparze.Commands;
 
 // Declare group type constant for better readability and maintainability
 const MovementGroup = struct { Position, Velocity };
@@ -104,18 +105,32 @@ pub fn main() !void {
     });
     try world.createGroup(MovementGroup);
 
-    // Create entities
-    const e1 = world.createEntity();
-    try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
-    try world.addComponent(e1, Velocity, .{ .x = 1.0, .y = 2.0 });
-    try world.addComponent(e1, Health, .{ .hp = 100 });
+    // Spawn initial entities with Commands
+    const spawn = struct {
+        fn system(commands: anytype) !void {
+            const e1 = try commands.createEntityWith(.{
+                Position{ .x = 10.0, .y = 20.0 },
+                Velocity{ .x = 1.0, .y = 2.0 },
+                Health{ .hp = 100 },
+            });
+            _ = e1;
 
-    const e2 = world.createEntity();
-    try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
-    try world.addComponent(e2, Velocity, .{ .x = -1.0, .y = 0.5 });
+            const e2 = try commands.createEntityWith(.{
+                Position{ .x = 30.0, .y = 40.0 },
+                Velocity{ .x = -1.0, .y = 0.5 },
+            });
+            _ = e2;
 
-    const e3 = world.createEntity();
-    try world.addComponent(e3, Position, .{ .x = 50.0, .y = 60.0 });
+            const e3 = try commands.createEntityWith(.{
+                Position{ .x = 50.0, .y = 60.0 },
+            });
+            _ = e3;
+        }
+    }.system;
+
+    world.beginFrame();
+    try world.runSystem(spawn);
+    try world.endFrame();
 
     // Run startup systems
     try world.runSystem(startupSystem);

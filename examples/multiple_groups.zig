@@ -53,15 +53,23 @@ pub fn main() !void {
     try world.createGroup(MovementGroup);
     try world.createGroup(CombatGroup);
 
-    // Create a moving entity with Position & Velocity.
-    const mover = world.createEntity();
-    try world.addComponent(mover, Position, .{ .x = 0.0, .y = 0.0 });
-    try world.addComponent(mover, Velocity, .{ .x = 1.0, .y = 1.5 });
+    // Spawn initial entities via Commands
+    const spawn = struct {
+        fn system(commands: anytype) !void {
+            _ = try commands.createEntityWith(.{
+                Position{ .x = 0.0, .y = 0.0 },
+                Velocity{ .x = 1.0, .y = 1.5 },
+            });
+            _ = try commands.createEntityWith(.{
+                Health{ .hp = 100 },
+                Armor{ .defense = 20 },
+            });
+        }
+    }.system;
 
-    // Create a combat entity with Health & Armor.
-    const combatant = world.createEntity();
-    try world.addComponent(combatant, Health, .{ .hp = 100 });
-    try world.addComponent(combatant, Armor, .{ .defense = 20 });
+    world.beginFrame();
+    try world.runSystem(spawn);
+    try world.endFrame();
 
     // Run each system a few frames.
     for (0..3) |_| {
@@ -69,7 +77,7 @@ pub fn main() !void {
         try world.runSystem(combatSystem);
     }
 
-    // Show final position of the mover.
-    const finalPos = world.getComponent(mover, Position).?;
-    std.debug.print("Mover final position: ({d}, {d})\n", .{ finalPos.x, finalPos.y });
+    // Show final position of the first movement entity
+    const positions = world.getGroupComponents(MovementGroup, Position).?;
+    std.debug.print("First mover final position: ({d}, {d})\n", .{ positions[0].x, positions[0].y });
 }

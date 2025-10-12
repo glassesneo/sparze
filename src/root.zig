@@ -19,6 +19,8 @@ pub const FilterType = system_module.FilterType;
 pub const SingleQuery = system_module.SingleQuery;
 pub const Query = system_module.Query;
 pub const Group = system_module.Group;
+pub const Commands = system_module.Commands;
+pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;
 
 test {

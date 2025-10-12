@@ -1027,7 +1027,7 @@ test "Commands with frame-based execution" {
 
     // System that spawns enemies using Commands
     const spawnEnemies = struct {
-        fn system(commands: Commands(TestWorld)) !void {
+        fn system(commands: anytype) !void {
             // Create 3 enemies
             for (0..3) |i| {
                 const enemy = commands.createEntity();
@@ -1091,7 +1091,7 @@ test "Commands remove and destroy operations" {
 
     // System that marks dead entities and removes/destroys
     const deathSystem = struct {
-        fn system(query: SingleQuery(Health), commands: Commands(TestWorld)) !void {
+        fn system(query: SingleQuery(Health), commands: anytype) !void {
             for (query.entities, query.components) |entity, health| {
                 if (health.hp <= 0) {
                     // Mark as dead (add component)
@@ -1137,7 +1137,7 @@ test "Commands createEntityWith convenience method" {
     defer world.deinit();
 
     const spawnWithBatch = struct {
-        fn system(commands: Commands(TestWorld)) !void {
+        fn system(commands: anytype) !void {
             _ = try commands.createEntityWith(.{
                 Position{ .x = 10.0, .y = 20.0 },
                 Velocity{ .dx = 1.0, .dy = 2.0 },

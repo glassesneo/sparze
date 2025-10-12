@@ -100,24 +100,32 @@ pub fn main() !void {
     try world.createGroup(MovementGroup);
     try world.createGroup(CombatGroup);
 
-    // Create entities with different component combinations
-    const player = world.createEntity();
-    try world.addComponent(player, Position, .{ .x = 0.0, .y = 0.0 });
-    try world.addComponent(player, Velocity, .{ .x = 1.0, .y = 0.5 });
-    try world.addComponent(player, Health, .{ .hp = 100 });
-    try world.addComponent(player, Armor, .{ .defense = 50 });
+    // Create entities with different component combinations using Commands
+    const spawn = struct {
+        fn system(commands: anytype) !void {
+            _ = try commands.createEntityWith(.{
+                Position{ .x = 0.0, .y = 0.0 },
+                Velocity{ .x = 1.0, .y = 0.5 },
+                Health{ .hp = 100 },
+                Armor{ .defense = 50 },
+            });
 
-    const enemy = world.createEntity();
-    try world.addComponent(enemy, Position, .{ .x = 10.0, .y = 5.0 });
-    try world.addComponent(enemy, Velocity, .{ .x = -0.5, .y = 0.0 });
-    try world.addComponent(enemy, Health, .{ .hp = 50 });
+            _ = try commands.createEntityWith(.{
+                Position{ .x = 10.0, .y = 5.0 },
+                Velocity{ .x = -0.5, .y = 0.0 },
+                Health{ .hp = 50 },
+            });
+        }
+    }.system;
+
+    world.beginFrame();
+    try world.runSystem(spawn);
+    try world.endFrame();
 
     // Run systems
     try world.runSystem(movementSystem);
     try world.runSystem(combatSystem);
 
-    std.debug.print("Player position after update: ({d}, {d})\n", .{
-        world.getComponent(player, Position).?.x,
-        world.getComponent(player, Position).?.y,
-    });
+    const positions = world.getGroupComponents(MovementGroup, Position).?;
+    std.debug.print("Player position after update: ({d}, {d})\n", .{ positions[0].x, positions[0].y });
 }

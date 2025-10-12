@@ -152,22 +152,27 @@ pub fn CommandBuffer(comptime World: type) type {
 /// - `removeComponent(entity, C)` - Remove component (deferred)
 /// - `destroyEntity(entity)` - Destroy entity (deferred)
 ///
+/// Note: System functions should use `anytype` for commands parameters. Any `anytype` parameter
+/// will receive Commands(World) at runtime. By convention, name the parameter `commands`.
+///
 /// Example:
 /// ```zig
-/// fn spawnEnemies(commands: Commands) !void {
+/// fn spawnEnemies(commands: anytype) !void {
 ///     const enemy = commands.createEntity();
 ///     try commands.addComponent(enemy, Position, .{ .x = 100, .y = 100 });
 ///     try commands.addComponent(enemy, Enemy, .{});
 /// }
 /// ```
 pub fn Commands(comptime World: type) type {
+    const CommandBufferType = CommandBuffer(World);
+
     return struct {
         const Self = @This();
 
         world: *World,
-        command_buffer: *CommandBuffer(World),
+        command_buffer: *CommandBufferType,
 
-        pub fn init(world: *World, command_buffer: *CommandBuffer(World)) Self {
+        pub fn init(world: *World, command_buffer: *CommandBufferType) Self {
             return .{
                 .world = world,
                 .command_buffer = command_buffer,
@@ -467,10 +472,16 @@ pub fn Query(comptime QueryComponents: type) type {
     };
 }
 
-fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn) type {
+fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn, comptime World: type) type {
+    const CommandsType = Commands(World);
     var fields: [fn_info.params.len]StructField = undefined;
     for (fn_info.params, 0..) |param, i| {
-        const ArgType = param.type orelse @compileError("System function must have typed parameters");
+        const ArgType = if (param.type) |t|
+            t
+        else
+            // anytype parameter - treat as Commands(World)
+            CommandsType;
+
         fields[i] = StructField{
             .name = std.fmt.comptimePrint("{d}", .{i}),
             .type = ArgType,
@@ -495,14 +506,15 @@ fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn) type {
 ///
 /// System functions can accept multiple parameter types:
 /// - Query filters: SingleQuery(Component), Query(struct { A, B, ... }), Group(struct { A, B })
-/// - Commands: Commands(World) for entity/component manipulation
+/// - Commands: Use `anytype` for parameters that should receive Commands(World). By convention,
+///   name such parameters `commands`.
 ///
 /// Example:
 /// ```zig
 /// fn mySystem(
 ///     movement: Group(struct { Position, Velocity }),
 ///     health: SingleQuery(Health),
-///     commands: Commands(World),
+///     commands: anytype,
 /// ) !void {
 ///     // Query data and spawn entities
 ///     const enemy = commands.createEntity();
@@ -518,7 +530,7 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
         else => @compileError("Expected a function, got " ++ @typeName(@TypeOf(system_fn))),
     };
 
-    const SystemArgsType = constructSystemArgsType(system_type_info);
+    const SystemArgsType = constructSystemArgsType(system_type_info, World);
     const CommandsType = Commands(World);
 
     return struct {
@@ -526,9 +538,10 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
             const system_args = construct_args: {
                 var args: SystemArgsType = undefined;
                 inline for (system_type_info.params, 0..) |param, i| {
-                    const ArgType = param.type.?;
+                    // If param.type is null (anytype), treat it as Commands
+                    const ArgType = param.type orelse CommandsType;
 
-                    // Check if it's Commands type
+                    // Check if it's Commands type (either explicit or anytype)
                     if (ArgType == CommandsType) {
                         args[i] = CommandsType.init(world, &world.command_buffer);
                     } else if (@hasDecl(ArgType, "filter_type")) {

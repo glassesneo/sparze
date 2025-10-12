@@ -14,6 +14,17 @@ const World = sparze.World(struct { Position, Velocity });
 // Declare group type constant for better readability and maintainability
 const MovementGroup = struct { Position, Velocity };
 
+// Spawn entities using Commands (deferred component ops)
+fn spawnSystem(commands: anytype) !void {
+    const e1 = commands.createEntity();
+    try commands.addComponent(e1, Position, .{ .x = 0.0, .y = 0.0 });
+    try commands.addComponent(e1, Velocity, .{ .x = 1.0, .y = 2.0 });
+
+    const e2 = commands.createEntity();
+    try commands.addComponent(e2, Position, .{ .x = 5.0, .y = 5.0 });
+    try commands.addComponent(e2, Velocity, .{ .x = -0.5, .y = 0.0 });
+}
+
 // Define system as plain function
 fn movementSystem(group: sparze.Group(MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
@@ -36,23 +47,18 @@ pub fn main() !void {
     // Create a full‑owning group so iteration is fast.
     try world.createGroup(MovementGroup);
 
-    // Create a couple of entities.
-    const e1 = world.createEntity();
-    try world.addComponent(e1, Position, .{ .x = 0.0, .y = 0.0 });
-    try world.addComponent(e1, Velocity, .{ .x = 1.0, .y = 2.0 });
-
-    const e2 = world.createEntity();
-    try world.addComponent(e2, Position, .{ .x = 5.0, .y = 5.0 });
-    try world.addComponent(e2, Velocity, .{ .x = -0.5, .y = 0.0 });
+    // Spawn initial entities via command buffer
+    world.beginFrame();
+    try world.runSystem(spawnSystem);
+    try world.endFrame();
 
     // Run the system for a few frames.
     for (0..3) |_| {
         try world.runSystem(movementSystem);
     }
 
-    // Print the final positions.
-    const p1 = world.getComponent(e1, Position).?;
-    const p2 = world.getComponent(e2, Position).?;
-    std.debug.print("Entity 1 final position: ({d}, {d})\n", .{ p1.x, p1.y });
-    std.debug.print("Entity 2 final position: ({d}, {d})\n", .{ p2.x, p2.y });
+    // Print the final positions (first two entities in the movement group)
+    const positions = world.getGroupComponents(MovementGroup, Position).?;
+    std.debug.print("Entity 1 final position: ({d}, {d})\n", .{ positions[0].x, positions[0].y });
+    std.debug.print("Entity 2 final position: ({d}, {d})\n", .{ positions[1].x, positions[1].y });
 }
