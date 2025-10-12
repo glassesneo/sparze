@@ -18,7 +18,7 @@ const MovementGroup = struct { Position, Velocity };
 const CombatGroup = struct { Health, Armor };
 
 // Define systems as plain functions
-fn movementSystem(group: sparze.Group(World, MovementGroup)) !void {
+fn movementSystem(group: sparze.Group(MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
     for (positions, velocities) |*pos, vel| {
@@ -27,7 +27,7 @@ fn movementSystem(group: sparze.Group(World, MovementGroup)) !void {
     }
 }
 
-fn combatSystem(group: sparze.Group(World, CombatGroup)) !void {
+fn combatSystem(group: sparze.Group(CombatGroup)) !void {
     const healths = group.getArrayOf(Health);
     const armors = group.getArrayOf(Armor);
     for (healths, armors) |health, armor| {

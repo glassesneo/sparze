@@ -46,9 +46,9 @@ zig build run-{example-name}
 - Direct sparse set access without dynamic lookup
 
 **Systems** (`src/system.zig`):
-- `SingleQuery(World, Component)`: single component query, requires explicit World type parameter
-- `Query(World, struct { A, B, ... })`: multi-component runtime intersection query (no group setup required)
-- `Group(World, struct { A, B })`: optimized multi-component query with pre-allocated group (requires `createGroup()`)
+- `SingleQuery(Component)`: single component query
+- `Query(struct { A, B, ... })`: multi-component runtime intersection query (no group setup required)
+- `Group(struct { A, B })`: optimized multi-component query with pre-allocated group (requires `createGroup()`)
 - `world.runSystem(systemFn)`: convenience method for inline system execution
 - `createSystemFunction(World, systemFn)`: returns typed function pointer
 
@@ -73,7 +73,7 @@ var world = World.init(allocator);
 try world.createGroup(struct { Position, Velocity });
 
 // System with Group (optimized, requires createGroup)
-fn movementSystem(movement: Group(World, struct { Position, Velocity })) !void {
+fn movementSystem(movement: Group(struct { Position, Velocity })) !void {
     const positions = movement.getMutArrayOf(Position);
     const velocities = movement.getArrayOf(Velocity);
     for (positions, velocities) |*pos, vel| {
@@ -82,7 +82,7 @@ fn movementSystem(movement: Group(World, struct { Position, Velocity })) !void {
 }
 
 // System with Query (flexible, no group setup required)
-fn combatSystem(query: Query(World, struct { Position, Health })) !void {
+fn combatSystem(query: Query(struct { Position, Health })) !void {
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
             const pos = query.getComponent(entity, Position).?;
@@ -95,8 +95,8 @@ fn combatSystem(query: Query(World, struct { Position, Health })) !void {
 
 // System with multiple query types
 fn mySystem(
-    movement: Group(World, struct { Position, Velocity }),
-    health: SingleQuery(World, Health),
+    movement: Group(struct { Position, Velocity }),
+    health: SingleQuery(Health),
 ) !void {
     // Use movement.getEntities(), movement.getMutArrayOf(Position), etc.
     // Use health.entities, health.components
@@ -110,9 +110,9 @@ try world.runSystem(combatSystem);
 
 | Type | Components | Setup Required | Performance | Use Case |
 |------|------------|----------------|-------------|----------|
-| `SingleQuery(World, C)` | 1 | None | O(n) - Fast | Single component iteration |
-| `Query(World, struct { A, B, ... })` | 2+ | None | O(n) - Moderate | Ad-hoc multi-component queries |
-| `Group(World, struct { A, B })` | 2+ | `createGroup()` required | O(n) - Fastest | Frequently used multi-component queries |
+| `SingleQuery(C)` | 1 | None | O(n) - Fast | Single component iteration |
+| `Query(struct { A, B, ... })` | 2+ | None | O(n) - Moderate | Ad-hoc multi-component queries |
+| `Group(struct { A, B })` | 2+ | `createGroup()` required | O(n) - Fastest | Frequently used multi-component queries |
 
 **When to use each**:
 - **SingleQuery**: Iterating over entities with one component
@@ -143,11 +143,11 @@ World.validateGroups(.{
 try world.createGroup(MovementGroup);
 try world.createGroup(CombatGroup);
 
-fn movementSystem(group: Group(World, MovementGroup)) !void {
+fn movementSystem(group: Group(MovementGroup)) !void {
     // System implementation
 }
 
-fn combatSystem(group: Group(World, CombatGroup)) !void {
+fn combatSystem(group: Group(CombatGroup)) !void {
     // System implementation
 }
 ```
@@ -164,7 +164,7 @@ Systems should be defined as plain functions that accept query parameters. This 
 
 ```zig
 // Recommended: Plain function
-fn movementSystem(group: Group(World, MovementGroup)) !void {
+fn movementSystem(group: Group(MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
     for (positions, velocities) |*pos, vel| {
@@ -181,9 +181,9 @@ Systems can accept multiple query parameters:
 
 ```zig
 fn complexSystem(
-    movement: Group(World, MovementGroup),
-    health: SingleQuery(World, Health),
-    combat: Query(World, struct { Position, Armor }),
+    movement: Group(MovementGroup),
+    health: SingleQuery(Health),
+    combat: Query(struct { Position, Armor }),
 ) !void {
     // Use multiple query types in one system
 }

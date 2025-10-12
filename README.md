@@ -63,7 +63,7 @@ const World = sparze.World(struct { Position, Velocity });
 const MovementGroup = struct { Position, Velocity };
 
 // Define system as plain function
-fn movementSystem(group: sparze.Group(World, MovementGroup)) !void {
+fn movementSystem(group: sparze.Group(MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -101,7 +101,7 @@ Sparze provides three query types for different use cases:
 #### SingleQuery - Single Component Iteration
 
 ```zig
-fn healthSystem(query: sparze.SingleQuery(World, Health)) !void {
+fn healthSystem(query: sparze.SingleQuery(Health)) !void {
     for (query.entities, query.components) |entity, health| {
         std.debug.print("Entity {} has {} HP\n", .{ entity, health.hp });
     }
@@ -111,7 +111,7 @@ fn healthSystem(query: sparze.SingleQuery(World, Health)) !void {
 #### Query - Runtime Intersection (No Setup)
 
 ```zig
-fn combatSystem(query: sparze.Query(World, struct { Position, Health })) !void {
+fn combatSystem(query: sparze.Query(struct { Position, Health })) !void {
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
             const pos = query.getComponent(entity, Position).?;
@@ -138,7 +138,7 @@ fn combatSystem(query: sparze.Query(World, struct { Position, Health })) !void {
 // Best practice: Declare group type constant
 const MovementGroup = struct { Position, Velocity };
 
-fn movementSystem(group: sparze.Group(World, MovementGroup)) !void {
+fn movementSystem(group: sparze.Group(MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -178,9 +178,9 @@ try world.runSystem(movementSystem);
 **Systems**: Functions that operate on entities with specific component combinations
 
 **Query Types**:
-- **SingleQuery**: Fast iteration over entities with a single component type
-- **Query**: Flexible runtime intersection for multiple components without setup overhead
-- **Group**: Optimized multi-component iteration requiring upfront `createGroup()` call for maximum performance
+- **SingleQuery(Component)**: Fast iteration over entities with a single component type
+- **Query(struct { A, B, ... })**: Flexible runtime intersection for multiple components without setup overhead
+- **Group(struct { A, B })**: Optimized multi-component iteration requiring upfront `createGroup()` call for maximum performance
 
 ## Examples
 

@@ -4,6 +4,9 @@ const StructField = std.builtin.Type.StructField;
 const entity_module = @import("core/entity.zig");
 const Entity = entity_module.Entity;
 
+const sparse_set_module = @import("core/sparse_set.zig");
+const SparseSet = sparse_set_module.SparseSet;
+
 pub const FilterType = enum {
     single_query,
     query,
@@ -11,7 +14,7 @@ pub const FilterType = enum {
 };
 
 /// SingleQuery provides iteration over entities with a specific component for a given World type
-pub fn SingleQuery(comptime World: type, comptime QueryComponent: type) type {
+pub fn SingleQuery(comptime QueryComponent: type) type {
     return struct {
         const Self = @This();
 
@@ -21,8 +24,7 @@ pub fn SingleQuery(comptime World: type, comptime QueryComponent: type) type {
         entities: []const Entity,
         components: []Component,
 
-        pub fn init(world: *World) Self {
-            const sparse_set = world.getSparseSetPtr(Component);
+        pub fn init(sparse_set: *SparseSet(Component)) Self {
             return .{
                 .entities = sparse_set.packed_array.items,
                 .components = sparse_set.components.items,
@@ -31,39 +33,114 @@ pub fn SingleQuery(comptime World: type, comptime QueryComponent: type) type {
     };
 }
 
-/// Group provides fast iteration over entities with multiple components for a given World type
-pub fn Group(comptime World: type, comptime GroupComponents: type) type {
+/// Group provides fast iteration over entities with multiple components
+pub fn Group(comptime GroupComponents: type) type {
+    // The same way World and Query define their component_pool
+    const info = @typeInfo(GroupComponents);
+    if (info != .@"struct") @compileError("Invalid form of components");
+    const component_fields = info.@"struct".fields;
+    if (component_fields.len == 0) @compileError("Group must have at least one component");
+    const length = component_fields.len;
+
+    const GroupComponentPoolType = construct_component_pool: {
+        var sparse_set_fields: [length]StructField = undefined;
+        inline for (component_fields, 0..) |field, i| {
+            const SparseSetType = SparseSet(field.type);
+            sparse_set_fields[i] = StructField{
+                .name = std.fmt.comptimePrint("{d}", .{i}),
+                .type = *SparseSetType,
+                .is_comptime = false,
+                .alignment = @alignOf(*SparseSetType),
+                .default_value_ptr = null,
+            };
+        }
+        break :construct_component_pool @Type(.{ .@"struct" = .{
+            .layout = .auto,
+            .is_tuple = true,
+            .decls = &.{},
+            .fields = &sparse_set_fields,
+        } });
+    };
+
     return struct {
         const Self = @This();
 
         pub const filter_type: FilterType = .group;
         pub const ComponentTypes = GroupComponents;
 
-        world: *World,
+        group_component_pool: GroupComponentPoolType,
 
-        pub fn init(world: *World) Self {
-            return .{ .world = world };
+        pub fn init(world: anytype) Self {
+            var component_pool: GroupComponentPoolType = undefined;
+
+            // Extract sparse set pointers for all group components
+            inline for (component_fields, 0..) |field, i| {
+                const Component = field.type;
+                const sparse_set: *SparseSet(Component) = world.getSparseSetPtr(Component);
+                component_pool[i] = sparse_set;
+            }
+
+            return .{
+                .group_component_pool = component_pool,
+            };
+        }
+
+        pub fn getComponentId(comptime C: type) u16 {
+            // The order of components become the id
+            return inline for (component_fields, 0..) |field, i| {
+                if (C == field.type) break i;
+            } else @compileError("Unknown component type: " ++ @typeName(C));
+        }
+
+        fn getSparseSetPtr(self: Self, comptime C: type) *SparseSet(C) {
+            const id = comptime getComponentId(C);
+            return self.group_component_pool[id];
         }
 
         pub fn getEntities(self: Self) []const Entity {
-            return self.world.getGroupEntities(ComponentTypes) orelse &[_]Entity{};
+            // Use the first component's sparse set to get group entities
+            return self.group_component_pool[0].getGroupEntities();
         }
 
         pub fn getArrayOf(self: Self, comptime C: type) []const C {
-            return self.world.getGroupComponents(ComponentTypes, C) orelse &[_]C{};
+            return self.getSparseSetPtr(C).getGroupComponents();
         }
 
         pub fn getMutArrayOf(self: Self, comptime C: type) []C {
-            return self.world.getGroupComponentsMut(ComponentTypes, C) orelse &[_]C{};
+            return self.getSparseSetPtr(C).getGroupComponentsMut();
         }
     };
 }
 
 /// Query provides runtime intersection query over entities with multiple components
 /// Unlike Group, this doesn't require group setup but performs intersection at query time
-pub fn Query(comptime World: type, comptime QueryComponents: type) type {
-    const component_fields = comptime std.meta.fields(QueryComponents);
+pub fn Query(comptime QueryComponents: type) type {
+    // The same way World define its component_pool
+    const info = @typeInfo(QueryComponents);
+    if (info != .@"struct") @compileError("Invalid form of components");
+    const component_fields = info.@"struct".fields;
     if (component_fields.len == 0) @compileError("Query must have at least one component");
+    const length = info.@"struct".fields.len;
+
+    const QueryComponentPoolType = construct_component_pool: {
+        var sparse_set_fields: [length]StructField = undefined;
+        inline for (component_fields, 0..) |field, i| {
+            const SparseSetType = SparseSet(field.type);
+            sparse_set_fields[i] = StructField{
+                .name = std.fmt.comptimePrint("{d}", .{i}),
+                .type = *SparseSetType,
+                .is_comptime = false,
+                .alignment = @alignOf(*SparseSetType),
+                .default_value_ptr = null,
+            };
+        }
+        break :construct_component_pool @Type(.{ .@"struct" = .{
+            .layout = .auto,
+            .is_tuple = true,
+            .decls = &.{},
+            .fields = &sparse_set_fields,
+        } });
+    };
 
     return struct {
         const Self = @This();
@@ -71,18 +148,21 @@ pub fn Query(comptime World: type, comptime QueryComponents: type) type {
         pub const filter_type: FilterType = .query;
         pub const ComponentTypes = QueryComponents;
 
-        world: *World,
+        query_component_pool: QueryComponentPoolType,
         entities: []const Entity,
 
-        pub fn init(world: *World) Self {
+        pub fn init(world: anytype) Self {
             // Find the smallest sparse set to minimize iterations
             // We need to find this at runtime, but we can iterate all component types at comptime
             var min_size: usize = std.math.maxInt(usize);
             var candidate_entities: []const Entity = &[_]Entity{};
+            var component_pool: QueryComponentPoolType = undefined;
 
             // Try each component type and find the one with smallest sparse set
-            inline for (component_fields) |field| {
-                const sparse_set = world.getSparseSetPtr(field.type);
+            inline for (component_fields, 0..) |field, i| {
+                const Component = field.type;
+                const sparse_set: *SparseSet(Component) = world.getSparseSetPtr(Component);
+                component_pool[i] = sparse_set;
                 const size = sparse_set.packed_array.items.len;
                 if (size < min_size) {
                     min_size = size;
@@ -93,30 +173,40 @@ pub fn Query(comptime World: type, comptime QueryComponents: type) type {
             // Return a query that will iterate through the smallest set
             // Users must call hasAllComponents() to filter for entities with all components
             return .{
-                .world = world,
+                .query_component_pool = component_pool,
                 .entities = candidate_entities,
             };
         }
 
+        pub fn getComponentId(comptime C: type) u16 {
+            // The order of components become the id
+            return inline for (component_fields, 0..) |field, i| {
+                if (C == field.type) break i;
+            } else @compileError("Unknown component type: " ++ @typeName(C));
+        }
+
+        fn getSparseSetPtr(self: Self, comptime C: type) *SparseSet(C) {
+            const id = comptime getComponentId(C);
+            return self.query_component_pool[id];
+        }
+
         /// Get immutable component for an entity
         pub fn getComponent(self: Self, entity: Entity, comptime C: type) ?C {
-            return self.world.getComponent(entity, C);
+            return self.getSparseSetPtr(C).get(entity);
         }
 
         /// Get mutable component pointer for an entity
         pub fn getComponentMut(self: Self, entity: Entity, comptime C: type) ?*C {
-            const sparse_set = self.world.getSparseSetPtr(C);
+            const sparse_set = self.getSparseSetPtr(C);
             return sparse_set.getPtrMut(entity);
         }
 
         /// Check if entity has all required components
         pub fn hasAllComponents(self: Self, entity: Entity) bool {
-            inline for (component_fields) |field| {
-                if (!self.world.hasComponent(entity, field.type)) {
-                    return false;
-                }
-            }
-            return true;
+            return inline for (component_fields) |field| {
+                if (!self.getSparseSetPtr(field.type).contains(entity))
+                    break false;
+            } else true;
         }
     };
 }
@@ -163,7 +253,7 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                     const filter_type: FilterType = ArgType.filter_type;
                     switch (filter_type) {
                         .single_query => {
-                            args[i] = ArgType.init(world);
+                            args[i] = ArgType.init(world.getSparseSetPtr(ArgType.Component));
                         },
                         .query => {
                             args[i] = ArgType.init(world);
@@ -203,8 +293,8 @@ test "FixedSingleQuery basic iteration" {
     try world.addComponent(e2, Velocity, .{ .dx = 1.0, .dy = 2.0 });
 
     // Query all positions
-    const PositionQuery = SingleQuery(TestWorld, Position);
-    const query = PositionQuery.init(&world);
+    const PositionQuery = SingleQuery(Position);
+    const query = PositionQuery.init(world.getSparseSetPtr(Position));
 
     try std.testing.expectEqual(@as(usize, 2), query.entities.len);
     try std.testing.expectEqual(@as(usize, 2), query.components.len);
@@ -244,7 +334,7 @@ test "FixedGroup query basic usage" {
     // e2 has no velocity - not in group
 
     // Use Group query
-    const MovementGroup = Group(TestWorld, struct { Position, Velocity });
+    const MovementGroup = Group(struct { Position, Velocity });
     const group = MovementGroup.init(&world);
 
     const entities = group.getEntities();
@@ -265,7 +355,7 @@ test "FixedWorld system function with SingleQuery" {
     const TestWorld = @import("world.zig").World(struct { Position });
 
     const UpdatePositions = struct {
-        fn system(query: SingleQuery(TestWorld, Position)) !void {
+        fn system(query: SingleQuery(Position)) !void {
             for (query.components) |*pos| {
                 pos.x += 1.0;
                 pos.y += 1.0;
@@ -303,7 +393,7 @@ test "FixedWorld system function with Group" {
     const TestWorld = @import("world.zig").World(struct { Position, Velocity });
 
     const MovementSystem = struct {
-        fn system(group: Group(TestWorld, struct { Position, Velocity })) !void {
+        fn system(group: Group(struct { Position, Velocity })) !void {
             const positions = group.getMutArrayOf(Position);
             const velocities = group.getArrayOf(Velocity);
 
@@ -351,8 +441,8 @@ test "FixedWorld system with multiple queries" {
 
     const ComplexSystem = struct {
         fn system(
-            movement: Group(TestWorld, struct { Position, Velocity }),
-            health_query: SingleQuery(TestWorld, Health),
+            movement: Group(struct { Position, Velocity }),
+            health_query: SingleQuery(Health),
         ) !void {
             // Update movement
             const positions = movement.getMutArrayOf(Position);
@@ -422,7 +512,7 @@ test "FixedQuery basic iteration" {
     // e3 has only position
 
     // Query entities with Position and Velocity (no group setup required)
-    const MovementQuery = Query(TestWorld, struct { Position, Velocity });
+    const MovementQuery = Query(struct { Position, Velocity });
     const query = MovementQuery.init(&world);
 
     // Should find e1 and e2 (both have Position and Velocity)
@@ -461,7 +551,7 @@ test "FixedQuery with mutable component access" {
     try world.addComponent(e2, Velocity, .{ .dx = -1.0, .dy = -2.0 });
 
     // Use query to mutate components
-    const MovementQuery = Query(TestWorld, struct { Position, Velocity });
+    const MovementQuery = Query(struct { Position, Velocity });
     const query = MovementQuery.init(&world);
 
     for (query.entities) |entity| {
@@ -489,7 +579,7 @@ test "FixedWorld system function with Query" {
     const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
 
     const CombatSystem = struct {
-        fn system(query: Query(TestWorld, struct { Position, Health })) !void {
+        fn system(query: Query(struct { Position, Health })) !void {
             for (query.entities) |entity| {
                 if (query.hasAllComponents(entity)) {
                     const pos = query.getComponent(entity, Position).?;
@@ -559,7 +649,7 @@ test "FixedQuery three components" {
     try world.addComponent(e3, Velocity, .{ .dx = 1.0, .dy = 2.0 });
 
     // Query for all three components
-    const FullEntityQuery = Query(TestWorld, struct { Position, Velocity, Health });
+    const FullEntityQuery = Query(struct { Position, Velocity, Health });
     const query = FullEntityQuery.init(&world);
 
     // Should only find e1

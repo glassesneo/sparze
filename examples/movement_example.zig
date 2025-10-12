@@ -15,7 +15,7 @@ const World = sparze.World(struct { Position, Velocity });
 const MovementGroup = struct { Position, Velocity };
 
 // Define system as plain function
-fn movementSystem(group: sparze.Group(World, MovementGroup)) !void {
+fn movementSystem(group: sparze.Group(MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
     for (positions, velocities) |*pos, vel| {

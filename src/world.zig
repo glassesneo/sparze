@@ -264,7 +264,7 @@ pub fn World(Components: anytype) type {
 
         /// Get group information by component types
         pub fn getGroup(self: *const Self, comptime GroupComponents: type) ?*const GroupInfo {
-            const group_fields = comptime std.meta.fields(GroupComponents);
+            const group_fields: []const StructField = comptime std.meta.fields(GroupComponents);
             const target_ids = comptime blk: {
                 var ids: [group_fields.len]u16 = undefined;
                 for (group_fields, 0..) |field, i| {

@@ -32,7 +32,7 @@ fn terminationSystem() !void {
     std.debug.print("Termination system called!\n", .{});
 }
 
-fn movementSystem(group: Group(World, MovementGroup)) !void {
+fn movementSystem(group: Group(MovementGroup)) !void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -43,13 +43,13 @@ fn movementSystem(group: Group(World, MovementGroup)) !void {
     }
 }
 
-fn healthSystem(query: SingleQuery(World, Health)) !void {
+fn healthSystem(query: SingleQuery(Health)) !void {
     for (query.entities, query.components) |entity, health| {
         std.debug.print("entity: {any}, health: {d} hp\n", .{ entity, health.hp });
     }
 }
 
-fn positionSystem(query: SingleQuery(World, Position)) !void {
+fn positionSystem(query: SingleQuery(Position)) !void {
     for (query.entities, query.components) |entity, *pos| {
         std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y });
         pos.y -= 1;
@@ -61,8 +61,8 @@ fn noQuerySystem() !void {
 }
 
 fn multiQuerySystem(
-    movement_group: Group(World, MovementGroup),
-    health_query: SingleQuery(World, Health),
+    movement_group: Group(MovementGroup),
+    health_query: SingleQuery(Health),
 ) !void {
     std.debug.print("Multi-query system:\n", .{});
     std.debug.print("  Movement entities: {}\n", .{movement_group.getEntities().len});
@@ -70,7 +70,7 @@ fn multiQuerySystem(
 }
 
 // Query example: Multi-component query without requiring a group
-fn combatQuerySystem(query: Query(World, struct { Position, Health })) !void {
+fn combatQuerySystem(query: Query(struct { Position, Health })) !void {
     std.debug.print("Combat query (no group needed):\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
