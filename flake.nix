@@ -39,11 +39,15 @@
         # zon2nix = inputs.zon2nix.packages.${system}.zon2nix;
       in
         pkgs.mkShell {
-          packages = [
-            zig
-            zls
-            # zon2nix
-          ];
+          packages =
+            [
+              zig
+              zls
+              # zon2nix
+            ]
+            ++ (with pkgs; [
+              wasmtime
+            ]);
         }
     );
 

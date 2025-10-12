@@ -193,9 +193,11 @@ pub fn World(Components: anytype) type {
                 if (i == type_id) {
                     const C = field.type;
                     if (bytes.len != @sizeOf(C)) return error.InvalidComponentSize;
-                    // Use bytesAsValue to properly handle alignment
-                    const component = std.mem.bytesAsValue(C, bytes[0..@sizeOf(C)]);
-                    try self.addComponent(entity, C, component.*);
+                    // Copy into properly aligned storage to avoid unaligned access (e.g., on wasm)
+                    var component: C = undefined;
+                    const dst = std.mem.asBytes(&component);
+                    std.mem.copyForwards(u8, dst, bytes[0..@sizeOf(C)]);
+                    try self.addComponent(entity, C, component);
                     return;
                 }
             }

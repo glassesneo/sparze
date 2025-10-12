@@ -21,9 +21,17 @@ jobs:
           curl -L https://ziglang.org/download/0.15.1/zig-x86_64-linux-0.15.1.tar.xz | tar -xJ
           sudo mv zig-x86_64-linux-0.15.1 /usr/local/zig
           sudo ln -s /usr/local/zig/zig /usr/local/bin/zig
+      - name: Install wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+          wasmtime --version
       - name: Run Tests
         run: |
           zig test src/root.zig
+      - name: Run Wasm Tests (WASI)
+        run: |
+          zig build test-wasm
       - name: Build Examples
         run: |
           zig build examples

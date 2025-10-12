@@ -38,19 +38,33 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
-    // Creates a step for unit testing. This only builds the test executable
-    // but does not run it.
+    // Creates a step for unit testing. This builds and runs the unit tests.
     const lib_unit_tests = b.addTest(.{
         .root_module = lib_mod,
     });
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
+    // Expose a `test` step. If the target is wasm32-wasi, run with wasmtime.
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+    if (target.result.cpu.arch.isWasm() and target.result.os.tag == .wasi) {
+        const run_wasi = b.addSystemCommand(&.{"wasmtime"});
+        run_wasi.addArtifactArg(lib_unit_tests);
+        test_step.dependOn(&run_wasi.step);
+    } else {
+        const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+        test_step.dependOn(&run_lib_unit_tests.step);
+    }
+
+    // Convenience: always provide a `test-wasm` step to build+run tests under WASI using wasmtime
+    const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .wasi });
+    const wasm_mod = b.addModule("sparze-wasm", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+    const wasm_tests = b.addTest(.{ .root_module = wasm_mod });
+    const run_wasm_tests = b.addSystemCommand(&.{"wasmtime"});
+    run_wasm_tests.addArtifactArg(wasm_tests);
+    b.step("test-wasm", "Run unit tests (wasm32-wasi via wasmtime)").dependOn(&run_wasm_tests.step);
 }
 
 const ExampleOptions = struct {
