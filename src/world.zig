@@ -16,6 +16,8 @@ pub const FilterType = system_module.FilterType;
 pub const SingleQuery = system_module.SingleQuery;
 pub const Query = system_module.Query;
 pub const Group = system_module.Group;
+pub const Commands = system_module.Commands;
+pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;
 
 /// Information about a full-owning group
@@ -57,6 +59,7 @@ pub fn World(Components: anytype) type {
         entity_registry: EntityRegistry,
         component_pool: ComponentPoolType,
         groups: ArrayList(GroupInfo),
+        command_buffer: CommandBuffer(Self),
 
         pub fn init(allocator: Allocator) Self {
             return .{
@@ -70,10 +73,12 @@ pub fn World(Components: anytype) type {
                     break :init pool;
                 },
                 .groups = .{},
+                .command_buffer = CommandBuffer(Self).init(allocator),
             };
         }
 
         pub fn deinit(self: *Self) void {
+            self.command_buffer.deinit();
             for (self.groups.items) |*group| {
                 self.allocator.free(group.component_ids);
             }
@@ -182,6 +187,21 @@ pub fn World(Components: anytype) type {
             self.updateGroupsOnAdd(entity, component_id);
         }
 
+        /// Add component from raw bytes (used by CommandBuffer)
+        pub fn addComponentFromBytes(self: *Self, entity: Entity, type_id: u16, bytes: []const u8) !void {
+            inline for (component_fields, 0..) |field, i| {
+                if (i == type_id) {
+                    const C = field.type;
+                    if (bytes.len != @sizeOf(C)) return error.InvalidComponentSize;
+                    // Use bytesAsValue to properly handle alignment
+                    const component = std.mem.bytesAsValue(C, bytes[0..@sizeOf(C)]);
+                    try self.addComponent(entity, C, component.*);
+                    return;
+                }
+            }
+            return error.InvalidComponentId;
+        }
+
         pub fn addComponents(self: *Self, entity: Entity, comptime components: anytype) !void {
             inline for (components) |component| {
                 const C = @TypeOf(component);
@@ -207,6 +227,16 @@ pub fn World(Components: anytype) type {
             self.updateGroupsOnRemove(entity, component_id);
 
             self.getSparseSetPtr(C).remove(entity);
+        }
+
+        /// Remove component by ID (used by CommandBuffer)
+        pub fn removeComponentById(self: *Self, entity: Entity, type_id: u16) void {
+            inline for (component_fields, 0..) |field, i| {
+                if (i == type_id) {
+                    self.removeComponent(entity, field.type);
+                    return;
+                }
+            }
         }
 
         pub fn createEntityWith(self: *Self, comptime components: anytype) !Entity {
@@ -445,6 +475,16 @@ pub fn World(Components: anytype) type {
                     }
                 }
             }
+        }
+
+        /// Begin a new frame - clears command buffer
+        pub fn beginFrame(self: *Self) void {
+            self.command_buffer.clear();
+        }
+
+        /// End frame - executes all recorded commands
+        pub fn endFrame(self: *Self) !void {
+            try self.command_buffer.flush(self);
         }
 
         /// Convenience method to run a system directly
@@ -968,3 +1008,151 @@ test "World recommended usage pattern - validate groups upfront" {
 //         struct { B, C },
 //     });
 // }
+
+test "Commands with frame-based execution" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+    const Enemy = struct { tag: u8 = 0 }; // Zero-sized types not supported in ArrayList
+
+    const TestWorld = World(struct { Position, Velocity, Enemy });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // System that spawns enemies using Commands
+    const spawnEnemies = struct {
+        fn system(commands: Commands(TestWorld)) !void {
+            // Create 3 enemies
+            for (0..3) |i| {
+                const enemy = commands.createEntity();
+                try commands.addComponent(enemy, Position, .{
+                    .x = @as(f32, @floatFromInt(i)) * 10.0,
+                    .y = 100.0,
+                });
+                try commands.addComponent(enemy, Velocity, .{ .dx = 1.0, .dy = 0.0 });
+                try commands.addComponent(enemy, Enemy, .{});
+            }
+        }
+    }.system;
+
+    // Begin frame
+    world.beginFrame();
+
+    // Run spawn system - entities created immediately, components deferred
+    try world.runSystem(spawnEnemies);
+
+    // At this point, entities exist but have no components yet
+    const enemy_query_before = SingleQuery(Enemy).init(world.getSparseSetPtr(Enemy));
+    try std.testing.expectEqual(@as(usize, 0), enemy_query_before.entities.len); // No enemies with Enemy component yet
+
+    // End frame - execute commands
+    try world.endFrame();
+
+    // Now components are added
+    const enemy_query_after = SingleQuery(Enemy).init(world.getSparseSetPtr(Enemy));
+    try std.testing.expectEqual(@as(usize, 3), enemy_query_after.entities.len); // 3 enemies now exist
+
+    // Verify components were added correctly
+    const position_query = SingleQuery(Position).init(world.getSparseSetPtr(Position));
+    try std.testing.expectEqual(@as(usize, 3), position_query.entities.len);
+
+    const velocity_query = SingleQuery(Velocity).init(world.getSparseSetPtr(Velocity));
+    try std.testing.expectEqual(@as(usize, 3), velocity_query.entities.len);
+}
+
+test "Commands remove and destroy operations" {
+    const Health = struct { hp: i32 };
+    const Dead = struct { tag: u8 = 0 }; // Zero-sized types not supported in ArrayList
+
+    const TestWorld = World(struct { Health, Dead });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create entities with health
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Health, .{ .hp = 100 });
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Health, .{ .hp = 0 });
+
+    const e3 = world.createEntity();
+    try world.addComponent(e3, Health, .{ .hp = 50 });
+
+    // System that marks dead entities and removes/destroys
+    const deathSystem = struct {
+        fn system(query: SingleQuery(Health), commands: Commands(TestWorld)) !void {
+            for (query.entities, query.components) |entity, health| {
+                if (health.hp <= 0) {
+                    // Mark as dead (add component)
+                    try commands.addComponent(entity, Dead, .{});
+                    // Remove health
+                    try commands.removeComponent(entity, Health);
+                } else if (health.hp < 25) {
+                    // Destroy low health entities
+                    try commands.destroyEntity(entity);
+                }
+            }
+        }
+    }.system;
+
+    world.beginFrame();
+    try world.runSystem(deathSystem);
+    try world.endFrame();
+
+    // e1 (hp=100) should be alive with Health
+    try std.testing.expect(world.isAlive(e1));
+    try std.testing.expect(world.hasComponent(e1, Health));
+
+    // e2 (hp=0) should be alive but marked Dead, Health removed
+    try std.testing.expect(world.isAlive(e2));
+    try std.testing.expect(!world.hasComponent(e2, Health));
+    try std.testing.expect(world.hasComponent(e2, Dead));
+
+    // e3 (hp=50) should be alive (not destroyed since hp >= 25)
+    try std.testing.expect(world.isAlive(e3));
+}
+
+test "Commands createEntityWith convenience method" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+
+    const TestWorld = World(struct { Position, Velocity });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    const spawnWithBatch = struct {
+        fn system(commands: Commands(TestWorld)) !void {
+            _ = try commands.createEntityWith(.{
+                Position{ .x = 10.0, .y = 20.0 },
+                Velocity{ .dx = 1.0, .dy = 2.0 },
+            });
+        }
+    }.system;
+
+    world.beginFrame();
+    try world.runSystem(spawnWithBatch);
+    try world.endFrame();
+
+    // Verify entity was created with both components
+    const pos_query = SingleQuery(Position).init(world.getSparseSetPtr(Position));
+    try std.testing.expectEqual(@as(usize, 1), pos_query.entities.len);
+    try std.testing.expectEqual(@as(f32, 10.0), pos_query.components[0].x);
+
+    const vel_query = SingleQuery(Velocity).init(world.getSparseSetPtr(Velocity));
+    try std.testing.expectEqual(@as(usize, 1), vel_query.entities.len);
+    try std.testing.expectEqual(@as(f32, 1.0), vel_query.components[0].dx);
+}

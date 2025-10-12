@@ -21,6 +21,194 @@ pub const FilterType = enum {
     group,
 };
 
+/// Command types for deferred entity/component operations
+const CommandType = enum {
+    add_component,
+    remove_component,
+    destroy_entity,
+};
+
+/// Type-erased component data for command buffer
+const ComponentData = struct {
+    type_id: u16,
+    data: []u8,
+
+    pub fn deinit(self: *ComponentData, allocator: std.mem.Allocator) void {
+        allocator.free(self.data);
+    }
+};
+
+/// A single command in the command buffer
+const Command = struct {
+    type: CommandType,
+    entity: Entity,
+    component_data: ?ComponentData,
+
+    pub fn deinit(self: *Command, allocator: std.mem.Allocator) void {
+        if (self.component_data) |*data| {
+            data.deinit(allocator);
+        }
+    }
+};
+
+/// CommandBuffer records entity and component operations for deferred execution.
+///
+/// Commands are executed at the end of a frame via `world.endFrame()`, ensuring
+/// that the world state remains stable during system execution.
+pub fn CommandBuffer(comptime World: type) type {
+    return struct {
+        const Self = @This();
+
+        allocator: std.mem.Allocator,
+        commands: std.ArrayList(Command),
+
+        pub fn init(allocator: std.mem.Allocator) Self {
+            return .{
+                .allocator = allocator,
+                .commands = .{},
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            for (self.commands.items) |*cmd| {
+                cmd.deinit(self.allocator);
+            }
+            self.commands.deinit(self.allocator);
+        }
+
+        pub fn clear(self: *Self) void {
+            for (self.commands.items) |*cmd| {
+                cmd.deinit(self.allocator);
+            }
+            self.commands.clearRetainingCapacity();
+        }
+
+        /// Record a component addition
+        pub fn recordAddComponent(self: *Self, entity: Entity, type_id: u16, data: []const u8) !void {
+            const data_copy = try self.allocator.dupe(u8, data);
+            try self.commands.append(self.allocator, .{
+                .type = .add_component,
+                .entity = entity,
+                .component_data = .{
+                    .type_id = type_id,
+                    .data = data_copy,
+                },
+            });
+        }
+
+        /// Record a component removal
+        pub fn recordRemoveComponent(self: *Self, entity: Entity, type_id: u16) !void {
+            try self.commands.append(self.allocator, .{
+                .type = .remove_component,
+                .entity = entity,
+                .component_data = .{
+                    .type_id = type_id,
+                    .data = &[_]u8{},
+                },
+            });
+        }
+
+        /// Record an entity destruction
+        pub fn recordDestroyEntity(self: *Self, entity: Entity) !void {
+            try self.commands.append(self.allocator, .{
+                .type = .destroy_entity,
+                .entity = entity,
+                .component_data = null,
+            });
+        }
+
+        /// Execute all recorded commands
+        pub fn flush(self: *Self, world: *World) !void {
+            for (self.commands.items) |*cmd| {
+                switch (cmd.type) {
+                    .add_component => {
+                        const comp_data = cmd.component_data.?;
+                        try world.addComponentFromBytes(cmd.entity, comp_data.type_id, comp_data.data);
+                    },
+                    .remove_component => {
+                        const comp_data = cmd.component_data.?;
+                        world.removeComponentById(cmd.entity, comp_data.type_id);
+                    },
+                    .destroy_entity => {
+                        world.destroyEntity(cmd.entity);
+                    },
+                }
+            }
+            self.clear();
+        }
+    };
+}
+
+/// Commands provides a restricted API for entity/component manipulation within systems.
+///
+/// Unlike direct World access, Commands ensures safe, deferred execution of operations.
+/// With Option C implementation: entities are created immediately, but component operations
+/// are deferred until `world.endFrame()`.
+///
+/// Allowed operations:
+/// - `createEntity()` - Create new entity (immediate)
+/// - `createEntityWith(components)` - Create entity with components (immediate entity, deferred components)
+/// - `addComponent(entity, C, component)` - Add component (deferred)
+/// - `removeComponent(entity, C)` - Remove component (deferred)
+/// - `destroyEntity(entity)` - Destroy entity (deferred)
+///
+/// Example:
+/// ```zig
+/// fn spawnEnemies(commands: Commands) !void {
+///     const enemy = commands.createEntity();
+///     try commands.addComponent(enemy, Position, .{ .x = 100, .y = 100 });
+///     try commands.addComponent(enemy, Enemy, .{});
+/// }
+/// ```
+pub fn Commands(comptime World: type) type {
+    return struct {
+        const Self = @This();
+
+        world: *World,
+        command_buffer: *CommandBuffer(World),
+
+        pub fn init(world: *World, command_buffer: *CommandBuffer(World)) Self {
+            return .{
+                .world = world,
+                .command_buffer = command_buffer,
+            };
+        }
+
+        /// Create a new empty entity (immediate execution)
+        pub fn createEntity(self: Self) Entity {
+            return self.world.createEntity();
+        }
+
+        /// Create entity with components (immediate entity creation, deferred component addition)
+        pub fn createEntityWith(self: Self, comptime components: anytype) !Entity {
+            const entity = self.createEntity();
+            inline for (components) |component| {
+                const C = @TypeOf(component);
+                try self.addComponent(entity, C, component);
+            }
+            return entity;
+        }
+
+        /// Add component to entity (deferred execution)
+        pub fn addComponent(self: Self, entity: Entity, comptime C: type, component: C) !void {
+            const type_id = comptime World.getComponentId(C);
+            const bytes = std.mem.asBytes(&component);
+            try self.command_buffer.recordAddComponent(entity, type_id, bytes);
+        }
+
+        /// Remove component from entity (deferred execution)
+        pub fn removeComponent(self: Self, entity: Entity, comptime C: type) !void {
+            const type_id = comptime World.getComponentId(C);
+            try self.command_buffer.recordRemoveComponent(entity, type_id);
+        }
+
+        /// Destroy entity (deferred execution)
+        pub fn destroyEntity(self: Self, entity: Entity) !void {
+            try self.command_buffer.recordDestroyEntity(entity);
+        }
+    };
+}
+
 /// SingleQuery is a query filter that provides iteration over entities with a single component.
 ///
 /// This is the simplest and most efficient query filter for accessing entities with
@@ -305,18 +493,20 @@ fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn) type {
 /// into a function that can be executed by the World. It automatically resolves and injects
 /// the appropriate query filters based on the system function's parameter types.
 ///
-/// System functions can accept multiple query filter parameters of different types:
-/// - SingleQuery(Component)
-/// - Query(struct { A, B, ... })
-/// - Group(struct { A, B })
+/// System functions can accept multiple parameter types:
+/// - Query filters: SingleQuery(Component), Query(struct { A, B, ... }), Group(struct { A, B })
+/// - Commands: Commands(World) for entity/component manipulation
 ///
 /// Example:
 /// ```zig
 /// fn mySystem(
 ///     movement: Group(struct { Position, Velocity }),
 ///     health: SingleQuery(Health),
+///     commands: Commands(World),
 /// ) !void {
-///     // System implementation
+///     // Query data and spawn entities
+///     const enemy = commands.createEntity();
+///     try commands.addComponent(enemy, Position, .{ .x = 100, .y = 100 });
 /// }
 ///
 /// const system = createSystemFunction(World, mySystem);
@@ -329,6 +519,7 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
     };
 
     const SystemArgsType = constructSystemArgsType(system_type_info);
+    const CommandsType = Commands(World);
 
     return struct {
         fn run(world: *World) !void {
@@ -336,21 +527,26 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                 var args: SystemArgsType = undefined;
                 inline for (system_type_info.params, 0..) |param, i| {
                     const ArgType = param.type.?;
-                    if (!@hasDecl(ArgType, "filter_type")) {
-                        @compileError("System parameter must be a query filter type (SingleQuery, Query, or Group). Got: " ++ @typeName(ArgType));
-                    }
 
-                    const filter_type: FilterType = ArgType.filter_type;
-                    switch (filter_type) {
-                        .single_query => {
-                            args[i] = ArgType.init(world.getSparseSetPtr(ArgType.Component));
-                        },
-                        .query => {
-                            args[i] = ArgType.init(world);
-                        },
-                        .group => {
-                            args[i] = ArgType.init(world);
-                        },
+                    // Check if it's Commands type
+                    if (ArgType == CommandsType) {
+                        args[i] = CommandsType.init(world, &world.command_buffer);
+                    } else if (@hasDecl(ArgType, "filter_type")) {
+                        // It's a query filter
+                        const filter_type: FilterType = ArgType.filter_type;
+                        switch (filter_type) {
+                            .single_query => {
+                                args[i] = ArgType.init(world.getSparseSetPtr(ArgType.Component));
+                            },
+                            .query => {
+                                args[i] = ArgType.init(world);
+                            },
+                            .group => {
+                                args[i] = ArgType.init(world);
+                            },
+                        }
+                    } else {
+                        @compileError("System parameter must be a query filter type (SingleQuery, Query, or Group) or Commands. Got: " ++ @typeName(ArgType));
                     }
                 }
                 break :construct_args args;
