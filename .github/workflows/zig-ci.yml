@@ -22,14 +22,15 @@ jobs:
           sudo mv zig-x86_64-linux-0.15.1 /usr/local/zig
           sudo ln -s /usr/local/zig/zig /usr/local/bin/zig
       - name: Setup wasmtime
-      - steps:
-        - name: Setup `wasmtime`
-          uses: bytecodealliance/actions/wasmtime/setup@v1
-        - name: Run `wasmtime version`
-          run: "wasmtime --version"
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+      - name: Wasmtime version
+        run: wasmtime --version
       - name: Run Tests
         run: |
           zig test src/root.zig
+      - name: Run Wasm Tests (WASI)
+        run: |
+          zig build test-wasm
       - name: Build Examples
         run: |
           zig build examples
