@@ -7,13 +7,34 @@ const Entity = entity_module.Entity;
 const sparse_set_module = @import("core/sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 
+/// FilterType identifies the type of query filter used in system parameters.
+///
+/// Query filters are types that filter entities based on component composition,
+/// used as parameters in system functions to specify which entities the system operates on.
+/// Each filter type provides different performance characteristics and usage patterns.
 pub const FilterType = enum {
+    /// SingleQuery filter: iterates over entities with a single component
     single_query,
+    /// Query filter: performs runtime intersection for multiple components
     query,
+    /// Group filter: optimized multi-component iteration with pre-organized layout
     group,
 };
 
-/// SingleQuery provides iteration over entities with a specific component for a given World type
+/// SingleQuery is a query filter that provides iteration over entities with a single component.
+///
+/// This is the simplest and most efficient query filter for accessing entities with
+/// a single component type. It provides direct access to packed component arrays for
+/// cache-friendly iteration.
+///
+/// Example:
+/// ```zig
+/// fn healthSystem(query: SingleQuery(Health)) !void {
+///     for (query.entities, query.components) |entity, health| {
+///         // Process each entity with Health component
+///     }
+/// }
+/// ```
 pub fn SingleQuery(comptime QueryComponent: type) type {
     return struct {
         const Self = @This();
@@ -33,7 +54,32 @@ pub fn SingleQuery(comptime QueryComponent: type) type {
     };
 }
 
-/// Group provides fast iteration over entities with multiple components
+/// Group is a query filter that provides optimized iteration over entities with multiple components.
+///
+/// Groups require upfront setup via `world.createGroup()` but provide the fastest iteration
+/// for multi-component queries. Entities in a group are stored at the beginning of all
+/// component arrays, enabling cache-friendly sequential access.
+///
+/// Use Group for hot-path queries that run frequently (e.g., every frame) where
+/// maximum performance is critical.
+///
+/// Example:
+/// ```zig
+/// const MovementGroup = struct { Position, Velocity };
+///
+/// // Setup (once)
+/// try world.createGroup(MovementGroup);
+///
+/// // System function
+/// fn movementSystem(group: Group(MovementGroup)) !void {
+///     const positions = group.getMutArrayOf(Position);
+///     const velocities = group.getArrayOf(Velocity);
+///     for (positions, velocities) |*pos, vel| {
+///         pos.x += vel.x;
+///         pos.y += vel.y;
+///     }
+/// }
+/// ```
 pub fn Group(comptime GroupComponents: type) type {
     // The same way World and Query define their component_pool
     const info = @typeInfo(GroupComponents);
@@ -112,8 +158,30 @@ pub fn Group(comptime GroupComponents: type) type {
     };
 }
 
-/// Query provides runtime intersection query over entities with multiple components
-/// Unlike Group, this doesn't require group setup but performs intersection at query time
+/// Query is a query filter that provides runtime intersection over entities with multiple components.
+///
+/// Unlike Group, Query doesn't require any setup but performs intersection at query time
+/// by iterating through the smallest component set and checking for the presence of other
+/// components. This makes it flexible for ad-hoc queries or varying component combinations.
+///
+/// Use Query when:
+/// - You need multi-component queries without setup overhead
+/// - Query patterns are dynamic or one-off
+/// - Flexibility is more important than raw performance
+///
+/// Example:
+/// ```zig
+/// fn combatSystem(query: Query(struct { Position, Health })) !void {
+///     for (query.entities) |entity| {
+///         if (query.hasAllComponents(entity)) {
+///             const pos = query.getComponent(entity, Position).?;
+///             if (query.getComponentMut(entity, Health)) |health| {
+///                 // Apply damage based on position
+///             }
+///         }
+///     }
+/// }
+/// ```
 pub fn Query(comptime QueryComponents: type) type {
     // The same way World define its component_pool
     const info = @typeInfo(QueryComponents);
@@ -231,7 +299,29 @@ fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn) type {
     } });
 }
 
-/// Create a system function for a specific World type that can be called with world.runSystem(system_fn)
+/// Create a system function for a specific World type that can be called with world.runSystem(system_fn).
+///
+/// This function converts a user-defined system function (which accepts query filter parameters)
+/// into a function that can be executed by the World. It automatically resolves and injects
+/// the appropriate query filters based on the system function's parameter types.
+///
+/// System functions can accept multiple query filter parameters of different types:
+/// - SingleQuery(Component)
+/// - Query(struct { A, B, ... })
+/// - Group(struct { A, B })
+///
+/// Example:
+/// ```zig
+/// fn mySystem(
+///     movement: Group(struct { Position, Velocity }),
+///     health: SingleQuery(Health),
+/// ) !void {
+///     // System implementation
+/// }
+///
+/// const system = createSystemFunction(World, mySystem);
+/// try system(&world);
+/// ```
 pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) fn (*World) anyerror!void {
     const system_type_info = switch (@typeInfo(@TypeOf(system_fn))) {
         .@"fn" => |f| f,
@@ -247,7 +337,7 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                 inline for (system_type_info.params, 0..) |param, i| {
                     const ArgType = param.type.?;
                     if (!@hasDecl(ArgType, "filter_type")) {
-                        @compileError("System parameter must be a Query or Group type. Got: " ++ @typeName(ArgType));
+                        @compileError("System parameter must be a query filter type (SingleQuery, Query, or Group). Got: " ++ @typeName(ArgType));
                     }
 
                     const filter_type: FilterType = ArgType.filter_type;

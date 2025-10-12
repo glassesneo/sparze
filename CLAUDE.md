@@ -46,9 +46,10 @@ zig build run-{example-name}
 - Direct sparse set access without dynamic lookup
 
 **Systems** (`src/system.zig`):
-- `SingleQuery(Component)`: single component query
-- `Query(struct { A, B, ... })`: multi-component runtime intersection query (no group setup required)
-- `Group(struct { A, B })`: optimized multi-component query with pre-allocated group (requires `createGroup()`)
+- Query filters: Types that filter entities based on component composition, used as system parameters
+  - `SingleQuery(Component)`: single component query filter
+  - `Query(struct { A, B, ... })`: multi-component runtime intersection query filter (no group setup required)
+  - `Group(struct { A, B })`: optimized multi-component query filter with pre-allocated group (requires `createGroup()`)
 - `world.runSystem(systemFn)`: convenience method for inline system execution
 - `createSystemFunction(World, systemFn)`: returns typed function pointer
 
@@ -93,7 +94,7 @@ fn combatSystem(query: Query(struct { Position, Health })) !void {
     }
 }
 
-// System with multiple query types
+// System with multiple query filters
 fn mySystem(
     movement: Group(struct { Position, Velocity }),
     health: SingleQuery(Health),
@@ -106,10 +107,10 @@ try world.runSystem(movementSystem);
 try world.runSystem(combatSystem);
 ```
 
-## Query Types Comparison
+## Query Filter Comparison
 
-| Type | Components | Setup Required | Performance | Use Case |
-|------|------------|----------------|-------------|----------|
+| Filter Type | Components | Setup Required | Performance | Use Case |
+|-------------|------------|----------------|-------------|----------|
 | `SingleQuery(C)` | 1 | None | O(n) - Fast | Single component iteration |
 | `Query(struct { A, B, ... })` | 2+ | None | O(n) - Moderate | Ad-hoc multi-component queries |
 | `Group(struct { A, B })` | 2+ | `createGroup()` required | O(n) - Fastest | Frequently used multi-component queries |
@@ -160,7 +161,7 @@ fn combatSystem(group: Group(CombatGroup)) !void {
 
 ### 2. Define Systems as Plain Functions
 
-Systems should be defined as plain functions that accept query parameters. This pattern is simple, idiomatic, and works seamlessly with `world.runSystem()`.
+Systems should be defined as plain functions that accept query filter parameters. This pattern is simple, idiomatic, and works seamlessly with `world.runSystem()`.
 
 ```zig
 // Recommended: Plain function
@@ -177,7 +178,7 @@ fn movementSystem(group: Group(MovementGroup)) !void {
 try world.runSystem(movementSystem);
 ```
 
-Systems can accept multiple query parameters:
+Systems can accept multiple query filter parameters:
 
 ```zig
 fn complexSystem(
@@ -185,7 +186,7 @@ fn complexSystem(
     health: SingleQuery(Health),
     combat: Query(struct { Position, Armor }),
 ) !void {
-    // Use multiple query types in one system
+    // Use multiple query filters in one system
 }
 ```
 

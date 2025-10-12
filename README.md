@@ -94,9 +94,9 @@ pub fn main() !void {
 }
 ```
 
-### Query Types Comparison
+### Query Filters
 
-Sparze provides three query types for different use cases:
+Sparze provides three query filter types for different use cases:
 
 #### SingleQuery - Single Component Iteration
 
@@ -177,10 +177,12 @@ try world.runSystem(movementSystem);
 
 **Systems**: Functions that operate on entities with specific component combinations
 
-**Query Types**:
+**Query Filters**:
 - **SingleQuery(Component)**: Fast iteration over entities with a single component type
 - **Query(struct { A, B, ... })**: Flexible runtime intersection for multiple components without setup overhead
 - **Group(struct { A, B })**: Optimized multi-component iteration requiring upfront `createGroup()` call for maximum performance
+
+Query filters are types that filter entities based on component composition, used as parameters in system functions to specify which entities the system operates on.
 
 ## Examples
 
