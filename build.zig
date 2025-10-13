@@ -6,6 +6,7 @@ const examples = [_]Example{
     .{ .name = "system_operations" },
     .{ .name = "movement_example" },
     .{ .name = "multiple_groups" },
+    .{ .name = "performance_benchmark" },
 };
 
 const Example = struct {

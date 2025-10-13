@@ -28,39 +28,48 @@ const CommandType = enum {
     destroy_entity,
 };
 
-/// Type-erased component data for command buffer
-const ComponentData = struct {
-    type_id: u16,
-    data: []u8,
+/// Type-erased component data for command buffer with inline storage
+fn ComponentData(comptime max_size: comptime_int) type {
+    return struct {
+        type_id: u16,
+        data: [max_size]u8,
+        len: u16,
 
-    pub fn deinit(self: *ComponentData, allocator: std.mem.Allocator) void {
-        allocator.free(self.data);
-    }
-};
+        pub fn deinit(_: *@This(), _: std.mem.Allocator) void {
+            // No-op: inline storage, nothing to free
+        }
+    };
+}
 
 /// A single command in the command buffer
-const Command = struct {
-    type: CommandType,
-    entity: Entity,
-    component_data: ?ComponentData,
+fn Command(comptime max_size: comptime_int) type {
+    return struct {
+        type: CommandType,
+        entity: Entity,
+        component_data: ?ComponentData(max_size),
 
-    pub fn deinit(self: *Command, allocator: std.mem.Allocator) void {
-        if (self.component_data) |*data| {
-            data.deinit(allocator);
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            if (self.component_data) |*data| {
+                data.deinit(allocator);
+            }
         }
-    }
-};
+    };
+}
 
 /// CommandBuffer records entity and component operations for deferred execution.
 ///
 /// Commands are executed at the end of a frame via `world.endFrame()`, ensuring
 /// that the world state remains stable during system execution.
 pub fn CommandBuffer(comptime World: type) type {
+    const max_comp_size = World.max_component_size;
+    const CommandStruct = Command(max_comp_size);
+    const ComponentDataType = ComponentData(max_comp_size);
+
     return struct {
         const Self = @This();
 
         allocator: std.mem.Allocator,
-        commands: std.ArrayList(Command),
+        commands: std.ArrayList(CommandStruct),
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return .{
@@ -83,16 +92,19 @@ pub fn CommandBuffer(comptime World: type) type {
             self.commands.clearRetainingCapacity();
         }
 
-        /// Record a component addition
+        /// Record a component addition (inline storage, no heap allocation)
         pub fn recordAddComponent(self: *Self, entity: Entity, type_id: u16, data: []const u8) !void {
-            const data_copy = try self.allocator.dupe(u8, data);
+            if (data.len > max_comp_size) return error.ComponentTooLarge;
+
+            var comp_data: ComponentDataType = undefined;
+            comp_data.type_id = type_id;
+            comp_data.len = @intCast(data.len);
+            @memcpy(comp_data.data[0..data.len], data);
+
             try self.commands.append(self.allocator, .{
                 .type = .add_component,
                 .entity = entity,
-                .component_data = .{
-                    .type_id = type_id,
-                    .data = data_copy,
-                },
+                .component_data = comp_data,
             });
         }
 
@@ -103,7 +115,8 @@ pub fn CommandBuffer(comptime World: type) type {
                 .entity = entity,
                 .component_data = .{
                     .type_id = type_id,
-                    .data = &[_]u8{},
+                    .data = undefined, // not used for remove
+                    .len = 0,
                 },
             });
         }
@@ -123,7 +136,7 @@ pub fn CommandBuffer(comptime World: type) type {
                 switch (cmd.type) {
                     .add_component => {
                         const comp_data = cmd.component_data.?;
-                        try world.addComponentFromBytes(cmd.entity, comp_data.type_id, comp_data.data);
+                        try world.addComponentFromBytes(cmd.entity, comp_data.type_id, comp_data.data[0..comp_data.len]);
                     },
                     .remove_component => {
                         const comp_data = cmd.component_data.?;

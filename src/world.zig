@@ -55,6 +55,17 @@ pub fn World(Components: anytype) type {
     return struct {
         const Self = @This();
 
+        /// Maximum component size in this world (computed at comptime)
+        pub const max_component_size: comptime_int = blk: {
+            if (length == 0) break :blk 1;
+            var max_size: comptime_int = 1;
+            for (component_fields) |field| {
+                const size = @sizeOf(field.type);
+                if (size > max_size) max_size = size;
+            }
+            break :blk max_size;
+        };
+
         allocator: Allocator,
         entity_registry: EntityRegistry,
         component_pool: ComponentPoolType,
