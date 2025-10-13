@@ -19,180 +19,6 @@ pub const GroupInfo = struct {
     }
 };
 
-pub const AbstractSparseSet = struct {
-    // entities: []const Entity,
-    vtable: *const VTable,
-    instance: *anyopaque,
-    const VTable = struct {
-        getFn: *const fn (*anyopaque, Entity) ?*anyopaque,
-        getPtrFn: *const fn (*anyopaque, Entity) ?*const anyopaque,
-        getPtrMutFn: *const fn (*anyopaque, Entity) ?*anyopaque,
-        getEntities: *const fn (*anyopaque) []const Entity,
-        getComponentsFn: *const fn (*anyopaque) *anyopaque,
-        insertFn: *const fn (*anyopaque, Entity, *anyopaque) anyerror!void,
-        containsFn: *const fn (*anyopaque, Entity) bool,
-        removeFn: *const fn (*anyopaque, Entity) void,
-        moveToGroupFn: *const fn (*anyopaque, Entity) void,
-        moveFromGroupFn: *const fn (*anyopaque, Entity) void,
-        getGroupSizeFn: *const fn (*anyopaque) u32,
-        getGroupEntitiesFn: *const fn (*anyopaque) []const Entity,
-    };
-
-    pub fn get(self: *const AbstractSparseSet, entity: Entity, comptime C: type) ?C {
-        const component = self.vtable.getFn(self.instance, entity) orelse return null;
-        const typed_ptr = castTo(C, component);
-        return typed_ptr.*;
-    }
-
-    pub fn getPtr(self: *const AbstractSparseSet, entity: Entity, comptime C: type) ?*const C {
-        const component = self.vtable.getPtrFn(self.instance, entity) orelse return null;
-        const typed_ptr: *const C = @ptrCast(@alignCast(component));
-        return typed_ptr;
-    }
-
-    pub fn getPtrMut(self: *const AbstractSparseSet, entity: Entity, comptime C: type) ?*C {
-        const component = self.vtable.getPtrMutFn(self.instance, entity) orelse return null;
-        const typed_ptr = castTo(C, component);
-        return typed_ptr;
-    }
-
-    pub fn getEntities(self: *const AbstractSparseSet) []const Entity {
-        return self.vtable.getEntities(self.instance);
-    }
-
-    pub fn getComponents(self: *const AbstractSparseSet, comptime C: type) []C {
-        const components = self.vtable.getComponentsFn(self.instance);
-        const typed_ptr = castTo([]C, components);
-        return typed_ptr.*;
-    }
-
-    pub fn insert(self: *const AbstractSparseSet, entity: Entity, component: *anyopaque) !void {
-        return try self.vtable.insertFn(self.instance, entity, component);
-    }
-
-    pub fn contains(self: *const AbstractSparseSet, entity: Entity) bool {
-        return self.vtable.containsFn(self.instance, entity);
-    }
-
-    pub fn remove(self: *const AbstractSparseSet, entity: Entity) void {
-        return self.vtable.removeFn(self.instance, entity);
-    }
-
-    pub fn moveToGroup(self: *const AbstractSparseSet, entity: Entity) void {
-        return self.vtable.moveToGroupFn(self.instance, entity);
-    }
-
-    pub fn moveFromGroup(self: *const AbstractSparseSet, entity: Entity) void {
-        return self.vtable.moveFromGroupFn(self.instance, entity);
-    }
-
-    pub fn getGroupSize(self: *const AbstractSparseSet) u32 {
-        return self.vtable.getGroupSizeFn(self.instance);
-    }
-
-    pub fn getGroupEntities(self: *const AbstractSparseSet) []const Entity {
-        return self.vtable.getGroupEntitiesFn(self.instance);
-    }
-
-    pub fn incarnate(self: *const AbstractSparseSet, comptime C: type) *SparseSet(C) {
-        return castTo(SparseSet(C), self.instance);
-    }
-
-    fn castTo(comptime T: type, ptr: *anyopaque) *T {
-        return @ptrCast(@alignCast(ptr));
-    }
-
-    pub fn init(comptime Component: type, instance: *SparseSet(Component)) AbstractSparseSet {
-        const SparseSetType = SparseSet(Component);
-        const vtable = comptime VTable{
-            .getFn = struct {
-                fn get(ptr: *anyopaque, entity: Entity) ?*anyopaque {
-                    const self = castTo(SparseSetType, ptr);
-                    const sparse_index = getIndex(entity);
-                    const page_idx = sparse_index >> page_shift;
-                    const slot_idx = sparse_index & page_mask;
-
-                    const page = self.sparse_pages[page_idx] orelse return null;
-                    const dense_index = page.slots[slot_idx] orelse return null;
-                    return @ptrCast(&self.components.items[dense_index]);
-                }
-            }.get,
-            .getPtrFn = struct {
-                fn getPtr(ptr: *anyopaque, entity: Entity) ?*const anyopaque {
-                    const self = castTo(SparseSetType, ptr);
-                    return self.getPtr(entity);
-                }
-            }.getPtr,
-            .getPtrMutFn = struct {
-                fn getPtrMut(ptr: *anyopaque, entity: Entity) ?*anyopaque {
-                    const self = castTo(SparseSetType, ptr);
-                    return self.getPtrMut(entity);
-                }
-            }.getPtrMut,
-            .getEntities = struct {
-                fn getEntities(ptr: *anyopaque) []const Entity {
-                    const self = castTo(SparseSetType, ptr);
-                    return self.packed_array.items;
-                }
-            }.getEntities,
-            .getComponentsFn = struct {
-                fn getComponents(ptr: *anyopaque) *anyopaque {
-                    const self = castTo(SparseSetType, ptr);
-                    return @ptrCast(&self.components.items);
-                }
-            }.getComponents,
-            .insertFn = struct {
-                fn insert(ptr: *anyopaque, entity: Entity, component_ptr: *anyopaque) !void {
-                    const self = castTo(SparseSetType, ptr);
-                    const component = castTo(Component, component_ptr);
-                    try self.insert(entity, component.*);
-                }
-            }.insert,
-            .containsFn = struct {
-                fn contains(ptr: *anyopaque, entity: Entity) bool {
-                    const self = castTo(SparseSetType, ptr);
-                    return self.contains(entity);
-                }
-            }.contains,
-            .removeFn = struct {
-                fn remove(ptr: *anyopaque, entity: Entity) void {
-                    const self = castTo(SparseSetType, ptr);
-                    self.remove(entity);
-                }
-            }.remove,
-            .moveToGroupFn = struct {
-                fn moveToGroup(ptr: *anyopaque, entity: Entity) void {
-                    const self = castTo(SparseSetType, ptr);
-                    self.moveToGroup(entity);
-                }
-            }.moveToGroup,
-            .moveFromGroupFn = struct {
-                fn moveFromGroup(ptr: *anyopaque, entity: Entity) void {
-                    const self = castTo(SparseSetType, ptr);
-                    self.moveFromGroup(entity);
-                }
-            }.moveFromGroup,
-            .getGroupSizeFn = struct {
-                fn getGroupSize(ptr: *anyopaque) u32 {
-                    const self = castTo(SparseSetType, ptr);
-                    return self.group_info.size;
-                }
-            }.getGroupSize,
-            .getGroupEntitiesFn = struct {
-                fn getGroupEntities(ptr: *anyopaque) []const Entity {
-                    const self = castTo(SparseSetType, ptr);
-                    return self.getGroupEntities();
-                }
-            }.getGroupEntities,
-        };
-        return .{
-            // .entities = instance.packed_array.items,
-            .vtable = &vtable,
-            .instance = instance,
-        };
-    }
-};
-
 // Pagination configuration
 const page_size: u16 = 4096; // Entities per page (2^12)
 const page_shift: u5 = 12; // log2(page_size)
@@ -459,10 +285,6 @@ pub fn SparseSet(comptime C: type) type {
         pub fn getGroupComponentsMut(self: *const Self) []Component {
             return self.components.items[0..self.group_info.size];
         }
-
-        pub fn abstract(self: *Self) AbstractSparseSet {
-            return AbstractSparseSet.init(Component, self);
-        }
     };
 }
 
@@ -629,36 +451,6 @@ test "SparseSet entity version validation" {
     try std.testing.expectEqual(@as(usize, 42), set.get(e2).?.v);
 }
 
-test "AbstractSparseSet dynamic dispatch" {
-    const TestComp = struct { v: usize };
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var set = SparseSet(TestComp).init(allocator);
-    defer set.deinit();
-
-    // Concrete API works
-    var registry = EntityRegistry.init();
-    const entity = registry.create();
-    try set.insert(entity, .{ .v = 42 });
-    try std.testing.expect(set.contains(entity));
-    try std.testing.expectEqual(@as(usize, 42), set.get(entity).?.v);
-
-    // Convert to abstract interface
-    const abstract_set = set.abstract();
-
-    // Dynamic get/contains match concrete behavior
-    try std.testing.expect(abstract_set.contains(entity));
-    const component = abstract_set.get(entity, TestComp).?;
-    try std.testing.expectEqual(@as(usize, 42), component.v);
-
-    // Remove via abstract interface and verify
-    abstract_set.remove(entity);
-    try std.testing.expect(!abstract_set.contains(entity));
-    try std.testing.expect(abstract_set.get(entity, TestComp) == null);
-}
-
 test "SparseSet pointer access methods" {
     const TestComp = struct { value: i32, count: u32 };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -696,54 +488,6 @@ test "SparseSet pointer access methods" {
     const verify_ptr = set.getPtr(entity).?;
     try std.testing.expectEqual(@as(i32, 200), verify_ptr.value);
     try std.testing.expectEqual(@as(u32, 10), verify_ptr.count);
-}
-
-test "AbstractSparseSet pointer access methods" {
-    const TestComp = struct { x: f32, y: f32 };
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var set = SparseSet(TestComp).init(allocator);
-    defer set.deinit();
-
-    var registry = EntityRegistry.init();
-    const entity1 = registry.create();
-    const entity2 = registry.create();
-
-    const abstract_set = set.abstract();
-
-    // Test pointer access on empty set
-    try std.testing.expect(abstract_set.getPtr(entity1, TestComp) == null);
-    try std.testing.expect(abstract_set.getPtrMut(entity1, TestComp) == null);
-
-    // Insert components for both entities
-    try set.insert(entity1, .{ .x = 1.5, .y = 2.5 });
-    try set.insert(entity2, .{ .x = 3.5, .y = 4.5 });
-
-    // Test immutable pointer access through abstract interface
-    const ptr1 = abstract_set.getPtr(entity1, TestComp).?;
-    const ptr2 = abstract_set.getPtr(entity2, TestComp).?;
-
-    try std.testing.expectEqual(@as(f32, 1.5), ptr1.x);
-    try std.testing.expectEqual(@as(f32, 2.5), ptr1.y);
-    try std.testing.expectEqual(@as(f32, 3.5), ptr2.x);
-    try std.testing.expectEqual(@as(f32, 4.5), ptr2.y);
-
-    // Test mutable pointer access and modification through abstract interface
-    const mut_ptr1 = abstract_set.getPtrMut(entity1, TestComp).?;
-    mut_ptr1.x = 10.0;
-    mut_ptr1.y = 20.0;
-
-    // Verify changes through concrete interface
-    const updated = set.get(entity1).?;
-    try std.testing.expectEqual(@as(f32, 10.0), updated.x);
-    try std.testing.expectEqual(@as(f32, 20.0), updated.y);
-
-    // Verify entity2 was not affected
-    const unchanged = set.get(entity2).?;
-    try std.testing.expectEqual(@as(f32, 3.5), unchanged.x);
-    try std.testing.expectEqual(@as(f32, 4.5), unchanged.y);
 }
 
 test "SparseSet pointer consistency across operations" {
@@ -785,30 +529,4 @@ test "SparseSet pointer consistency across operations" {
     // Verify removed entity returns null
     try std.testing.expect(set.getPtr(entity2) == null);
     try std.testing.expect(set.getPtrMut(entity2) == null);
-}
-
-test "AbstractSparseSet pointer type safety" {
-    const CompA = struct { a: i32 };
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var set_a = SparseSet(CompA).init(allocator);
-    defer set_a.deinit();
-
-    var registry = EntityRegistry.init();
-    const entity = registry.create();
-
-    try set_a.insert(entity, .{ .a = 42 });
-
-    const abstract_set = set_a.abstract();
-
-    // Correct type access should work
-    const ptr_a = abstract_set.getPtr(entity, CompA).?;
-    try std.testing.expectEqual(@as(i32, 42), ptr_a.a);
-
-    const mut_ptr_a = abstract_set.getPtrMut(entity, CompA).?;
-    mut_ptr_a.a = 100;
-    try std.testing.expectEqual(@as(i32, 100), set_a.get(entity).?.a);
 }

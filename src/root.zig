@@ -8,7 +8,6 @@ pub const getVersion = entity_module.getVersion;
 
 const sparse_set_module = @import("core/sparse_set.zig");
 pub const SparseSet = sparse_set_module.SparseSet;
-pub const AbstractSparseSet = sparse_set_module.AbstractSparseSet;
 pub const GroupInfo = sparse_set_module.GroupInfo;
 
 const world_module = @import("world.zig");

@@ -35,7 +35,6 @@ zig build run-{example-name}
 - Paginated sparse array (4096 entities per page) for O(1) entity→component lookup
 - Packed dense arrays for cache-friendly iteration
 - Group support: entities in groups are stored at the beginning of the packed array for fast iteration
-- `AbstractSparseSet` provides type-erased interface using vtable for dynamic dispatch
 
 ### World API
 
