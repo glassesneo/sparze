@@ -20,13 +20,13 @@ pub const GroupInfo = struct {
 };
 
 // Pagination configuration
-const page_size: u16 = 4096; // Entities per page (2^12)
-const page_shift: u5 = 12; // log2(page_size)
-const page_mask: u16 = page_size - 1; // 0xFFF
-const max_pages: u16 = @intCast((@as(u32, max_entities) + @as(u32, page_size) - 1) / @as(u32, page_size));
+pub const page_size: u16 = 4096; // Entities per page (2^12)
+pub const page_shift: u5 = 12; // log2(page_size)
+pub const page_mask: u16 = page_size - 1; // 0xFFF
+pub const max_pages: u16 = @intCast((@as(u32, max_entities) + @as(u32, page_size) - 1) / @as(u32, page_size));
 
 /// A single page in the sparse array
-const SparsePage = struct {
+pub const SparsePage = struct {
     slots: [page_size]?u16,
 
     fn init() SparsePage {

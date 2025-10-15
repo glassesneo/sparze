@@ -11,6 +11,13 @@ const Entity = entity_module.Entity;
 const sparse_set_module = @import("core/sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 
+const tag_storage_module = @import("core/tag_storage.zig");
+const TagStorage = tag_storage_module.TagStorage;
+
+const component_storage_module = @import("core/component_storage.zig");
+const ComponentStorage = component_storage_module.ComponentStorage;
+const isTagComponent = component_storage_module.isTagComponent;
+
 const system_module = @import("system.zig");
 pub const FilterType = system_module.FilterType;
 pub const SingleQuery = system_module.SingleQuery;
@@ -29,18 +36,18 @@ pub fn World(Components: anytype) type {
     const info = @typeInfo(Components);
     if (info != .@"struct") @compileError("Invalid form of components");
     const component_fields = info.@"struct".fields;
-    const length = info.@"struct".fields.len;
+    const length = component_fields.len;
 
-    const ComponentPoolType = construct_component_pool: {
-        if (length == 0) break :construct_component_pool @TypeOf(.{});
-        var sparse_set_fields: [length]StructField = undefined;
+    const ComponentPoolType = if (length == 0) @TypeOf(.{}) else construct_component_pool: {
+        var pool_fields: [length]StructField = undefined;
         inline for (component_fields, 0..) |field, i| {
-            const SparseSetType = SparseSet(field.type);
-            sparse_set_fields[i] = StructField{
+            const FieldType = ComponentStorage(field.type);
+
+            pool_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
-                .type = SparseSetType,
+                .type = FieldType,
                 .is_comptime = false,
-                .alignment = @alignOf(SparseSetType),
+                .alignment = @alignOf(FieldType),
                 .default_value_ptr = null,
             };
         }
@@ -48,7 +55,7 @@ pub fn World(Components: anytype) type {
             .layout = .auto,
             .is_tuple = true,
             .decls = &.{},
-            .fields = &sparse_set_fields,
+            .fields = &pool_fields,
         } });
     };
 
@@ -79,7 +86,7 @@ pub fn World(Components: anytype) type {
                 .component_pool = init: {
                     var pool: ComponentPoolType = undefined;
                     inline for (component_fields, 0..) |field, i| {
-                        pool[i] = SparseSet(field.type).init(allocator);
+                        pool[i] = ComponentStorage(field.type).init(allocator);
                     }
                     break :init pool;
                 },
@@ -95,8 +102,7 @@ pub fn World(Components: anytype) type {
             }
             self.groups.deinit(self.allocator);
             inline for (component_fields) |field| {
-                const sparse_set = self.getSparseSetPtr(field.type);
-                sparse_set.deinit();
+                self.getComponentStoragePtr(field.type).deinit();
             }
         }
 
@@ -165,14 +171,40 @@ pub fn World(Components: anytype) type {
             }
         }
 
-        pub fn getSparseSet(self: Self, comptime C: type) SparseSet(C) {
+        pub fn getComponentStorage(self: Self, comptime C: type) ComponentStorage(C) {
             const id = comptime getComponentId(C);
             return self.component_pool[id];
         }
 
-        pub fn getSparseSetPtr(self: *Self, comptime C: type) *SparseSet(C) {
+        pub fn getComponentStoragePtr(self: *Self, comptime C: type) *ComponentStorage(C) {
             const id = comptime getComponentId(C);
             return &self.component_pool[id];
+        }
+
+        /// Get SparseSet storage for non-tag components
+        /// Note: Only works for non-tag components (components with fields)
+        pub fn getSparseSet(self: Self, comptime C: type) SparseSet(C) {
+            return self.getComponentStorage(C);
+        }
+
+        /// Get SparseSet pointer for non-tag components
+        /// Note: Only works for non-tag components (components with fields)
+        pub fn getSparseSetPtr(self: *Self, comptime C: type) *SparseSet(C) {
+            // ComponentStorage(C) is SparseSet(C) for non-tag components
+            return @ptrCast(self.getComponentStoragePtr(C));
+        }
+
+        /// Get TagStorage for tag components
+        /// Note: Only works for tag components (empty structs)
+        pub fn getTagStorage(self: Self, comptime C: type) TagStorage(C) {
+            return self.getComponentStorage(C);
+        }
+
+        /// Get TagStorage pointer for tag components
+        /// Note: Only works for tag components (empty structs)
+        pub fn getTagStoragePtr(self: *Self, comptime C: type) *TagStorage(C) {
+            // ComponentStorage(C) is TagStorage(C) for tag components
+            return @ptrCast(self.getComponentStoragePtr(C));
         }
 
         /// Complexity: O(1).
@@ -191,11 +223,36 @@ pub fn World(Components: anytype) type {
         }
 
         pub fn addComponent(self: *Self, entity: Entity, comptime C: type, component: C) !void {
-            try self.getSparseSetPtr(C).insert(entity, component);
+            if (comptime isTagComponent(C)) {
+                try self.addTag(entity, C);
+            } else {
+                try self.getSparseSetPtr(C).insert(entity, component);
 
-            // Update groups when component is added
-            const component_id = comptime getComponentId(C);
-            self.updateGroupsOnAdd(entity, component_id);
+                // Update groups when component is added
+                const component_id = comptime getComponentId(C);
+                self.updateGroupsOnAdd(entity, component_id);
+            }
+        }
+
+        pub fn addComponents(self: *Self, entity: Entity, comptime components: anytype) !void {
+            inline for (components) |component| {
+                const C = @TypeOf(component);
+                try self.addComponent(entity, C, component);
+            }
+        }
+
+        /// Add a tag component to an entity
+        /// Note: Only works for tag components (empty structs)
+        pub fn addTag(self: *Self, entity: Entity, comptime C: type) !void {
+            try self.getTagStoragePtr(C).set(entity);
+        }
+
+        /// Add multiple tag components to an entity
+        pub fn addTags(self: *Self, entity: Entity, comptime tags: anytype) !void {
+            inline for (tags) |tag| {
+                const C = @TypeOf(tag);
+                try self.addTag(entity, C);
+            }
         }
 
         /// Add component from raw bytes (used by CommandBuffer)
@@ -203,6 +260,10 @@ pub fn World(Components: anytype) type {
             inline for (component_fields, 0..) |field, i| {
                 if (i == type_id) {
                     const C = field.type;
+                    if (isTagComponent(C)) {
+                        try self.addTag(entity, C);
+                        return;
+                    }
                     if (bytes.len != @sizeOf(C)) return error.InvalidComponentSize;
                     // Copy into properly aligned storage to avoid unaligned access (e.g., on wasm)
                     var component: C = undefined;
@@ -215,14 +276,8 @@ pub fn World(Components: anytype) type {
             return error.InvalidComponentId;
         }
 
-        pub fn addComponents(self: *Self, entity: Entity, comptime components: anytype) !void {
-            inline for (components) |component| {
-                const C = @TypeOf(component);
-                try self.addComponent(entity, C, component);
-            }
-        }
-
         pub fn getComponent(self: *Self, entity: Entity, comptime C: type) ?C {
+            if (comptime isTagComponent(C)) @compileError("Cannot get tag component value, use hasComponent to check for tag presence");
             return self.getSparseSetPtr(C).get(entity);
         }
 
@@ -231,15 +286,25 @@ pub fn World(Components: anytype) type {
         }
 
         pub fn hasComponent(self: Self, entity: Entity, comptime C: type) bool {
-            return self.getSparseSet(C).contains(entity);
+            return self.getComponentStorage(C).contains(entity);
         }
 
         pub fn removeComponent(self: *Self, entity: Entity, comptime C: type) void {
-            // Update groups before removing component
-            const component_id = comptime getComponentId(C);
-            self.updateGroupsOnRemove(entity, component_id);
+            if (comptime isTagComponent(C)) {
+                self.removeTag(entity, C);
+            } else {
+                // Update groups before removing component
+                const component_id = comptime getComponentId(C);
+                self.updateGroupsOnRemove(entity, component_id);
 
-            self.getSparseSetPtr(C).remove(entity);
+                self.getSparseSetPtr(C).remove(entity);
+            }
+        }
+
+        /// Remove a tag component from an entity
+        /// Note: Only works for tag components (empty structs)
+        pub fn removeTag(self: *Self, entity: Entity, comptime C: type) void {
+            self.getTagStoragePtr(C).unset(entity);
         }
 
         /// Remove component by ID (used by CommandBuffer)
@@ -337,7 +402,8 @@ pub fn World(Components: anytype) type {
             const first_id = group.component_ids[0];
 
             // Use inline for to access tuple element at runtime
-            inline for (component_fields, 0..) |_, i| {
+            inline for (component_fields, 0..) |field, i| {
+                if (comptime isTagComponent(field.type)) continue;
                 if (first_id == i) {
                     return self.component_pool[i].getGroupEntities();
                 }
@@ -354,7 +420,8 @@ pub fn World(Components: anytype) type {
             for (group.component_ids) |group_id| {
                 if (group_id == component_id) {
                     // Use inline for to access tuple element at runtime
-                    inline for (component_fields, 0..) |_, i| {
+                    inline for (component_fields, 0..) |field, i| {
+                        if (comptime isTagComponent(field.type)) continue;
                         if (component_id == i) {
                             return self.component_pool[i].getGroupComponents();
                         }
@@ -372,7 +439,8 @@ pub fn World(Components: anytype) type {
             for (group.component_ids) |group_id| {
                 if (group_id == component_id) {
                     // Use inline for to access tuple element at runtime
-                    inline for (component_fields, 0..) |_, i| {
+                    inline for (component_fields, 0..) |field, i| {
+                        if (comptime isTagComponent(field.type)) continue;
                         if (component_id == i) {
                             return self.component_pool[i].getGroupComponentsMut();
                         }
@@ -392,7 +460,8 @@ pub fn World(Components: anytype) type {
             var shortest_id: u16 = group.component_ids[0];
 
             for (group.component_ids) |id| {
-                inline for (component_fields, 0..) |_, i| {
+                inline for (component_fields, 0..) |field, i| {
+                    if (comptime isTagComponent(field.type)) continue;
                     if (id == i) {
                         const entities = self.component_pool[i].packed_array.items;
                         if (entities.len < min_size) {
@@ -404,7 +473,8 @@ pub fn World(Components: anytype) type {
             }
 
             // Iterate through shortest set and check if entities have all components
-            inline for (component_fields, 0..) |_, i| {
+            inline for (component_fields, 0..) |field, i| {
+                if (comptime isTagComponent(field.type)) continue;
                 if (shortest_id == i) {
                     const entities = self.component_pool[i].packed_array.items;
                     for (entities) |entity| {
@@ -420,7 +490,8 @@ pub fn World(Components: anytype) type {
         fn entityHasAllGroupComponents(self: *const Self, entity: Entity, component_ids: []const u16) bool {
             for (component_ids) |id| {
                 var has_component = false;
-                inline for (component_fields, 0..) |_, i| {
+                inline for (component_fields, 0..) |field, i| {
+                    if (comptime isTagComponent(field.type)) continue;
                     if (id == i) {
                         if (self.component_pool[i].contains(entity)) {
                             has_component = true;
@@ -471,7 +542,8 @@ pub fn World(Components: anytype) type {
         /// Add entity to a group (move to group area in all component sparse sets)
         fn addEntityToGroup(self: *Self, entity: Entity, group: *const GroupInfo) void {
             for (group.component_ids) |id| {
-                inline for (component_fields, 0..) |_, i| {
+                inline for (component_fields, 0..) |field, i| {
+                    if (comptime isTagComponent(field.type)) continue;
                     if (id == i) {
                         self.component_pool[i].moveToGroup(entity);
                     }
@@ -482,7 +554,8 @@ pub fn World(Components: anytype) type {
         /// Remove entity from a group (move from group area in all component sparse sets)
         fn removeEntityFromGroup(self: *Self, entity: Entity, group: *const GroupInfo) void {
             for (group.component_ids) |id| {
-                inline for (component_fields, 0..) |_, i| {
+                inline for (component_fields, 0..) |field, i| {
+                    if (comptime isTagComponent(field.type)) continue;
                     if (id == i) {
                         self.component_pool[i].moveFromGroup(entity);
                     }
@@ -1025,7 +1098,7 @@ test "World recommended usage pattern - validate groups upfront" {
 test "Commands with frame-based execution" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
-    const Enemy = struct { tag: u8 = 0 }; // Zero-sized types not supported in ArrayList
+    const Enemy = struct {};
 
     const TestWorld = World(struct { Position, Velocity, Enemy });
 
@@ -1047,7 +1120,7 @@ test "Commands with frame-based execution" {
                     .y = 100.0,
                 });
                 try commands.addComponent(enemy, Velocity, .{ .dx = 1.0, .dy = 0.0 });
-                try commands.addComponent(enemy, Enemy, .{});
+                try commands.addTag(enemy, Enemy);
             }
         }
     }.system;
@@ -1059,14 +1132,14 @@ test "Commands with frame-based execution" {
     try world.runSystem(spawnEnemies);
 
     // At this point, entities exist but have no components yet
-    const enemy_query_before = SingleQuery(Enemy).init(world.getSparseSetPtr(Enemy));
+    const enemy_query_before = SingleQuery(Enemy).init(world.getTagStoragePtr(Enemy));
     try std.testing.expectEqual(@as(usize, 0), enemy_query_before.entities.len); // No enemies with Enemy component yet
 
     // End frame - execute commands
     try world.endFrame();
 
     // Now components are added
-    const enemy_query_after = SingleQuery(Enemy).init(world.getSparseSetPtr(Enemy));
+    const enemy_query_after = SingleQuery(Enemy).init(world.getTagStoragePtr(Enemy));
     try std.testing.expectEqual(@as(usize, 3), enemy_query_after.entities.len); // 3 enemies now exist
 
     // Verify components were added correctly
@@ -1079,7 +1152,7 @@ test "Commands with frame-based execution" {
 
 test "Commands remove and destroy operations" {
     const Health = struct { hp: i32 };
-    const Dead = struct { tag: u8 = 0 }; // Zero-sized types not supported in ArrayList
+    const Dead = struct {};
 
     const TestWorld = World(struct { Health, Dead });
 

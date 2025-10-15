@@ -13,6 +13,7 @@ A high-performance Entity Component System (ECS) library for Zig with compile-ti
   - Paginated sparse sets for O(1) component access
   - Cache-friendly packed arrays for fast iteration
   - Full-owning groups for high-performance multi-component queries
+  - Tag storage for zero-sized marker components (1 bit per entity)
 
 - **Entity Management**
   - 32-bit entity identifiers with built-in versioning
@@ -169,11 +170,66 @@ try world.runSystem(movementSystem);
 | **Memory Layout** | Packed | Sparse set | Cache-optimized |
 | **Use Case** | Single component | Ad-hoc multi-component | Hot path iteration |
 
+### Tag Components
+
+Tag components are zero-sized marker components (empty structs) used for entity categorization, state flags, or filtering. They consume only 1 bit per entity and support all query operations.
+
+```zig
+// Define tag components as empty structs
+const Player = struct {};
+const Enemy = struct {};
+const Active = struct {};
+
+const World = sparze.World(struct { Position, Player, Enemy, Active });
+
+var world = World.init(allocator);
+defer world.deinit();
+
+// Create entity with tags
+const entity = world.createEntity();
+try world.addTag(entity, Player);
+try world.addTag(entity, Active);
+
+// Or use generic method (works for both tags and regular components)
+try world.addComponent(entity, Player, .{});
+
+// Check for tags
+if (world.hasComponent(entity, Player)) {
+    // Entity is a player
+}
+
+// Query entities with specific tags
+fn playerSystem(query: sparze.SingleQuery(Player)) !void {
+    for (query.entities) |entity| {
+        // Process all player entities
+    }
+}
+
+// Combine tags with regular components
+fn activePlayerSystem(query: sparze.Query(struct { Position, Player, Active })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            // Process active players with positions
+        }
+    }
+}
+```
+
+**Common Tag Use Cases**:
+- **Entity types**: `Player`, `Enemy`, `NPC`, `Boss`
+- **State flags**: `Active`, `Disabled`, `Selected`, `Paused`
+- **Categories**: `UI`, `Renderable`, `Collidable`, `Static`
+- **Events**: `Damaged`, `Died`, `LeveledUp` (single-frame markers)
+
+**Performance**: Tags use bit sets for O(1) membership checking and are extremely memory-efficient, consuming only 1 bit per entity index instead of storing full component data.
+
 ## Core Concepts
 
 **Entities**: Lightweight 32-bit identifiers (16-bit index + 16-bit version)
 
 **Components**: Plain Zig structs containing data
+- **Regular components**: Structs with fields, stored in sparse sets
+- **Tag components**: Empty structs (`struct {}`), stored in bit sets for minimal memory usage
 
 **Systems**: Functions that operate on entities with specific component combinations
 
@@ -191,6 +247,7 @@ Explore the `examples/` directory for comprehensive demonstrations:
 - `basic.zig` - Entity and component basics
 - `plugin_architecture.zig` - Plugin-style architecture
 - `system_operations.zig` - System patterns and multi-query examples
+- `tag_components.zig` - Tag component usage and patterns
 
 Run all examples:
 ```bash
@@ -200,6 +257,7 @@ zig build run-examples
 Run a specific example:
 ```bash
 zig build run-basic
+zig build run-tag_components
 ```
 
 ## Building and Testing
@@ -224,6 +282,7 @@ Sparze is designed for high-performance game and simulation workloads:
 - **Group optimization** for multi-component queries
 - **Zero runtime overhead** with compile-time component registration
 - **Optimized command buffer** with inline storage (77.8x faster than heap allocation)
+- **Tag component optimization** with bit sets (1 bit per entity, O(1) membership checks)
 - **Reserve API** for bulk insertion optimization
 
 ### Performance Characteristics
@@ -243,12 +302,14 @@ For large-scale entity creation (e.g., loading scenes), use the `reserve()` API 
 // Pre-reserve capacity for better performance
 try world.getSparseSetPtr(Position).reserve(10000);
 try world.getSparseSetPtr(Velocity).reserve(10000);
+try world.getTagStoragePtr(Player).reserve(10000); // Also works for tags
 
 // Now bulk insert without reallocations
 for (0..10000) |_| {
     const entity = world.createEntity();
     try world.addComponent(entity, Position, .{ .x = 0.0, .y = 0.0 });
     try world.addComponent(entity, Velocity, .{ .x = 1.0, .y = 1.0 });
+    try world.addTag(entity, Player);
 }
 ```
 

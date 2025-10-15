@@ -36,6 +36,13 @@ zig build run-{example-name}
 - Packed dense arrays for cache-friendly iteration
 - Group support: entities in groups are stored at the beginning of the packed array for fast iteration
 
+**TagStorage** (`src/core/tag_storage.zig`):
+- Specialized storage for tag components (zero-sized marker components)
+- Uses DynamicBitSet for O(1) presence checking
+- Packed entity array for efficient iteration
+- No component data stored, only entity membership
+- Automatically used for empty struct components via `ComponentStorage` type dispatch
+
 ### World API
 
 **Component Registration** (`src/world.zig`):
@@ -105,6 +112,58 @@ fn mySystem(
 try world.runSystem(movementSystem);
 try world.runSystem(combatSystem);
 ```
+
+### Tag Components
+
+Tag components are zero-sized marker components used for entity categorization or state flags. They are defined as empty structs and automatically use `TagStorage` for optimized memory usage.
+
+```zig
+// Define tag components as empty structs
+const Player = struct {};
+const Enemy = struct {};
+const Active = struct {};
+
+const World = sparze.World(struct { Position, Player, Enemy, Active });
+
+var world = World.init(allocator);
+
+// Add/remove tags using dedicated methods
+const entity = try world.createEntity();
+try world.addTag(entity, Player);
+try world.addTag(entity, Active);
+
+// Check for tags
+if (world.hasComponent(entity, Player)) {
+    // Entity is a player
+}
+
+// Iterate over entities with a specific tag
+fn playerSystem(query: SingleQuery(Player)) !void {
+    for (query.entities) |entity| {
+        // Process all player entities
+    }
+}
+
+// Combine tags with regular components
+fn activePlayerSystem(query: Query(struct { Position, Player, Active })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            // Process active players with position
+        }
+    }
+}
+
+// Remove tags
+world.removeTag(entity, Active);
+```
+
+**Tag Component Usage**:
+- **Marker components**: `Player`, `Enemy`, `NPC` - entity categorization
+- **State flags**: `Active`, `Disabled`, `Selected` - entity state tracking
+- **Group membership**: `UI`, `Renderable`, `Collidable` - system filtering
+- **Events**: `Damaged`, `Died`, `LeveledUp` - single-frame event markers
+
+**Performance**: Tags use bit sets for O(1) membership checking and consume only 1 bit per entity index, making them extremely memory-efficient compared to regular components.
 
 ## Query Filter Comparison
 
@@ -235,13 +294,17 @@ try world.getSparseSetPtr(Position).reserve(expected_capacity);
 
 - **Entity versioning**: Always use the entity handles returned by create/destroy operations. Stale entity handles will fail version checks.
 
+- **Tag components**: Empty structs (`struct {}`) are automatically treated as tag components and use `TagStorage` instead of `SparseSet`. Use `world.addTag()` and `world.removeTag()` for tag-specific operations, or use the generic `world.addComponent()` / `world.removeComponent()` which dispatch correctly.
+
 - **Memory management**:
   - Component pools are owned by World and deinitialized automatically
   - Command buffer uses inline storage (no per-command allocation)
+  - Tag storage uses bit sets (1 bit per entity) for minimal memory overhead
 
 - **Performance**:
   - Use `reserve()` for bulk insertions to eliminate reallocation overhead
   - Prefer `Group` over `Query` for hot-path multi-component iteration
   - Command buffers are highly optimized with inline storage
+  - Use tag components for markers/flags to save memory (1 bit vs full component size)
 
 - **Examples**: The `examples/` directory contains implementations showing various patterns (e.g., `system_operations.zig`, `plugin_architecture.zig`, `performance_benchmark.zig`).

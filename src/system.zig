@@ -7,6 +7,13 @@ const Entity = entity_module.Entity;
 const sparse_set_module = @import("core/sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 
+const tag_storage_module = @import("core/tag_storage.zig");
+const TagStorage = tag_storage_module.TagStorage;
+
+const component_storage_module = @import("core/component_storage.zig");
+const ComponentStorage = component_storage_module.ComponentStorage;
+const isTagComponent = component_storage_module.isTagComponent;
+
 /// FilterType identifies the type of query filter used in system parameters.
 ///
 /// Query filters are types that filter entities based on component composition,
@@ -220,6 +227,15 @@ pub fn Commands(comptime World: type) type {
             try self.command_buffer.recordRemoveComponent(entity, type_id);
         }
 
+        pub fn addTag(self: Self, entity: Entity, comptime C: type) !void {
+            try self.addComponent(entity, C, C{});
+        }
+
+        pub fn removeTag(self: Self, entity: Entity, comptime C: type) !void {
+            if (!isTagComponent(C)) @compileError("removeTag can only be used with tag components");
+            try self.removeComponent(entity, C);
+        }
+
         /// Destroy entity (deferred execution)
         pub fn destroyEntity(self: Self, entity: Entity) !void {
             try self.command_buffer.recordDestroyEntity(entity);
@@ -242,7 +258,20 @@ pub fn Commands(comptime World: type) type {
 /// }
 /// ```
 pub fn SingleQuery(comptime QueryComponent: type) type {
-    return struct {
+    return if (isTagComponent(QueryComponent)) struct {
+        const Self = @This();
+
+        pub const filter_type: FilterType = .single_query;
+        pub const Component = QueryComponent;
+
+        entities: []const Entity,
+
+        pub fn init(tag_storage: *TagStorage(Component)) Self {
+            return .{
+                .entities = tag_storage.packed_array.items,
+            };
+        }
+    } else struct {
         const Self = @This();
 
         pub const filter_type: FilterType = .single_query;
@@ -297,6 +326,7 @@ pub fn Group(comptime GroupComponents: type) type {
     const GroupComponentPoolType = construct_component_pool: {
         var sparse_set_fields: [length]StructField = undefined;
         inline for (component_fields, 0..) |field, i| {
+            if (isTagComponent(field.type)) @compileError("Group cannot consist of tag components");
             const SparseSetType = SparseSet(field.type);
             sparse_set_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
@@ -397,14 +427,14 @@ pub fn Query(comptime QueryComponents: type) type {
     const length = info.@"struct".fields.len;
 
     const QueryComponentPoolType = construct_component_pool: {
-        var sparse_set_fields: [length]StructField = undefined;
+        var query_fields: [length]StructField = undefined;
         inline for (component_fields, 0..) |field, i| {
-            const SparseSetType = SparseSet(field.type);
-            sparse_set_fields[i] = StructField{
+            const StorageType = ComponentStorage(field.type);
+            query_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
-                .type = *SparseSetType,
+                .type = *StorageType,
                 .is_comptime = false,
-                .alignment = @alignOf(*SparseSetType),
+                .alignment = @alignOf(*StorageType),
                 .default_value_ptr = null,
             };
         }
@@ -412,7 +442,7 @@ pub fn Query(comptime QueryComponents: type) type {
             .layout = .auto,
             .is_tuple = true,
             .decls = &.{},
-            .fields = &sparse_set_fields,
+            .fields = &query_fields,
         } });
     };
 
@@ -435,12 +465,12 @@ pub fn Query(comptime QueryComponents: type) type {
             // Try each component type and find the one with smallest sparse set
             inline for (component_fields, 0..) |field, i| {
                 const Component = field.type;
-                const sparse_set: *SparseSet(Component) = world.getSparseSetPtr(Component);
-                component_pool[i] = sparse_set;
-                const size = sparse_set.packed_array.items.len;
+                const component_storage: *ComponentStorage(Component) = world.getComponentStoragePtr(Component);
+                component_pool[i] = component_storage;
+                const size = component_storage.packed_array.items.len;
                 if (size < min_size) {
                     min_size = size;
-                    candidate_entities = sparse_set.packed_array.items;
+                    candidate_entities = component_storage.packed_array.items;
                 }
             }
 
@@ -459,26 +489,35 @@ pub fn Query(comptime QueryComponents: type) type {
             } else @compileError("Unknown component type: " ++ @typeName(C));
         }
 
-        fn getSparseSetPtr(self: Self, comptime C: type) *SparseSet(C) {
+        fn getComponentStoragePtr(self: *const Self, comptime C: type) *const ComponentStorage(C) {
             const id = comptime getComponentId(C);
             return self.query_component_pool[id];
         }
 
+        fn getComponentStoragePtrMut(self: *const Self, comptime C: type) *ComponentStorage(C) {
+            const id = comptime getComponentId(C);
+            // This is safe because we're only mutating through the pointer chain
+            return @constCast(self.query_component_pool[id]);
+        }
+
         /// Get immutable component for an entity
+        /// Note: Cannot be used with tag components (zero-sized components)
         pub fn getComponent(self: Self, entity: Entity, comptime C: type) ?C {
-            return self.getSparseSetPtr(C).get(entity);
+            const storage = self.getComponentStoragePtr(C);
+            return storage.*.get(entity);
         }
 
         /// Get mutable component pointer for an entity
+        /// Note: Cannot be used with tag components (zero-sized components)
         pub fn getComponentMut(self: Self, entity: Entity, comptime C: type) ?*C {
-            const sparse_set = self.getSparseSetPtr(C);
-            return sparse_set.getPtrMut(entity);
+            const sparse_set = self.getComponentStoragePtrMut(C);
+            return sparse_set.*.getPtrMut(entity);
         }
 
         /// Check if entity has all required components
         pub fn hasAllComponents(self: Self, entity: Entity) bool {
             return inline for (component_fields) |field| {
-                if (!self.getSparseSetPtr(field.type).contains(entity))
+                if (!self.getComponentStoragePtr(field.type).*.contains(entity))
                     break false;
             } else true;
         }
@@ -562,7 +601,7 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                         const filter_type: FilterType = ArgType.filter_type;
                         switch (filter_type) {
                             .single_query => {
-                                args[i] = ArgType.init(world.getSparseSetPtr(ArgType.Component));
+                                args[i] = ArgType.init(world.getComponentStoragePtr(ArgType.Component));
                             },
                             .query => {
                                 args[i] = ArgType.init(world);
@@ -606,7 +645,7 @@ test "FixedSingleQuery basic iteration" {
 
     // Query all positions
     const PositionQuery = SingleQuery(Position);
-    const query = PositionQuery.init(world.getSparseSetPtr(Position));
+    const query = PositionQuery.init(world.getComponentStoragePtr(Position));
 
     try std.testing.expectEqual(@as(usize, 2), query.entities.len);
     try std.testing.expectEqual(@as(usize, 2), query.components.len);
