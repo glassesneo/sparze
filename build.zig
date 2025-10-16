@@ -8,6 +8,7 @@ const examples = [_]Example{
     .{ .name = "multiple_groups" },
     .{ .name = "performance_benchmark" },
     .{ .name = "tag_components" },
+    .{ .name = "query_vs_group_benchmark" },
 };
 
 const Example = struct {
