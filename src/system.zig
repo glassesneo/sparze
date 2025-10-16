@@ -26,6 +26,10 @@ pub const FilterType = enum {
     query,
     /// Group filter: optimized multi-component iteration with pre-organized layout
     group,
+    /// SingleTag filter: iterates over entities with a single tag component
+    single_tag,
+    /// TagQuery filter: performs runtime intersection for multiple tag components
+    tag_query,
 };
 
 /// Command types for deferred entity/component operations
@@ -258,20 +262,7 @@ pub fn Commands(comptime World: type) type {
 /// }
 /// ```
 pub fn SingleQuery(comptime QueryComponent: type) type {
-    return if (isTagComponent(QueryComponent)) struct {
-        const Self = @This();
-
-        pub const filter_type: FilterType = .single_query;
-        pub const Component = QueryComponent;
-
-        entities: []const Entity,
-
-        pub fn init(tag_storage: *TagStorage(Component)) Self {
-            return .{
-                .entities = tag_storage.packed_array.items,
-            };
-        }
-    } else struct {
+    return struct {
         const Self = @This();
 
         pub const filter_type: FilterType = .single_query;
@@ -285,111 +276,6 @@ pub fn SingleQuery(comptime QueryComponent: type) type {
                 .entities = sparse_set.packed_array.items,
                 .components = sparse_set.components.items,
             };
-        }
-    };
-}
-
-/// Group is a query filter that provides optimized iteration over entities with multiple components.
-///
-/// Groups require upfront setup via `world.createGroup()` but provide the fastest iteration
-/// for multi-component queries. Entities in a group are stored at the beginning of all
-/// component arrays, enabling cache-friendly sequential access.
-///
-/// Use Group for hot-path queries that run frequently (e.g., every frame) where
-/// maximum performance is critical.
-///
-/// Example:
-/// ```zig
-/// const MovementGroup = struct { Position, Velocity };
-///
-/// // Setup (once)
-/// try world.createGroup(MovementGroup);
-///
-/// // System function
-/// fn movementSystem(group: Group(MovementGroup)) !void {
-///     const positions = group.getMutArrayOf(Position);
-///     const velocities = group.getArrayOf(Velocity);
-///     for (positions, velocities) |*pos, vel| {
-///         pos.x += vel.x;
-///         pos.y += vel.y;
-///     }
-/// }
-/// ```
-pub fn Group(comptime GroupComponents: type) type {
-    // The same way World and Query define their component_pool
-    const info = @typeInfo(GroupComponents);
-    if (info != .@"struct") @compileError("Invalid form of components");
-    const component_fields = info.@"struct".fields;
-    if (component_fields.len == 0) @compileError("Group must have at least one component");
-    const length = component_fields.len;
-
-    const GroupComponentPoolType = construct_component_pool: {
-        var sparse_set_fields: [length]StructField = undefined;
-        inline for (component_fields, 0..) |field, i| {
-            if (isTagComponent(field.type)) @compileError("Group cannot consist of tag components");
-            const SparseSetType = SparseSet(field.type);
-            sparse_set_fields[i] = StructField{
-                .name = std.fmt.comptimePrint("{d}", .{i}),
-                .type = *SparseSetType,
-                .is_comptime = false,
-                .alignment = @alignOf(*SparseSetType),
-                .default_value_ptr = null,
-            };
-        }
-        break :construct_component_pool @Type(.{ .@"struct" = .{
-            .layout = .auto,
-            .is_tuple = true,
-            .decls = &.{},
-            .fields = &sparse_set_fields,
-        } });
-    };
-
-    return struct {
-        const Self = @This();
-
-        pub const filter_type: FilterType = .group;
-        pub const ComponentTypes = GroupComponents;
-
-        group_component_pool: GroupComponentPoolType,
-
-        pub fn init(world: anytype) Self {
-            var component_pool: GroupComponentPoolType = undefined;
-
-            // Extract sparse set pointers for all group components
-            inline for (component_fields, 0..) |field, i| {
-                const Component = field.type;
-                const sparse_set: *SparseSet(Component) = world.getSparseSetPtr(Component);
-                component_pool[i] = sparse_set;
-            }
-
-            return .{
-                .group_component_pool = component_pool,
-            };
-        }
-
-        pub fn getComponentId(comptime C: type) u16 {
-            // The order of components become the id
-            return inline for (component_fields, 0..) |field, i| {
-                if (C == field.type) break i;
-            } else @compileError("Unknown component type: " ++ @typeName(C));
-        }
-
-        fn getSparseSetPtr(self: Self, comptime C: type) *SparseSet(C) {
-            const id = comptime getComponentId(C);
-            return self.group_component_pool[id];
-        }
-
-        pub fn getEntities(self: Self) []const Entity {
-            // Use the first component's sparse set to get group entities
-            return self.group_component_pool[0].getGroupEntities();
-        }
-
-        pub fn getArrayOf(self: Self, comptime C: type) []const C {
-            return self.getSparseSetPtr(C).getGroupComponents();
-        }
-
-        pub fn getMutArrayOf(self: Self, comptime C: type) []C {
-            return self.getSparseSetPtr(C).getGroupComponentsMut();
         }
     };
 }
@@ -524,6 +410,242 @@ pub fn Query(comptime QueryComponents: type) type {
     };
 }
 
+/// Group is a query filter that provides optimized iteration over entities with multiple components.
+///
+/// Groups require upfront setup via `world.createGroup()` but provide the fastest iteration
+/// for multi-component queries. Entities in a group are stored at the beginning of all
+/// component arrays, enabling cache-friendly sequential access.
+///
+/// Use Group for hot-path queries that run frequently (e.g., every frame) where
+/// maximum performance is critical.
+///
+/// Example:
+/// ```zig
+/// const MovementGroup = struct { Position, Velocity };
+///
+/// // Setup (once)
+/// try world.createGroup(MovementGroup);
+///
+/// // System function
+/// fn movementSystem(group: Group(MovementGroup)) !void {
+///     const positions = group.getMutArrayOf(Position);
+///     const velocities = group.getArrayOf(Velocity);
+///     for (positions, velocities) |*pos, vel| {
+///         pos.x += vel.x;
+///         pos.y += vel.y;
+///     }
+/// }
+/// ```
+pub fn Group(comptime GroupComponents: type) type {
+    // The same way World and Query define their component_pool
+    const info = @typeInfo(GroupComponents);
+    if (info != .@"struct") @compileError("Invalid form of components");
+    const component_fields = info.@"struct".fields;
+    if (component_fields.len == 0) @compileError("Group must have at least one component");
+    const length = component_fields.len;
+
+    const GroupComponentPoolType = construct_component_pool: {
+        var sparse_set_fields: [length]StructField = undefined;
+        inline for (component_fields, 0..) |field, i| {
+            if (isTagComponent(field.type)) @compileError("Group cannot consist of tag components");
+            const SparseSetType = SparseSet(field.type);
+            sparse_set_fields[i] = StructField{
+                .name = std.fmt.comptimePrint("{d}", .{i}),
+                .type = *SparseSetType,
+                .is_comptime = false,
+                .alignment = @alignOf(*SparseSetType),
+                .default_value_ptr = null,
+            };
+        }
+        break :construct_component_pool @Type(.{ .@"struct" = .{
+            .layout = .auto,
+            .is_tuple = true,
+            .decls = &.{},
+            .fields = &sparse_set_fields,
+        } });
+    };
+
+    return struct {
+        const Self = @This();
+
+        pub const filter_type: FilterType = .group;
+        pub const ComponentTypes = GroupComponents;
+
+        group_component_pool: GroupComponentPoolType,
+
+        pub fn init(world: anytype) Self {
+            var component_pool: GroupComponentPoolType = undefined;
+
+            // Extract sparse set pointers for all group components
+            inline for (component_fields, 0..) |field, i| {
+                const Component = field.type;
+                const sparse_set: *SparseSet(Component) = world.getSparseSetPtr(Component);
+                component_pool[i] = sparse_set;
+            }
+
+            return .{
+                .group_component_pool = component_pool,
+            };
+        }
+
+        pub fn getComponentId(comptime C: type) u16 {
+            // The order of components become the id
+            return inline for (component_fields, 0..) |field, i| {
+                if (C == field.type) break i;
+            } else @compileError("Unknown component type: " ++ @typeName(C));
+        }
+
+        fn getSparseSetPtr(self: Self, comptime C: type) *SparseSet(C) {
+            const id = comptime getComponentId(C);
+            return self.group_component_pool[id];
+        }
+
+        pub fn getEntities(self: Self) []const Entity {
+            // Use the first component's sparse set to get group entities
+            return self.group_component_pool[0].getGroupEntities();
+        }
+
+        pub fn getArrayOf(self: Self, comptime C: type) []const C {
+            return self.getSparseSetPtr(C).getGroupComponents();
+        }
+
+        pub fn getMutArrayOf(self: Self, comptime C: type) []C {
+            return self.getSparseSetPtr(C).getGroupComponentsMut();
+        }
+    };
+}
+
+pub fn SingleTag(comptime TagComponent: type) type {
+    return struct {
+        const Self = @This();
+
+        pub const filter_type: FilterType = .single_tag;
+        pub const Component = TagComponent;
+
+        entities: []const Entity,
+
+        pub fn init(tag_storage: *TagStorage(Component)) Self {
+            return .{
+                .entities = tag_storage.packed_array.items,
+            };
+        }
+    };
+}
+
+/// TagQuery is a query filter that provides runtime intersection over entities with multiple tag components.
+///
+/// Unlike Query, TagQuery only accepts tag components (zero-sized structs) and provides a
+/// tag-specific API without component accessors. It performs intersection at query time by
+/// iterating through the smallest tag set and checking for the presence of other tags.
+///
+/// Use TagQuery when:
+/// - You need multi-tag queries (e.g., entities with both Enemy and Boss tags)
+/// - All components are tags (zero-sized markers)
+/// - You want explicit type safety for tag-only queries
+///
+/// Example:
+/// ```zig
+/// fn bossEnemySystem(query: TagQuery(struct { Enemy, Boss })) !void {
+///     for (query.entities) |entity| {
+///         if (query.hasAllTags(entity)) {
+///             // Process entities that are both enemies and bosses
+///         }
+///     }
+/// }
+/// ```
+pub fn TagQuery(comptime QueryTags: type) type {
+    // Validate that QueryTags is a struct
+    const info = @typeInfo(QueryTags);
+    if (info != .@"struct") @compileError("Invalid form of tags");
+    const tag_fields = info.@"struct".fields;
+    if (tag_fields.len == 0) @compileError("TagQuery must have at least one tag");
+
+    // Validate that all fields are tag components (zero-sized)
+    inline for (tag_fields) |field| {
+        if (!isTagComponent(field.type)) {
+            @compileError("TagQuery can only contain tag components (empty structs). Found non-tag: " ++ @typeName(field.type));
+        }
+    }
+
+    const length = tag_fields.len;
+
+    const TagPoolType = construct_tag_pool: {
+        var query_fields: [length]StructField = undefined;
+        inline for (tag_fields, 0..) |field, i| {
+            const StorageType = TagStorage(field.type);
+            query_fields[i] = StructField{
+                .name = std.fmt.comptimePrint("{d}", .{i}),
+                .type = *StorageType,
+                .is_comptime = false,
+                .alignment = @alignOf(*StorageType),
+                .default_value_ptr = null,
+            };
+        }
+        break :construct_tag_pool @Type(.{ .@"struct" = .{
+            .layout = .auto,
+            .is_tuple = true,
+            .decls = &.{},
+            .fields = &query_fields,
+        } });
+    };
+
+    return struct {
+        const Self = @This();
+
+        pub const filter_type: FilterType = .tag_query;
+        pub const TagTypes = QueryTags;
+
+        tag_pool: TagPoolType,
+        entities: []const Entity,
+
+        pub fn init(world: anytype) Self {
+            // Find the smallest tag storage to minimize iterations
+            var min_size: usize = std.math.maxInt(usize);
+            var candidate_entities: []const Entity = &[_]Entity{};
+            var tag_pool: TagPoolType = undefined;
+
+            // Try each tag type and find the one with smallest storage
+            inline for (tag_fields, 0..) |field, i| {
+                const Tag = field.type;
+                const tag_storage: *TagStorage(Tag) = world.getTagStoragePtr(Tag);
+                tag_pool[i] = tag_storage;
+                const size = tag_storage.packed_array.items.len;
+                if (size < min_size) {
+                    min_size = size;
+                    candidate_entities = tag_storage.packed_array.items;
+                }
+            }
+
+            // Return a query that will iterate through the smallest set
+            // Users must call hasAllTags() to filter for entities with all tags
+            return .{
+                .tag_pool = tag_pool,
+                .entities = candidate_entities,
+            };
+        }
+
+        pub fn getTagId(comptime T: type) u16 {
+            // The order of tags become the id
+            return inline for (tag_fields, 0..) |field, i| {
+                if (T == field.type) break i;
+            } else @compileError("Unknown tag type: " ++ @typeName(T));
+        }
+
+        fn getTagStoragePtr(self: *const Self, comptime T: type) *const TagStorage(T) {
+            const id = comptime getTagId(T);
+            return self.tag_pool[id];
+        }
+
+        /// Check if entity has all required tags
+        pub fn hasAllTags(self: Self, entity: Entity) bool {
+            return inline for (tag_fields) |field| {
+                if (!self.getTagStoragePtr(field.type).*.contains(entity))
+                    break false;
+            } else true;
+        }
+    };
+}
+
 fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn, comptime World: type) type {
     const CommandsType = Commands(World);
     var fields: [fn_info.params.len]StructField = undefined;
@@ -601,7 +723,7 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                         const filter_type: FilterType = ArgType.filter_type;
                         switch (filter_type) {
                             .single_query => {
-                                args[i] = ArgType.init(world.getComponentStoragePtr(ArgType.Component));
+                                args[i] = ArgType.init(world.getSparseSetPtr(ArgType.Component));
                             },
                             .query => {
                                 args[i] = ArgType.init(world);
@@ -609,9 +731,15 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                             .group => {
                                 args[i] = ArgType.init(world);
                             },
+                            .single_tag => {
+                                args[i] = ArgType.init(world.getTagStoragePtr(ArgType.Component));
+                            },
+                            .tag_query => {
+                                args[i] = ArgType.init(world);
+                            },
                         }
                     } else {
-                        @compileError("System parameter must be a query filter type (SingleQuery, Query, or Group) or Commands. Got: " ++ @typeName(ArgType));
+                        @compileError("System parameter must be a query filter type or Commands. Got: " ++ @typeName(ArgType));
                     }
                 }
                 break :construct_args args;
@@ -1012,4 +1140,176 @@ test "FixedQuery three components" {
         }
     }
     try std.testing.expectEqual(@as(usize, 1), count);
+}
+
+test "TagQuery basic iteration with two tags" {
+    const Player = struct {};
+    const Active = struct {};
+    const Enemy = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Player, Active, Enemy });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create entities with different tag combinations
+    const e1 = world.createEntity();
+    try world.addTag(e1, Player);
+    try world.addTag(e1, Active);
+
+    const e2 = world.createEntity();
+    try world.addTag(e2, Player);
+
+    const e3 = world.createEntity();
+    try world.addTag(e3, Player);
+    try world.addTag(e3, Active);
+
+    const e4 = world.createEntity();
+    try world.addTag(e4, Enemy);
+
+    // Query for Player + Active tags
+    const ActivePlayerQuery = TagQuery(struct { Player, Active });
+    const query = ActivePlayerQuery.init(&world);
+
+    // Should find e1 and e3 (both have Player and Active)
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            count += 1;
+            try std.testing.expect(entity == e1 or entity == e3);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), count);
+}
+
+test "TagQuery with three tags" {
+    const Player = struct {};
+    const Active = struct {};
+    const Boss = struct {};
+    const Enemy = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Player, Active, Boss, Enemy });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create entities
+    const e1 = world.createEntity();
+    try world.addTag(e1, Player);
+    try world.addTag(e1, Active);
+    try world.addTag(e1, Boss);
+
+    const e2 = world.createEntity();
+    try world.addTag(e2, Player);
+    try world.addTag(e2, Active);
+
+    const e3 = world.createEntity();
+    try world.addTag(e3, Player);
+    try world.addTag(e3, Boss);
+
+    const e4 = world.createEntity();
+    try world.addTag(e4, Enemy);
+
+    // Query for Player + Active + Boss tags
+    const BossPlayerQuery = TagQuery(struct { Player, Active, Boss });
+    const query = BossPlayerQuery.init(&world);
+
+    // Should only find e1
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            count += 1;
+            try std.testing.expectEqual(e1, entity);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), count);
+}
+
+test "TagQuery system function" {
+    const Player = struct {};
+    const Enemy = struct {};
+    const Boss = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Boss });
+
+    const BossEnemySystem = struct {
+        fn system(query: TagQuery(struct { Enemy, Boss })) !void {
+            var count: usize = 0;
+            for (query.entities) |entity| {
+                if (query.hasAllTags(entity)) {
+                    count += 1;
+                }
+            }
+            try std.testing.expectEqual(@as(usize, 2), count);
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create boss enemies
+    const boss1 = world.createEntity();
+    try world.addTag(boss1, Enemy);
+    try world.addTag(boss1, Boss);
+
+    const boss2 = world.createEntity();
+    try world.addTag(boss2, Enemy);
+    try world.addTag(boss2, Boss);
+
+    // Create regular enemy (not a boss)
+    const enemy = world.createEntity();
+    try world.addTag(enemy, Enemy);
+
+    // Create player (not in query)
+    const player = world.createEntity();
+    try world.addTag(player, Player);
+
+    // Run system
+    try world.runSystem(BossEnemySystem.system);
+}
+
+test "TagQuery with empty result set" {
+    const Player = struct {};
+    const Enemy = struct {};
+    const Boss = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Boss });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create entities without Boss tag
+    const e1 = world.createEntity();
+    try world.addTag(e1, Player);
+
+    const e2 = world.createEntity();
+    try world.addTag(e2, Enemy);
+
+    // Query for Enemy + Boss (no matches)
+    const BossEnemyQuery = TagQuery(struct { Enemy, Boss });
+    const query = BossEnemyQuery.init(&world);
+
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), count);
 }

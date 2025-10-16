@@ -18,11 +18,12 @@ const Active = struct {};
 const Boss = struct {};
 
 const World = sparze.World(struct { Position, Health, Player, Enemy, Active, Boss });
-const SingleQuery = sparze.SingleQuery;
+const SingleTag = sparze.SingleTag;
+const TagQuery = sparze.TagQuery;
 const Query = sparze.Query;
 
 // System that processes only player entities
-fn playerSystem(query: SingleQuery(Player)) !void {
+fn playerSystem(query: SingleTag(Player)) !void {
     std.debug.print("Player entities: {}\n", .{query.entities.len});
     for (query.entities) |entity| {
         std.debug.print("  Player entity: {}\n", .{entity});
@@ -30,7 +31,7 @@ fn playerSystem(query: SingleQuery(Player)) !void {
 }
 
 // System that processes only enemy entities
-fn enemySystem(query: SingleQuery(Enemy)) !void {
+fn enemySystem(query: SingleTag(Enemy)) !void {
     std.debug.print("Enemy entities: {}\n", .{query.entities.len});
     for (query.entities) |entity| {
         std.debug.print("  Enemy entity: {}\n", .{entity});
@@ -68,11 +69,11 @@ fn enemyPositionSystem(query: Query(struct { Enemy, Position })) !void {
 }
 
 // System demonstrating boss enemies (entities with multiple tags)
-fn bossSystem(query: Query(struct { Enemy, Boss })) !void {
+fn bossSystem(query: TagQuery(struct { Enemy, Boss })) !void {
     std.debug.print("Boss enemies:\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.hasAllTags(entity)) {
             std.debug.print("  Boss entity: {}\n", .{entity});
             count += 1;
         }

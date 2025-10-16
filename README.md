@@ -97,9 +97,11 @@ pub fn main() !void {
 
 ### Query Filters
 
-Sparze provides three query filter types for different use cases:
+Sparze provides multiple query filter types for different use cases:
 
 #### SingleQuery - Single Component Iteration
+
+For regular components (structs with data):
 
 ```zig
 fn healthSystem(query: sparze.SingleQuery(Health)) !void {
@@ -108,6 +110,22 @@ fn healthSystem(query: sparze.SingleQuery(Health)) !void {
     }
 }
 ```
+
+#### SingleTag - Single Tag Iteration
+
+For tag components (zero-sized marker components):
+
+```zig
+fn playerSystem(query: sparze.SingleTag(Player)) !void {
+    for (query.entities) |entity| {
+        std.debug.print("Player entity: {}\n", .{entity});
+    }
+}
+```
+
+**Use SingleTag when:**
+- Iterating over entities with a single tag component
+- Maximum type safety for tag-only queries
 
 #### Query - Runtime Intersection (No Setup)
 
@@ -132,6 +150,27 @@ fn combatSystem(query: sparze.Query(struct { Position, Health })) !void {
 - You need multi-component queries without setup overhead
 - Query patterns are dynamic or one-off
 - Flexibility is more important than raw performance
+- Mixing tags and regular components
+
+#### TagQuery - Multi-Tag Runtime Intersection
+
+For querying multiple tag components:
+
+```zig
+fn bossEnemySystem(query: sparze.TagQuery(struct { Enemy, Boss })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            // Process entities that are both enemies and bosses
+            std.debug.print("Boss enemy: {}\n", .{entity});
+        }
+    }
+}
+```
+
+**Use TagQuery when:**
+- You need multi-tag queries (e.g., entities with both Enemy and Boss tags)
+- All components are tags (zero-sized markers)
+- You want explicit type safety for tag-only queries
 
 #### Group - Optimized Multi-Component Iteration
 
@@ -161,14 +200,15 @@ try world.runSystem(movementSystem);
 
 #### Comparison Table
 
-| Feature | SingleQuery | Query | Group |
-|---------|------------|-------|-------|
-| **Component Count** | 1 | 2+ | 2+ |
-| **Setup Required** | ❌ None | ❌ None | ✅ `createGroup()` |
-| **Manual Filtering** | ❌ No | ✅ Yes (`hasAllComponents`) | ❌ No |
-| **Iteration Speed** | ⚡ Fast | ⚠️ Moderate | ⚡⚡ Fastest |
-| **Memory Layout** | Packed | Sparse set | Cache-optimized |
-| **Use Case** | Single component | Ad-hoc multi-component | Hot path iteration |
+| Feature | SingleQuery | SingleTag | Query | TagQuery | Group |
+|---------|------------|-----------|-------|----------|-------|
+| **Component Types** | Regular (1) | Tag (1) | Mixed (2+) | Tag only (2+) | Regular (2+) |
+| **Setup Required** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ `createGroup()` |
+| **Manual Filtering** | ❌ No | ❌ No | ✅ Yes (`hasAllComponents`) | ✅ Yes (`hasAllTags`) | ❌ No |
+| **Component Access** | ✅ Direct | ❌ N/A (zero-sized) | ✅ Via methods | ❌ N/A (zero-sized) | ✅ Direct arrays |
+| **Iteration Speed** | ⚡ Fast | ⚡ Fast | ⚠️ Moderate | ⚠️ Moderate | ⚡⚡ Fastest |
+| **Memory Layout** | Packed | Bit set | Sparse set | Bit set | Cache-optimized |
+| **Use Case** | Single component | Single tag | Ad-hoc multi-query | Multi-tag queries | Hot path iteration |
 
 ### Tag Components
 
@@ -198,14 +238,23 @@ if (world.hasComponent(entity, Player)) {
     // Entity is a player
 }
 
-// Query entities with specific tags
-fn playerSystem(query: sparze.SingleQuery(Player)) !void {
+// Query entities with specific tags using SingleTag
+fn playerSystem(query: sparze.SingleTag(Player)) !void {
     for (query.entities) |entity| {
         // Process all player entities
     }
 }
 
-// Combine tags with regular components
+// Query entities with multiple tags using TagQuery
+fn bossEnemySystem(query: sparze.TagQuery(struct { Enemy, Boss })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            // Process entities that are both enemies and bosses
+        }
+    }
+}
+
+// Combine tags with regular components using Query
 fn activePlayerSystem(query: sparze.Query(struct { Position, Player, Active })) !void {
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
@@ -234,8 +283,10 @@ fn activePlayerSystem(query: sparze.Query(struct { Position, Player, Active })) 
 **Systems**: Functions that operate on entities with specific component combinations
 
 **Query Filters**:
-- **SingleQuery(Component)**: Fast iteration over entities with a single component type
-- **Query(struct { A, B, ... })**: Flexible runtime intersection for multiple components without setup overhead
+- **SingleQuery(Component)**: Fast iteration over entities with a single regular component
+- **SingleTag(Tag)**: Fast iteration over entities with a single tag component
+- **Query(struct { A, B, ... })**: Flexible runtime intersection for multiple components (mixed tags and regular components)
+- **TagQuery(struct { A, B, ... })**: Runtime intersection for multiple tag components only
 - **Group(struct { A, B })**: Optimized multi-component iteration requiring upfront `createGroup()` call for maximum performance
 
 Query filters are types that filter entities based on component composition, used as parameters in system functions to specify which entities the system operates on.

@@ -19,10 +19,11 @@ const ComponentStorage = component_storage_module.ComponentStorage;
 const isTagComponent = component_storage_module.isTagComponent;
 
 const system_module = @import("system.zig");
-pub const FilterType = system_module.FilterType;
 pub const SingleQuery = system_module.SingleQuery;
 pub const Query = system_module.Query;
 pub const Group = system_module.Group;
+pub const SingleTag = system_module.SingleTag;
+pub const TagQuery = system_module.TagQuery;
 pub const Commands = system_module.Commands;
 pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;
@@ -1132,15 +1133,15 @@ test "Commands with frame-based execution" {
     try world.runSystem(spawnEnemies);
 
     // At this point, entities exist but have no components yet
-    const enemy_query_before = SingleQuery(Enemy).init(world.getTagStoragePtr(Enemy));
-    try std.testing.expectEqual(@as(usize, 0), enemy_query_before.entities.len); // No enemies with Enemy component yet
+    const enemy_tag_before = SingleTag(Enemy).init(world.getTagStoragePtr(Enemy));
+    try std.testing.expectEqual(@as(usize, 0), enemy_tag_before.entities.len); // No enemies with Enemy component yet
 
     // End frame - execute commands
     try world.endFrame();
 
     // Now components are added
-    const enemy_query_after = SingleQuery(Enemy).init(world.getTagStoragePtr(Enemy));
-    try std.testing.expectEqual(@as(usize, 3), enemy_query_after.entities.len); // 3 enemies now exist
+    const enemy_tag_after = SingleTag(Enemy).init(world.getTagStoragePtr(Enemy));
+    try std.testing.expectEqual(@as(usize, 3), enemy_tag_after.entities.len); // 3 enemies now exist
 
     // Verify components were added correctly
     const position_query = SingleQuery(Position).init(world.getSparseSetPtr(Position));
@@ -1179,7 +1180,7 @@ test "Commands remove and destroy operations" {
             for (query.entities, query.components) |entity, health| {
                 if (health.hp <= 0) {
                     // Mark as dead (add component)
-                    try commands.addComponent(entity, Dead, .{});
+                    try commands.addTag(entity, Dead);
                     // Remove health
                     try commands.removeComponent(entity, Health);
                 } else if (health.hp < 25) {

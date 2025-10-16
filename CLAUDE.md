@@ -53,8 +53,10 @@ zig build run-{example-name}
 
 **Systems** (`src/system.zig`):
 - Query filters: Types that filter entities based on component composition, used as system parameters
-  - `SingleQuery(Component)`: single component query filter
-  - `Query(struct { A, B, ... })`: multi-component runtime intersection query filter (no group setup required)
+  - `SingleQuery(Component)`: single regular component query filter
+  - `SingleTag(Tag)`: single tag component query filter
+  - `Query(struct { A, B, ... })`: multi-component runtime intersection query filter (mixed tags and regular components, no group setup required)
+  - `TagQuery(struct { A, B, ... })`: multi-tag runtime intersection query filter (tag components only, no group setup required)
   - `Group(struct { A, B })`: optimized multi-component query filter with pre-allocated group (requires `createGroup()`)
 - `world.runSystem(systemFn)`: convenience method for inline system execution
 - `createSystemFunction(World, systemFn)`: returns typed function pointer
@@ -109,8 +111,25 @@ fn mySystem(
     // Use health.entities, health.components
 }
 
+// System with tag filters
+fn playerSystem(query: SingleTag(Player)) !void {
+    for (query.entities) |entity| {
+        // Process all player entities
+    }
+}
+
+fn bossEnemySystem(query: TagQuery(struct { Enemy, Boss })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            // Process entities that are both enemies and bosses
+        }
+    }
+}
+
 try world.runSystem(movementSystem);
 try world.runSystem(combatSystem);
+try world.runSystem(playerSystem);
+try world.runSystem(bossEnemySystem);
 ```
 
 ### Tag Components
@@ -137,14 +156,23 @@ if (world.hasComponent(entity, Player)) {
     // Entity is a player
 }
 
-// Iterate over entities with a specific tag
-fn playerSystem(query: SingleQuery(Player)) !void {
+// Iterate over entities with a specific tag using SingleTag
+fn playerSystem(query: SingleTag(Player)) !void {
     for (query.entities) |entity| {
         // Process all player entities
     }
 }
 
-// Combine tags with regular components
+// Query multiple tags using TagQuery
+fn bossEnemySystem(query: TagQuery(struct { Enemy, Boss })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            // Process entities that are both enemies and bosses
+        }
+    }
+}
+
+// Combine tags with regular components using Query
 fn activePlayerSystem(query: Query(struct { Position, Player, Active })) !void {
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
@@ -167,21 +195,27 @@ world.removeTag(entity, Active);
 
 ## Query Filter Comparison
 
-| Filter Type | Components | Setup Required | Performance | Use Case |
-|-------------|------------|----------------|-------------|----------|
-| `SingleQuery(C)` | 1 | None | O(n) - Fast | Single component iteration |
-| `Query(struct { A, B, ... })` | 2+ | None | O(n) - Moderate | Ad-hoc multi-component queries |
-| `Group(struct { A, B })` | 2+ | `createGroup()` required | O(n) - Fastest | Frequently used multi-component queries |
+| Filter Type | Component Types | Count | Setup Required | Performance | Use Case |
+|-------------|----------------|-------|----------------|-------------|----------|
+| `SingleQuery(C)` | Regular | 1 | None | O(n) - Fast | Single component iteration |
+| `SingleTag(T)` | Tag | 1 | None | O(n) - Fast | Single tag iteration |
+| `Query(struct { A, B, ... })` | Mixed | 2+ | None | O(n) - Moderate | Ad-hoc multi-query (tags + components) |
+| `TagQuery(struct { A, B, ... })` | Tag only | 2+ | None | O(n) - Moderate | Ad-hoc multi-tag queries |
+| `Group(struct { A, B })` | Regular | 2+ | `createGroup()` required | O(n) - Fastest | Hot-path multi-component queries |
 
 **When to use each**:
-- **SingleQuery**: Iterating over entities with one component
-- **Query**: Multi-component queries used occasionally or with varying component combinations
+- **SingleQuery**: Iterating over entities with one regular component
+- **SingleTag**: Iterating over entities with one tag component (explicit type safety)
+- **Query**: Multi-component queries used occasionally or with varying component combinations (can mix tags and regular components)
+- **TagQuery**: Multi-tag queries (tag components only, explicit type safety)
 - **Group**: Hot-path multi-component queries (e.g., movement, rendering) where performance is critical
 
 **Key differences**:
-- **Query** performs runtime intersection, iterating smallest component set and checking for others
+- **SingleQuery** and **SingleTag**: Direct iteration over packed arrays (SingleQuery) or bit sets (SingleTag)
+- **Query** and **TagQuery**: Perform runtime intersection, iterating smallest set and checking for others
+- **Query** works with mixed tags and regular components; **TagQuery** enforces tag-only at compile time
 - **Group** has pre-organized memory layout with entities stored at start of all component arrays
-- **Group** requires upfront `createGroup()` call and validation; **Query** has no setup overhead
+- **Group** requires upfront `createGroup()` call and validation; **Query** and **TagQuery** have no setup overhead
 
 ## Best Practices
 
