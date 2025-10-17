@@ -190,7 +190,14 @@ pub fn World(Components: anytype) type {
 
         /// Get SparseSet pointer for non-tag components
         /// Note: Only works for non-tag components (components with fields)
-        pub fn getSparseSetPtr(self: *Self, comptime C: type) *SparseSet(C) {
+        pub fn getSparseSetPtr(self: *Self, comptime C: type) *const SparseSet(C) {
+            // ComponentStorage(C) is SparseSet(C) for non-tag components
+            return @ptrCast(self.getComponentStoragePtr(C));
+        }
+
+        /// Get mutable SparseSet pointer for non-tag components
+        /// Note: Only works for non-tag components (components with fields)
+        pub fn getSparseSetPtrMut(self: *Self, comptime C: type) *SparseSet(C) {
             // ComponentStorage(C) is SparseSet(C) for non-tag components
             return @ptrCast(self.getComponentStoragePtr(C));
         }
@@ -227,7 +234,7 @@ pub fn World(Components: anytype) type {
             if (comptime isTagComponent(C)) {
                 try self.addTag(entity, C);
             } else {
-                try self.getSparseSetPtr(C).insert(entity, component);
+                try self.getSparseSetPtrMut(C).insert(entity, component);
 
                 // Update groups when component is added
                 const component_id = comptime getComponentId(C);
@@ -298,7 +305,7 @@ pub fn World(Components: anytype) type {
                 const component_id = comptime getComponentId(C);
                 self.updateGroupsOnRemove(entity, component_id);
 
-                self.getSparseSetPtr(C).remove(entity);
+                self.getSparseSetPtrMut(C).remove(entity);
             }
         }
 

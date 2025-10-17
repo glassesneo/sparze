@@ -240,6 +240,14 @@ pub fn Commands(comptime World: type) type {
             try self.removeComponent(entity, C);
         }
 
+        pub fn getSparseSetPtr(self: Self, comptime C: type) *const SparseSet(C) {
+            return self.world.getSparseSetPtr(C);
+        }
+
+        pub fn getSparseSetPtrMut(self: Self, comptime C: type) *SparseSet(C) {
+            return self.world.getSparseSetPtrMut(C);
+        }
+
         /// Destroy entity (deferred execution)
         pub fn destroyEntity(self: Self, entity: Entity) !void {
             try self.command_buffer.recordDestroyEntity(entity);
@@ -271,7 +279,7 @@ pub fn SingleQuery(comptime QueryComponent: type) type {
         entities: []const Entity,
         components: []Component,
 
-        pub fn init(sparse_set: *SparseSet(Component)) Self {
+        pub fn init(sparse_set: *const SparseSet(Component)) Self {
             return .{
                 .entities = sparse_set.packed_array.items,
                 .components = sparse_set.components.items,
@@ -451,9 +459,9 @@ pub fn Group(comptime GroupComponents: type) type {
             const SparseSetType = SparseSet(field.type);
             sparse_set_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
-                .type = *SparseSetType,
+                .type = *const SparseSetType,
                 .is_comptime = false,
-                .alignment = @alignOf(*SparseSetType),
+                .alignment = @alignOf(*const SparseSetType),
                 .default_value_ptr = null,
             };
         }
@@ -479,7 +487,7 @@ pub fn Group(comptime GroupComponents: type) type {
             // Extract sparse set pointers for all group components
             inline for (component_fields, 0..) |field, i| {
                 const Component = field.type;
-                const sparse_set: *SparseSet(Component) = world.getSparseSetPtr(Component);
+                const sparse_set: *const SparseSet(Component) = world.getSparseSetPtr(Component);
                 component_pool[i] = sparse_set;
             }
 
@@ -495,7 +503,7 @@ pub fn Group(comptime GroupComponents: type) type {
             } else @compileError("Unknown component type: " ++ @typeName(C));
         }
 
-        fn getSparseSetPtr(self: Self, comptime C: type) *SparseSet(C) {
+        fn getSparseSetPtr(self: Self, comptime C: type) *const SparseSet(C) {
             const id = comptime getComponentId(C);
             return self.group_component_pool[id];
         }
