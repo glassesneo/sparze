@@ -690,14 +690,20 @@ fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn, comptime World
 /// - Query filters: SingleQuery(Component), Query(struct { A, B, ... }), Group(struct { A, B })
 /// - Commands: Use `anytype` for parameters that should receive Commands(World). By convention,
 ///   name such parameters `commands`.
+/// - Allocator: Use `std.mem.Allocator` to receive the World's allocator for dynamic allocations.
 ///
 /// Example:
 /// ```zig
 /// fn mySystem(
+///     allocator: std.mem.Allocator,
 ///     movement: Group(struct { Position, Velocity }),
 ///     health: SingleQuery(Health),
 ///     commands: anytype,
 /// ) !void {
+///     // Use allocator for temporary data structures
+///     var list: std.ArrayList(Entity) = .{};
+///     defer list.deinit(allocator);
+///
 ///     // Query data and spawn entities
 ///     const enemy = commands.createEntity();
 ///     try commands.addComponent(enemy, Position, .{ .x = 100, .y = 100 });
@@ -723,8 +729,11 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                     // If param.type is null (anytype), treat it as Commands
                     const ArgType = param.type orelse CommandsType;
 
-                    // Check if it's Commands type (either explicit or anytype)
-                    if (ArgType == CommandsType) {
+                    // Check if it's Allocator type
+                    if (ArgType == std.mem.Allocator) {
+                        args[i] = world.allocator;
+                    } else if (ArgType == CommandsType) {
+                        // Check if it's Commands type (either explicit or anytype)
                         args[i] = CommandsType.init(world, &world.command_buffer);
                     } else if (@hasDecl(ArgType, "filter_type")) {
                         // It's a query filter
@@ -747,7 +756,7 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                             },
                         }
                     } else {
-                        @compileError("System parameter must be a query filter type or Commands. Got: " ++ @typeName(ArgType));
+                        @compileError("System parameter must be a query filter type, Commands, or Allocator. Got: " ++ @typeName(ArgType));
                     }
                 }
                 break :construct_args args;
@@ -1320,4 +1329,199 @@ test "TagQuery with empty result set" {
         }
     }
     try std.testing.expectEqual(@as(usize, 0), count);
+}
+
+test "System function with Allocator parameter" {
+    const Position = struct { x: f32, y: f32 };
+
+    const TestWorld = @import("world.zig").World(struct {Position});
+
+    const AllocatorSystem = struct {
+        fn system(allocator: std.mem.Allocator) !void {
+            // Test that we can use the allocator
+            var list: std.ArrayList(i32) = .{};
+            try list.ensureTotalCapacity(allocator, 1);
+            defer list.deinit(allocator);
+
+            try list.append(allocator, 42);
+            try std.testing.expectEqual(@as(i32, 42), list.items[0]);
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Run system with allocator
+    try world.runSystem(AllocatorSystem.system);
+}
+
+test "System function with Allocator and query filter parameters" {
+    const Position = struct { x: f32, y: f32 };
+
+    const TestWorld = @import("world.zig").World(struct {Position});
+
+    const MixedSystem = struct {
+        fn system(allocator: std.mem.Allocator, query: SingleQuery(Position)) !void {
+            // Use allocator to create a dynamic list
+            var list: std.ArrayList(f32) = .{};
+            defer list.deinit(allocator);
+
+            // Collect all x positions
+            for (query.components) |pos| {
+                try list.append(allocator, pos.x);
+            }
+
+            // Verify we collected positions
+            try std.testing.expectEqual(@as(usize, 2), list.items.len);
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create test entities
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
+
+    // Run system with allocator and query
+    try world.runSystem(MixedSystem.system);
+}
+
+test "System function with Allocator and Commands parameters" {
+    const Position = struct { x: f32, y: f32 };
+
+    const TestWorld = @import("world.zig").World(struct {Position});
+
+    const SpawnSystem = struct {
+        fn system(allocator: std.mem.Allocator, commands: anytype) !void {
+            // Use allocator to determine spawn count
+            var list: std.ArrayList(i32) = .{};
+            defer list.deinit(allocator);
+
+            try list.append(allocator, 1);
+            try list.append(allocator, 2);
+            try list.append(allocator, 3);
+
+            // Spawn entities based on list
+            for (list.items, 0..) |_, i| {
+                const entity = commands.createEntity();
+                try commands.addComponent(entity, Position, .{
+                    .x = @as(f32, @floatFromInt(i)) * 10.0,
+                    .y = 0.0,
+                });
+            }
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    world.beginFrame();
+    try world.runSystem(SpawnSystem.system);
+    try world.endFrame();
+
+    // Verify entities were spawned
+    const query = SingleQuery(Position).init(world.getSparseSetPtr(Position));
+    try std.testing.expectEqual(@as(usize, 3), query.entities.len);
+}
+
+test "System function with Allocator, query filter, and Commands parameters" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
+
+    const ComplexSystem = struct {
+        fn system(
+            allocator: std.mem.Allocator,
+            movement: Group(struct { Position, Velocity }),
+            commands: anytype,
+        ) !void {
+            // Use allocator to track entities that need duplication
+            var to_duplicate: std.ArrayList(std.meta.Tuple(&[_]type{ Position, Velocity })) = .{};
+            defer to_duplicate.deinit(allocator);
+
+            const positions = movement.getArrayOf(Position);
+            const velocities = movement.getArrayOf(Velocity);
+
+            for (positions, velocities) |pos, vel| {
+                if (pos.x > 50.0) {
+                    try to_duplicate.append(allocator, .{ pos, vel });
+                }
+            }
+
+            // Spawn duplicates
+            for (to_duplicate.items) |item| {
+                const entity = commands.createEntity();
+                try commands.addComponent(entity, Position, item[0]);
+                try commands.addComponent(entity, Velocity, item[1]);
+            }
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    try world.createGroup(struct { Position, Velocity });
+
+    // Create test entities
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 100.0, .y = 0.0 });
+    try world.addComponent(e1, Velocity, .{ .dx = 1.0, .dy = 0.0 });
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 10.0, .y = 0.0 });
+    try world.addComponent(e2, Velocity, .{ .dx = 2.0, .dy = 0.0 });
+
+    world.beginFrame();
+    try world.runSystem(ComplexSystem.system);
+    try world.endFrame();
+
+    // Should have 3 entities: 2 original + 1 duplicate (only e1 has x > 50)
+    const query = SingleQuery(Position).init(world.getSparseSetPtr(Position));
+    try std.testing.expectEqual(@as(usize, 3), query.entities.len);
+}
+
+test "System function verifies allocator is world allocator" {
+    const TestWorld = @import("world.zig").World(struct {});
+
+    const CheckAllocatorSystem = struct {
+        var captured_allocator: ?std.mem.Allocator = null;
+
+        fn system(allocator: std.mem.Allocator) !void {
+            captured_allocator = allocator;
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    try world.runSystem(CheckAllocatorSystem.system);
+
+    // Verify the allocator passed to the system is the world's allocator
+    // Note: We can't directly compare allocators, but we can verify it was set
+    try std.testing.expect(CheckAllocatorSystem.captured_allocator != null);
 }

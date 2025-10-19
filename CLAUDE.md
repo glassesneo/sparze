@@ -52,12 +52,15 @@ zig build run-{example-name}
 - Direct sparse set access without dynamic lookup
 
 **Systems** (`src/system.zig`):
-- Query filters: Types that filter entities based on component composition, used as system parameters
-  - `SingleQuery(Component)`: single regular component query filter
-  - `SingleTag(Tag)`: single tag component query filter
-  - `Query(struct { A, B, ... })`: multi-component runtime intersection query filter (mixed tags and regular components, no group setup required)
-  - `TagQuery(struct { A, B, ... })`: multi-tag runtime intersection query filter (tag components only, no group setup required)
-  - `Group(struct { A, B })`: optimized multi-component query filter with pre-allocated group (requires `createGroup()`)
+- System functions accept parameters that are automatically injected by the World:
+  - Query filters: Types that filter entities based on component composition
+    - `SingleQuery(Component)`: single regular component query filter
+    - `SingleTag(Tag)`: single tag component query filter
+    - `Query(struct { A, B, ... })`: multi-component runtime intersection query filter (mixed tags and regular components, no group setup required)
+    - `TagQuery(struct { A, B, ... })`: multi-tag runtime intersection query filter (tag components only, no group setup required)
+    - `Group(struct { A, B })`: optimized multi-component query filter with pre-allocated group (requires `createGroup()`)
+  - `anytype` parameter: Receives `Commands(World)` for deferred entity/component operations
+  - `std.mem.Allocator`: Receives the World's allocator for dynamic allocations within systems
 - `world.runSystem(systemFn)`: convenience method for inline system execution
 - `createSystemFunction(World, systemFn)`: returns typed function pointer
 
@@ -270,17 +273,29 @@ fn movementSystem(group: Group(MovementGroup)) !void {
 try world.runSystem(movementSystem);
 ```
 
-Systems can accept multiple query filter parameters:
+Systems can accept multiple parameter types:
 
 ```zig
 fn complexSystem(
+    allocator: std.mem.Allocator,
     movement: Group(MovementGroup),
     health: SingleQuery(Health),
     combat: Query(struct { Position, Armor }),
 ) !void {
+    // Use allocator for temporary data structures
+    var list: std.ArrayList(Entity) = .{};
+    defer list.deinit(allocator);
+
     // Use multiple query filters in one system
 }
 ```
+
+**System Parameter Types**:
+- **Query filters**: `SingleQuery`, `SingleTag`, `Query`, `TagQuery`, `Group` - Filter entities by component composition
+- **Commands**: `anytype` parameter - Receives `Commands(World)` for deferred entity/component operations
+- **Allocator**: `std.mem.Allocator` - Receives the World's allocator for dynamic allocations
+
+All parameter types can be mixed in any order within a single system function.
 
 ## Performance Optimizations
 
