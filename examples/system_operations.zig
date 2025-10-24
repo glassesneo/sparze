@@ -76,8 +76,9 @@ fn combatQuerySystem(query: Query(struct { Position, Health })) !void {
     var count: usize = 0;
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
-            const pos = query.getComponent(entity, Position).?;
-            if (query.getComponentMut(entity, Health)) |health| {
+            const pos = query.getComponent(entity, Position);
+            const health = query.getComponentMut(entity, Health);
+            {
                 // Apply damage if far from origin
                 const dist_sq = pos.x * pos.x + pos.y * pos.y;
                 if (dist_sq > 2500.0) {

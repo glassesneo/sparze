@@ -88,10 +88,9 @@ fn benchmarkSingleFrameQuery(allocator: std.mem.Allocator) !void {
             var count: usize = 0;
             for (query.entities) |entity| {
                 if (query.hasAllComponents(entity)) {
-                    if (query.getComponent(entity, Position)) |pos| {
-                        std.mem.doNotOptimizeAway(&pos);
-                        count += 1;
-                    }
+                    const pos = query.getComponent(entity, Position);
+                    std.mem.doNotOptimizeAway(&pos);
+                    count += 1;
                 }
             }
             std.mem.doNotOptimizeAway(&count);
@@ -172,9 +171,8 @@ fn benchmarkRepeatedIteration(allocator: std.mem.Allocator) !void {
             var sum: f32 = 0;
             for (query.entities) |entity| {
                 if (query.hasAllComponents(entity)) {
-                    if (query.getComponent(entity, Position)) |pos| {
-                        sum += pos.x + pos.y;
-                    }
+                    const pos = query.getComponent(entity, Position);
+                    sum += pos.x + pos.y;
                 }
             }
             std.mem.doNotOptimizeAway(&sum);
@@ -358,9 +356,8 @@ fn benchmarkMultiQuery(allocator: std.mem.Allocator) !void {
             var sum: f32 = 0;
             for (query.entities) |entity| {
                 if (query.hasAllComponents(entity)) {
-                    if (query.getComponent(entity, Position)) |pos| {
-                        sum += pos.x;
-                    }
+                    const pos = query.getComponent(entity, Position);
+                    sum += pos.x;
                 }
             }
             std.mem.doNotOptimizeAway(&sum);
@@ -441,10 +438,9 @@ fn benchmarkMemoryPattern(allocator: std.mem.Allocator) !void {
             var sum: f32 = 0;
             for (query.entities) |entity| {
                 if (query.hasAllComponents(entity)) {
-                    if (query.getComponentMut(entity, Position)) |pos| {
-                        pos.x += 1.0;
-                        sum += pos.x;
-                    }
+                    const pos = query.getComponentMut(entity, Position);
+                    pos.x += 1.0;
+                    sum += pos.x;
                 }
             }
             std.mem.doNotOptimizeAway(&sum);

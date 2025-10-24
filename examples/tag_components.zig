@@ -44,10 +44,9 @@ fn activePlayerHealthSystem(query: Query(struct { Player, Active, Health })) !vo
     var count: usize = 0;
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
-            if (query.getComponent(entity, Health)) |health| {
-                std.debug.print("  Entity {}: {} HP\n", .{ entity, health.hp });
-                count += 1;
-            }
+            const health = query.getComponent(entity, Health);
+            std.debug.print("  Entity {}: {} HP\n", .{ entity, health.hp });
+            count += 1;
         }
     }
     std.debug.print("  Total: {} active players\n", .{count});
@@ -59,10 +58,9 @@ fn enemyPositionSystem(query: Query(struct { Enemy, Position })) !void {
     var count: usize = 0;
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
-            if (query.getComponent(entity, Position)) |pos| {
-                std.debug.print("  Enemy {} at ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
-                count += 1;
-            }
+            const pos = query.getComponent(entity, Position);
+            std.debug.print("  Enemy {} at ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
+            count += 1;
         }
     }
     std.debug.print("  Total: {} enemies\n", .{count});
@@ -79,6 +77,55 @@ fn bossSystem(query: TagQuery(struct { Enemy, Boss })) !void {
         }
     }
     std.debug.print("  Total: {} bosses\n", .{count});
+}
+
+// NEW: System demonstrating optional tags - processes all enemies, checks for boss status
+fn enemyProcessingSystem(query: TagQuery(struct { Enemy, ?Boss, ?Active })) !void {
+    std.debug.print("Processing all enemies (with optional Boss/Active tags):\n", .{});
+    var regular_count: usize = 0;
+    var boss_count: usize = 0;
+    var active_count: usize = 0;
+
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            const is_boss = query.hasTag(entity, Boss);
+            const is_active = query.hasTag(entity, Active);
+
+            std.debug.print("  Entity {}: ", .{entity});
+            if (is_boss) {
+                std.debug.print("BOSS", .{});
+                boss_count += 1;
+            } else {
+                std.debug.print("regular", .{});
+                regular_count += 1;
+            }
+
+            if (is_active) {
+                std.debug.print(" (active)", .{});
+                active_count += 1;
+            }
+            std.debug.print("\n", .{});
+        }
+    }
+    std.debug.print("  Summary: {} regular, {} bosses, {} active\n", .{ regular_count, boss_count, active_count });
+}
+
+// NEW: System demonstrating Query with both regular components and tags
+fn combatTargetingSystem(query: Query(struct { Position, Enemy }), commands: anytype) !void {
+    std.debug.print("Combat targeting (all enemies with Position):\n", .{});
+    // Get Boss tag storage to check for boss status
+    const boss_storage = commands.world.getTagStoragePtr(Boss);
+
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            const pos = query.getComponent(entity, Position);
+
+            // Check if this enemy has the Boss tag
+            const is_boss = boss_storage.contains(entity);
+            const target_priority = if (is_boss) "HIGH" else "NORMAL";
+            std.debug.print("  Target {} at ({d:.1}, {d:.1}) - Priority: {s}\n", .{ entity, pos.x, pos.y, target_priority });
+        }
+    }
 }
 
 pub fn main() !void {
@@ -140,6 +187,22 @@ pub fn main() !void {
     std.debug.print("\n", .{});
 
     try world.runSystem(bossSystem);
+    std.debug.print("\n", .{});
+
+    // NEW: Demonstrate optional tags systems
+    try world.runSystem(enemyProcessingSystem);
+    std.debug.print("\n", .{});
+
+    world.beginFrame();
+    try world.runSystem(combatTargetingSystem);
+    try world.endFrame();
+    std.debug.print("\n", .{});
+
+    // Demonstrate adding Active tag to an enemy
+    std.debug.print("=== Adding Active Tag to Enemy 1 ===\n\n", .{});
+    try world.addTag(enemy1, Active);
+
+    try world.runSystem(enemyProcessingSystem);
     std.debug.print("\n", .{});
 
     // Demonstrate tag removal

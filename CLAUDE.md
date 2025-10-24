@@ -56,8 +56,8 @@ zig build run-{example-name}
   - Query filters: Types that filter entities based on component composition
     - `SingleQuery(Component)`: single regular component query filter
     - `SingleTag(Tag)`: single tag component query filter
-    - `Query(struct { A, B, ... })`: multi-component runtime intersection query filter (mixed tags and regular components, no group setup required)
-    - `TagQuery(struct { A, B, ... })`: multi-tag runtime intersection query filter (tag components only, no group setup required)
+    - `Query(struct { A, B, ?C, ... })`: multi-component runtime intersection query filter (mixed tags and regular components, no group setup required)
+    - `TagQuery(struct { A, B, ?C, ... })`: multi-tag runtime intersection query filter (tag components only, no group setup required)
     - `Group(struct { A, B })`: optimized multi-component query filter with pre-allocated group (requires `createGroup()`)
   - `anytype` parameter: Receives `Commands(World)` for deferred entity/component operations
   - `std.mem.Allocator`: Receives the World's allocator for dynamic allocations within systems
@@ -196,14 +196,70 @@ world.removeTag(entity, Active);
 
 **Performance**: Tags use bit sets for O(1) membership checking and consume only 1 bit per entity index, making them extremely memory-efficient compared to regular components.
 
+
+### Optional Components and Tags
+
+Both `Query` and `TagQuery` support optional components/tags using the `?Component` or `?Tag` syntax. This allows queries to match entities based on required components while optionally checking for additional components.
+
+```zig
+// Query with optional components
+fn combatSystem(query: Query(struct { Health, ?Shield })) !void {
+    const damage = 15;
+    
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            const health = query.getComponentMut(entity, Health);
+            var actual_damage = damage;
+            
+            // Shield absorbs some damage if present
+            if (query.getOptionalMut(entity, Shield)) |shield| {
+                const absorbed = @min(shield.value, actual_damage);
+                shield.value -= absorbed;
+                actual_damage -= absorbed;
+            }
+            
+            health.hp -= actual_damage;
+        }
+    }
+}
+
+// TagQuery with optional tags
+fn enemyAISystem(query: TagQuery(struct { Enemy, ?Boss, ?Elite })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            // Base enemy AI
+            
+            if (query.hasTag(entity, Boss)) {
+                // Enhanced boss AI
+            }
+            
+            if (query.hasTag(entity, Elite)) {
+                // Elite enemy behavior
+            }
+        }
+    }
+}
+```
+
+**Optional Component/Tag API**:
+- **Required components**: Use `getComponent()` / `getComponentMut()` - asserts component exists
+- **Optional components**: Use `getOptional()` / `getOptionalMut()` - returns `?C` or `?*C`
+- **Optional tags**: Use `hasTag(entity, Tag)` - returns `bool`
+- **Filtering**: `hasAllComponents()` and `hasAllTags()` only check required (non-optional) fields
+
+**Benefits**:
+- **Flexibility**: Match entities with required components while optionally checking others
+- **Performance**: Query optimization only considers required components/tags for iteration
+- **Type Safety**: Explicit `?Component` syntax shows which components are optional at compile time
+- **Cleaner Code**: Avoid multiple separate queries when some components are optional
 ## Query Filter Comparison
 
 | Filter Type | Component Types | Count | Setup Required | Performance | Use Case |
 |-------------|----------------|-------|----------------|-------------|----------|
 | `SingleQuery(C)` | Regular | 1 | None | O(n) - Fast | Single component iteration |
 | `SingleTag(T)` | Tag | 1 | None | O(n) - Fast | Single tag iteration |
-| `Query(struct { A, B, ... })` | Mixed | 2+ | None | O(n) - Moderate | Ad-hoc multi-query (tags + components) |
-| `TagQuery(struct { A, B, ... })` | Tag only | 2+ | None | O(n) - Moderate | Ad-hoc multi-tag queries |
+| `Query(struct { A, B, ?C, ... })` | Mixed | 2+ | None | O(n) - Moderate | Ad-hoc multi-query (tags + components) |
+| `TagQuery(struct { A, B, ?C, ... })` | Tag only | 2+ | None | O(n) - Moderate | Ad-hoc multi-tag queries |
 | `Group(struct { A, B })` | Regular | 2+ | `createGroup()` required | O(n) - Fastest | Hot-path multi-component queries |
 
 **When to use each**:

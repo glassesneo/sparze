@@ -22,10 +22,13 @@ A high-performance Entity Component System (ECS) library for Zig with compile-ti
 
 - **Flexible Query System**
   - **SingleQuery**: Iterate over entities with a single component
-  - **Query**: Runtime intersection queries for multiple components (no setup required)
+  - **SingleTag**: Iterate over entities with a single tag component
+  - **Query**: Runtime intersection queries for multiple components with optional component support (no setup required)
+  - **TagQuery**: Runtime intersection queries for multiple tag components with optional tag support
   - **Group**: Optimized multi-component iteration with cache-friendly layout
   - Automatic query resolution and dependency injection
   - Support for multiple query parameters per system
+  - Optional components/tags using `?Component` or `?Tag` syntax
 
 ## Quick Start
 
@@ -133,12 +136,33 @@ fn playerSystem(query: sparze.SingleTag(Player)) !void {
 fn combatSystem(query: sparze.Query(struct { Position, Health })) !void {
     for (query.entities) |entity| {
         if (query.hasAllComponents(entity)) {
-            const pos = query.getComponent(entity, Position).?;
-            if (query.getComponentMut(entity, Health)) |health| {
-                // Apply damage based on position
-                const distance = @sqrt(pos.x * pos.x + pos.y * pos.y);
-                if (distance > 50.0) {
-                    health.hp -= 5;
+            const pos = query.getComponent(entity, Position);
+            const health = query.getComponentMut(entity, Health);
+            // Apply damage based on position
+            const distance = @sqrt(pos.x * pos.x + pos.y * pos.y);
+            if (distance > 50.0) {
+                health.hp -= 5;
+            }
+        }
+    }
+}
+
+// Query with optional components (using ?Component syntax)
+fn movementSystem(query: sparze.Query(struct { Position, Velocity, ?Health })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            const pos = query.getComponentMut(entity, Position);
+            const vel = query.getComponent(entity, Velocity);
+            
+            // Apply movement
+            pos.x += vel.x * 0.016;
+            pos.y += vel.y * 0.016;
+            
+            // Optional: slow down if injured
+            if (query.getOptional(entity, Health)) |health| {
+                if (health.hp < 30) {
+                    pos.x -= vel.x * 0.008; // Half speed
+                    pos.y -= vel.y * 0.008;
                 }
             }
         }
@@ -151,6 +175,7 @@ fn combatSystem(query: sparze.Query(struct { Position, Health })) !void {
 - Query patterns are dynamic or one-off
 - Flexibility is more important than raw performance
 - Mixing tags and regular components
+- Some components are optional (use `?Component` syntax)
 
 #### TagQuery - Multi-Tag Runtime Intersection
 
@@ -165,12 +190,31 @@ fn bossEnemySystem(query: sparze.TagQuery(struct { Enemy, Boss })) !void {
         }
     }
 }
+
+// TagQuery with optional tags (using ?Tag syntax)
+fn enemyAISystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Elite })) !void {
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            // Base enemy AI for all enemies
+            
+            // Check for optional tags
+            if (query.hasTag(entity, Boss)) {
+                // Enhanced boss AI
+            }
+            
+            if (query.hasTag(entity, Elite)) {
+                // Elite enemy behavior
+            }
+        }
+    }
+}
 ```
 
 **Use TagQuery when:**
 - You need multi-tag queries (e.g., entities with both Enemy and Boss tags)
 - All components are tags (zero-sized markers)
 - You want explicit type safety for tag-only queries
+- Some tags are optional (use `?Tag` syntax)
 
 #### Group - Optimized Multi-Component Iteration
 
@@ -203,6 +247,7 @@ try world.runSystem(movementSystem);
 | Feature | SingleQuery | SingleTag | Query | TagQuery | Group |
 |---------|------------|-----------|-------|----------|-------|
 | **Component Types** | Regular (1) | Tag (1) | Mixed (2+) | Tag only (2+) | Regular (2+) |
+| **Optional Support** | ❌ No | ❌ No | ✅ Yes (`?C`) | ✅ Yes (`?Tag`) | ❌ No |
 | **Setup Required** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ `createGroup()` |
 | **Manual Filtering** | ❌ No | ❌ No | ✅ Yes (`hasAllComponents`) | ✅ Yes (`hasAllTags`) | ❌ No |
 | **Component Access** | ✅ Direct | ❌ N/A (zero-sized) | ✅ Via methods | ❌ N/A (zero-sized) | ✅ Direct arrays |
@@ -272,6 +317,69 @@ fn activePlayerSystem(query: sparze.Query(struct { Position, Player, Active })) 
 
 **Performance**: Tags use bit sets for O(1) membership checking and are extremely memory-efficient, consuming only 1 bit per entity index instead of storing full component data.
 
+### Optional Components and Tags
+
+Both `Query` and `TagQuery` support optional components/tags using the `?Component` or `?Tag` syntax. This allows queries to match entities based on required components while optionally checking for additional ones.
+
+```zig
+// Query with optional components
+fn combatSystem(query: sparze.Query(struct { Health, ?Shield })) !void {
+    const damage = 15;
+    
+    for (query.entities) |entity| {
+        if (query.hasAllComponents(entity)) {
+            const health = query.getComponentMut(entity, Health);
+            var actual_damage = damage;
+            
+            // Shield absorbs damage if present
+            if (query.getOptionalMut(entity, Shield)) |shield| {
+                const absorbed = @min(shield.value, actual_damage);
+                shield.value -= absorbed;
+                actual_damage -= absorbed;
+            }
+            
+            health.hp -= actual_damage;
+        }
+    }
+}
+
+// TagQuery with optional tags
+fn enemyProcessingSystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Active })) !void {
+    var stats = .{ .regular = 0, .boss = 0, .active = 0 };
+    
+    for (query.entities) |entity| {
+        if (query.hasAllTags(entity)) {
+            if (query.hasTag(entity, Boss)) {
+                stats.boss += 1;
+            } else {
+                stats.regular += 1;
+            }
+            
+            if (query.hasTag(entity, Active)) {
+                stats.active += 1;
+            }
+        }
+    }
+}
+```
+
+**Optional Component/Tag API**:
+- **Required components**: `getComponent()` / `getComponentMut()` - asserts component exists
+- **Optional components**: `getOptional()` / `getOptionalMut()` - returns `?C` or `?*C`
+- **Optional tags**: `hasTag(entity, Tag)` - returns `bool`
+- **Filtering**: `hasAllComponents()` and `hasAllTags()` only check required (non-optional) fields
+
+**Benefits**:
+- Match entities with required components while optionally checking others
+- Query optimization only considers required components/tags for iteration
+- Explicit `?Component` syntax shows optional components at compile time
+- Avoid multiple separate queries when some components are optional
+
+**Use cases**:
+- Systems that apply special behavior when certain components exist (e.g., damage absorption with optional Shield)
+- AI systems with base behavior and optional enhancements (e.g., Enemy with optional Boss or Elite behaviors)
+- Status systems that display all available information (e.g., entity info with optional Health, Armor, Status effects)
+
 ## Core Concepts
 
 **Entities**: Lightweight 32-bit identifiers (16-bit index + 16-bit version)
@@ -285,8 +393,8 @@ fn activePlayerSystem(query: sparze.Query(struct { Position, Player, Active })) 
 **Query Filters**:
 - **SingleQuery(Component)**: Fast iteration over entities with a single regular component
 - **SingleTag(Tag)**: Fast iteration over entities with a single tag component
-- **Query(struct { A, B, ... })**: Flexible runtime intersection for multiple components (mixed tags and regular components)
-- **TagQuery(struct { A, B, ... })**: Runtime intersection for multiple tag components only
+- **Query(struct { A, B, ?C, ... })**: Flexible runtime intersection for multiple components (mixed tags and regular components, supports optional components)
+- **TagQuery(struct { A, B, ?C, ... })**: Runtime intersection for multiple tag components only (supports optional tags)
 - **Group(struct { A, B })**: Optimized multi-component iteration requiring upfront `createGroup()` call for maximum performance
 
 Query filters are types that filter entities based on component composition, used as parameters in system functions to specify which entities the system operates on.
@@ -296,6 +404,7 @@ Query filters are types that filter entities based on component composition, use
 Explore the `examples/` directory for comprehensive demonstrations:
 
 - `basic.zig` - Entity and component basics
+- `optional_components.zig` - Optional components and tags demonstration
 - `plugin_architecture.zig` - Plugin-style architecture
 - `system_operations.zig` - System patterns and multi-query examples
 - `tag_components.zig` - Tag component usage and patterns
