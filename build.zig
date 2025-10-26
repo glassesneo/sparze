@@ -9,6 +9,7 @@ const examples = [_]Example{
     .{ .name = "performance_benchmark" },
     .{ .name = "tag_components" },
     .{ .name = "query_vs_group_benchmark" },
+    .{ .name = "reserve_benchmark" },
 };
 
 const Example = struct {
