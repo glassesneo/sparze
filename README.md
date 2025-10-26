@@ -135,7 +135,7 @@ fn playerSystem(query: sparze.SingleTag(Player)) !void {
 ```zig
 fn combatSystem(query: sparze.Query(struct { Position, Health })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position);
             const health = query.getComponentMut(entity, Health);
             // Apply damage based on position
@@ -150,7 +150,7 @@ fn combatSystem(query: sparze.Query(struct { Position, Health })) !void {
 // Query with optional components (using ?Component syntax)
 fn movementSystem(query: sparze.Query(struct { Position, Velocity, ?Health })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponentMut(entity, Position);
             const vel = query.getComponent(entity, Velocity);
             
@@ -184,7 +184,7 @@ For querying multiple tag components:
 ```zig
 fn bossEnemySystem(query: sparze.TagQuery(struct { Enemy, Boss })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             // Process entities that are both enemies and bosses
             std.debug.print("Boss enemy: {}\n", .{entity});
         }
@@ -194,7 +194,7 @@ fn bossEnemySystem(query: sparze.TagQuery(struct { Enemy, Boss })) !void {
 // TagQuery with optional tags (using ?Tag syntax)
 fn enemyAISystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Elite })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             // Base enemy AI for all enemies
             
             // Check for optional tags
@@ -249,7 +249,7 @@ try world.runSystem(movementSystem);
 | **Component Types** | Regular (1) | Tag (1) | Mixed (2+) | Tag only (2+) | Regular (2+) |
 | **Optional Support** | ❌ No | ❌ No | ✅ Yes (`?C`) | ✅ Yes (`?Tag`) | ❌ No |
 | **Setup Required** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ `createGroup()` |
-| **Manual Filtering** | ❌ No | ❌ No | ✅ Yes (`hasAllComponents`) | ✅ Yes (`hasAllTags`) | ❌ No |
+| **Manual Filtering** | ❌ No | ❌ No | ✅ Yes (`filter`) | ✅ Yes (`filter`) | ❌ No |
 | **Component Access** | ✅ Direct | ❌ N/A (zero-sized) | ✅ Via methods | ❌ N/A (zero-sized) | ✅ Direct arrays |
 | **Iteration Speed** | ⚡ Fast | ⚡ Fast | ⚠️ Moderate | ⚠️ Moderate | ⚡⚡ Fastest |
 | **Memory Layout** | Packed | Bit set | Sparse set | Bit set | Cache-optimized |
@@ -293,7 +293,7 @@ fn playerSystem(query: sparze.SingleTag(Player)) !void {
 // Query entities with multiple tags using TagQuery
 fn bossEnemySystem(query: sparze.TagQuery(struct { Enemy, Boss })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             // Process entities that are both enemies and bosses
         }
     }
@@ -302,7 +302,7 @@ fn bossEnemySystem(query: sparze.TagQuery(struct { Enemy, Boss })) !void {
 // Combine tags with regular components using Query
 fn activePlayerSystem(query: sparze.Query(struct { Position, Player, Active })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             // Process active players with positions
         }
     }
@@ -327,7 +327,7 @@ fn combatSystem(query: sparze.Query(struct { Health, ?Shield })) !void {
     const damage = 15;
     
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const health = query.getComponentMut(entity, Health);
             var actual_damage = damage;
             
@@ -348,7 +348,7 @@ fn enemyProcessingSystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Active }
     var stats = .{ .regular = 0, .boss = 0, .active = 0 };
     
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             if (query.hasTag(entity, Boss)) {
                 stats.boss += 1;
             } else {
@@ -367,7 +367,7 @@ fn enemyProcessingSystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Active }
 - **Required components**: `getComponent()` / `getComponentMut()` - asserts component exists
 - **Optional components**: `getOptional()` / `getOptionalMut()` - returns `?C` or `?*C`
 - **Optional tags**: `hasTag(entity, Tag)` - returns `bool`
-- **Filtering**: `hasAllComponents()` and `hasAllTags()` only check required (non-optional) fields
+- **Filtering**: `filter()` only checks required (non-optional) fields
 
 **Benefits**:
 - Match entities with required components while optionally checking others

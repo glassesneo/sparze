@@ -15,7 +15,7 @@ fn movementSystem(query: Query(struct { Position, Velocity, ?Health })) !void {
     std.debug.print("\n=== Movement System ===\n", .{});
     
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponentMut(entity, Position);
             const vel = query.getComponent(entity, Velocity);
             
@@ -45,7 +45,7 @@ fn combatSystem(query: Query(struct { Health, ?Shield })) !void {
     const damage = 15;
     
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const health = query.getComponentMut(entity, Health);
             
             var actual_damage = damage;
@@ -70,7 +70,7 @@ fn statusDisplaySystem(query: Query(struct { Position, ?Health, ?Shield })) !voi
     std.debug.print("\n=== Entity Status ===\n", .{});
     
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position);
             
             std.debug.print("Entity {} at ({d:.2}, {d:.2})", .{ entity, pos.x, pos.y });

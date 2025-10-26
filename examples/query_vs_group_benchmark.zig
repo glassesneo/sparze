@@ -87,7 +87,7 @@ fn benchmarkSingleFrameQuery(allocator: std.mem.Allocator) !void {
             const query = sparze.Query(struct { Position, Velocity }).init(&world);
             var count: usize = 0;
             for (query.entities) |entity| {
-                if (query.hasAllComponents(entity)) {
+                if (query.filter(entity)) {
                     const pos = query.getComponent(entity, Position);
                     std.mem.doNotOptimizeAway(&pos);
                     count += 1;
@@ -170,7 +170,7 @@ fn benchmarkRepeatedIteration(allocator: std.mem.Allocator) !void {
             const query = sparze.Query(struct { Position, Velocity }).init(&world);
             var sum: f32 = 0;
             for (query.entities) |entity| {
-                if (query.hasAllComponents(entity)) {
+                if (query.filter(entity)) {
                     const pos = query.getComponent(entity, Position);
                     sum += pos.x + pos.y;
                 }
@@ -249,7 +249,7 @@ fn benchmarkDynamicQuery(allocator: std.mem.Allocator) !void {
                 const query = sparze.Query(struct { Position, Velocity }).init(&world);
                 var count: usize = 0;
                 for (query.entities) |entity| {
-                    if (query.hasAllComponents(entity)) {
+                    if (query.filter(entity)) {
                         count += 1;
                     }
                 }
@@ -261,7 +261,7 @@ fn benchmarkDynamicQuery(allocator: std.mem.Allocator) !void {
                 const query = sparze.Query(struct { Health, Armor }).init(&world);
                 var count: usize = 0;
                 for (query.entities) |entity| {
-                    if (query.hasAllComponents(entity)) {
+                    if (query.filter(entity)) {
                         count += 1;
                     }
                 }
@@ -355,7 +355,7 @@ fn benchmarkMultiQuery(allocator: std.mem.Allocator) !void {
             const query = sparze.Query(struct { Position, Velocity, Health, Armor }).init(&world);
             var sum: f32 = 0;
             for (query.entities) |entity| {
-                if (query.hasAllComponents(entity)) {
+                if (query.filter(entity)) {
                     const pos = query.getComponent(entity, Position);
                     sum += pos.x;
                 }
@@ -437,7 +437,7 @@ fn benchmarkMemoryPattern(allocator: std.mem.Allocator) !void {
             const query = sparze.Query(struct { Position, Velocity }).init(&world);
             var sum: f32 = 0;
             for (query.entities) |entity| {
-                if (query.hasAllComponents(entity)) {
+                if (query.filter(entity)) {
                     const pos = query.getComponentMut(entity, Position);
                     pos.x += 1.0;
                     sum += pos.x;

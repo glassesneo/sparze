@@ -2,6 +2,7 @@ const std = @import("std");
 
 const examples = [_]Example{
     .{ .name = "basic" },
+    .{ .name = "exclude_example" },
     .{ .name = "plugin_architecture" },
     .{ .name = "system_operations" },
     .{ .name = "movement_example" },

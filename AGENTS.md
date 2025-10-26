@@ -84,7 +84,7 @@ fn movementSystem(movement: Group(struct { Position, Velocity })) !void {
 // System with Query (flexible, no group setup required)
 fn combatSystem(query: Query(struct { Position, Health })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position).?;
             if (query.getComponentMut(entity, Health)) |health| {
                 // Process entity

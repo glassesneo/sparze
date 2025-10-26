@@ -32,6 +32,11 @@ pub const FilterType = enum {
     tag_query,
 };
 
+pub const ModifierType = enum {
+    optional,
+    exclude,
+};
+
 /// Command types for deferred entity/component operations
 const CommandType = enum {
     add_component,
@@ -50,6 +55,393 @@ fn ComponentData(comptime max_size: comptime_int) type {
             // No-op: inline storage, nothing to free
         }
     };
+}
+
+test "Query with Exclude modifier - basic usage" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+    const Dead = struct {};
+    const Static = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Dead, Static });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create living movable entities
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
+    try world.addComponent(e1, Velocity, .{ .dx = 1.0, .dy = 2.0 });
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
+    try world.addComponent(e2, Velocity, .{ .dx = -1.0, .dy = -2.0 });
+
+    // Create dead entity (should be excluded)
+    const e3 = world.createEntity();
+    try world.addComponent(e3, Position, .{ .x = 50.0, .y = 60.0 });
+    try world.addComponent(e3, Velocity, .{ .dx = 0.0, .dy = 0.0 });
+    try world.addTag(e3, Dead);
+
+    // Create static entity (should be excluded)
+    const e4 = world.createEntity();
+    try world.addComponent(e4, Position, .{ .x = 70.0, .y = 80.0 });
+    try world.addComponent(e4, Velocity, .{ .dx = 0.0, .dy = 0.0 });
+    try world.addTag(e4, Static);
+
+    // Query for living entities with position and velocity (exclude Dead)
+    const LivingMovementQuery = Query(struct { Position, Velocity, Exclude(Dead) });
+    const query = LivingMovementQuery.init(&world);
+
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            // Should only find e1, e2, and e4 (not e3 which is Dead)
+            try std.testing.expect(entity == e1 or entity == e2 or entity == e4);
+            try std.testing.expect(entity != e3);
+            count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 3), count);
+}
+
+test "Query with multiple Exclude modifiers" {
+    const Position = struct { x: f32, y: f32 };
+    const Enemy = struct {};
+    const Dead = struct {};
+    const Frozen = struct {};
+    const Disabled = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Position, Enemy, Dead, Frozen, Disabled });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create active enemy (should be included)
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
+    try world.addTag(e1, Enemy);
+
+    // Create another active enemy (should be included)
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
+    try world.addTag(e2, Enemy);
+
+    // Create frozen enemy (should be excluded)
+    const e3 = world.createEntity();
+    try world.addComponent(e3, Position, .{ .x = 50.0, .y = 60.0 });
+    try world.addTag(e3, Enemy);
+    try world.addTag(e3, Frozen);
+
+    // Create disabled enemy (should be excluded)
+    const e4 = world.createEntity();
+    try world.addComponent(e4, Position, .{ .x = 70.0, .y = 80.0 });
+    try world.addTag(e4, Enemy);
+    try world.addTag(e4, Disabled);
+
+    // Create dead enemy (should be excluded)
+    const e5 = world.createEntity();
+    try world.addComponent(e5, Position, .{ .x = 90.0, .y = 100.0 });
+    try world.addTag(e5, Enemy);
+    try world.addTag(e5, Dead);
+
+    // Create enemy with multiple exclusion tags (should be excluded)
+    const e6 = world.createEntity();
+    try world.addComponent(e6, Position, .{ .x = 110.0, .y = 120.0 });
+    try world.addTag(e6, Enemy);
+    try world.addTag(e6, Frozen);
+    try world.addTag(e6, Disabled);
+
+    // Query for active enemies (exclude Frozen, Disabled, Dead)
+    const ActiveEnemyQuery = Query(struct { Position, Enemy, Exclude(Frozen), Exclude(Disabled), Exclude(Dead) });
+    const query = ActiveEnemyQuery.init(&world);
+
+    var count: usize = 0;
+    var found_e1 = false;
+    var found_e2 = false;
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            // Should only find e1 and e2
+            try std.testing.expect(entity == e1 or entity == e2);
+            try std.testing.expect(entity != e3 and entity != e4 and entity != e5 and entity != e6);
+            if (entity == e1) found_e1 = true;
+            if (entity == e2) found_e2 = true;
+            count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), count);
+    try std.testing.expect(found_e1);
+    try std.testing.expect(found_e2);
+}
+
+test "Query with Exclude and optional components combined" {
+    const Position = struct { x: f32, y: f32 };
+    const Health = struct { hp: i32 };
+    const Shield = struct { value: i32 };
+    const Dead = struct {};
+    const Invulnerable = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Position, Health, Shield, Dead, Invulnerable });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Living entity with health and shield
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
+    try world.addComponent(e1, Health, .{ .hp = 100 });
+    try world.addComponent(e1, Shield, .{ .value = 50 });
+
+    // Living entity with health but no shield
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
+    try world.addComponent(e2, Health, .{ .hp = 75 });
+
+    // Dead entity (should be excluded)
+    const e3 = world.createEntity();
+    try world.addComponent(e3, Position, .{ .x = 50.0, .y = 60.0 });
+    try world.addComponent(e3, Health, .{ .hp = 0 });
+    try world.addTag(e3, Dead);
+
+    // Invulnerable entity (should be excluded)
+    const e4 = world.createEntity();
+    try world.addComponent(e4, Position, .{ .x = 70.0, .y = 80.0 });
+    try world.addComponent(e4, Health, .{ .hp = 100 });
+    try world.addTag(e4, Invulnerable);
+
+    // Query for damageable entities (living, not invulnerable, optional shield)
+    const DamageableQuery = Query(struct { Position, Health, ?Shield, Exclude(Dead), Exclude(Invulnerable) });
+    const query = DamageableQuery.init(&world);
+
+    var count: usize = 0;
+    var shielded_count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            // Should only find e1 and e2
+            try std.testing.expect(entity == e1 or entity == e2);
+            try std.testing.expect(entity != e3 and entity != e4);
+
+            const health = query.getComponent(entity, Health);
+            try std.testing.expect(health.hp > 0);
+
+            if (query.getOptional(entity, Shield)) |shield| {
+                try std.testing.expect(shield.value > 0);
+                shielded_count += 1;
+            }
+            count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), count);
+    try std.testing.expectEqual(@as(usize, 1), shielded_count);
+}
+
+test "Query with Exclude in system function" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+    const Static = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Static });
+
+    const MovementSystem = struct {
+        var updated_count: usize = 0;
+
+        fn system(query: Query(struct { Position, Velocity, Exclude(Static) })) !void {
+            updated_count = 0;
+            for (query.entities) |entity| {
+                if (query.filter(entity)) {
+                    const pos = query.getComponentMut(entity, Position);
+                    const vel = query.getComponent(entity, Velocity);
+                    pos.x += vel.dx;
+                    pos.y += vel.dy;
+                    updated_count += 1;
+                }
+            }
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Movable entities
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 0.0, .y = 0.0 });
+    try world.addComponent(e1, Velocity, .{ .dx = 1.0, .dy = 2.0 });
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 10.0, .y = 20.0 });
+    try world.addComponent(e2, Velocity, .{ .dx = -1.0, .dy = -2.0 });
+
+    // Static entity (should not move)
+    const e3 = world.createEntity();
+    try world.addComponent(e3, Position, .{ .x = 100.0, .y = 200.0 });
+    try world.addComponent(e3, Velocity, .{ .dx = 5.0, .dy = 10.0 });
+    try world.addTag(e3, Static);
+
+    // Run system
+    try world.runSystem(MovementSystem.system);
+
+    // Verify only non-static entities were updated
+    try std.testing.expectEqual(@as(usize, 2), MovementSystem.updated_count);
+
+    try std.testing.expectEqual(@as(f32, 1.0), world.getComponent(e1, Position).?.x);
+    try std.testing.expectEqual(@as(f32, 2.0), world.getComponent(e1, Position).?.y);
+    try std.testing.expectEqual(@as(f32, 9.0), world.getComponent(e2, Position).?.x);
+    try std.testing.expectEqual(@as(f32, 18.0), world.getComponent(e2, Position).?.y);
+    // Static entity should not have moved
+    try std.testing.expectEqual(@as(f32, 100.0), world.getComponent(e3, Position).?.x);
+    try std.testing.expectEqual(@as(f32, 200.0), world.getComponent(e3, Position).?.y);
+}
+
+test "TagQuery with Exclude modifier" {
+    const Player = struct {};
+    const Enemy = struct {};
+    const Dead = struct {};
+    const Frozen = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Dead, Frozen });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Active enemy
+    const e1 = world.createEntity();
+    try world.addTag(e1, Enemy);
+
+    // Another active enemy
+    const e2 = world.createEntity();
+    try world.addTag(e2, Enemy);
+
+    // Dead enemy (should be excluded)
+    const e3 = world.createEntity();
+    try world.addTag(e3, Enemy);
+    try world.addTag(e3, Dead);
+
+    // Frozen enemy (should be excluded)
+    const e4 = world.createEntity();
+    try world.addTag(e4, Enemy);
+    try world.addTag(e4, Frozen);
+
+    // Player (not an enemy, should not be in results)
+    const e5 = world.createEntity();
+    try world.addTag(e5, Player);
+
+    // Query for living, unfrozen enemies
+    const ActiveEnemyQuery = TagQuery(struct { Enemy, Exclude(Dead), Exclude(Frozen) });
+    const query = ActiveEnemyQuery.init(&world);
+
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            // Should only find e1 and e2
+            try std.testing.expect(entity == e1 or entity == e2);
+            try std.testing.expect(entity != e3 and entity != e4 and entity != e5);
+            count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), count);
+}
+
+test "Query with Exclude - no matches" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+    const Disabled = struct {};
+
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Disabled });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // All entities are disabled
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
+    try world.addComponent(e1, Velocity, .{ .dx = 1.0, .dy = 2.0 });
+    try world.addTag(e1, Disabled);
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
+    try world.addComponent(e2, Velocity, .{ .dx = -1.0, .dy = -2.0 });
+    try world.addTag(e2, Disabled);
+
+    // Query for enabled entities (should find none)
+    const EnabledQuery = Query(struct { Position, Velocity, Exclude(Disabled) });
+    const query = EnabledQuery.init(&world);
+
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), count);
+}
+
+test "Query with Exclude - regular component exclusion" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+    const Armor = struct { value: i32 };
+
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Armor });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Unarmored entities
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
+    try world.addComponent(e1, Velocity, .{ .dx = 1.0, .dy = 2.0 });
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
+    try world.addComponent(e2, Velocity, .{ .dx = -1.0, .dy = -2.0 });
+
+    // Armored entity (should be excluded)
+    const e3 = world.createEntity();
+    try world.addComponent(e3, Position, .{ .x = 50.0, .y = 60.0 });
+    try world.addComponent(e3, Velocity, .{ .dx = 0.5, .dy = 1.0 });
+    try world.addComponent(e3, Armor, .{ .value = 100 });
+
+    // Query for unarmored entities (exclude regular component)
+    const UnarmoredQuery = Query(struct { Position, Velocity, Exclude(Armor) });
+    const query = UnarmoredQuery.init(&world);
+
+    var count: usize = 0;
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            // Should only find e1 and e2
+            try std.testing.expect(entity == e1 or entity == e2);
+            try std.testing.expect(entity != e3);
+            count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), count);
 }
 
 /// A single command in the command buffer
@@ -303,7 +695,7 @@ pub fn SingleQuery(comptime QueryComponent: type) type {
 /// ```zig
 /// fn combatSystem(query: Query(struct { Position, Health })) !void {
 ///     for (query.entities) |entity| {
-///         if (query.hasAllComponents(entity)) {
+///         if (query.filter(entity)) {
 ///             const pos = query.getComponent(entity, Position);
 ///             const health = query.getComponentMut(entity, Health);
 ///             {
@@ -324,8 +716,8 @@ pub fn Query(comptime QueryComponents: type) type {
     const QueryComponentPoolType = construct_component_pool: {
         var query_fields: [length]StructField = undefined;
         inline for (component_fields, 0..) |field, i| {
-            const T = field.type;
-            const Component = extractOptional(T);
+            // const T = field.type;
+            const Component, _ = extractType(field.type);
 
             const StorageType = ComponentStorage(Component);
             query_fields[i] = StructField{
@@ -362,21 +754,19 @@ pub fn Query(comptime QueryComponents: type) type {
 
             // Try each component type and find the one with smallest sparse set
             inline for (component_fields, 0..) |field, i| {
-                const Component = extractOptional(field.type);
+                const Component, const modifier_type = extractType(field.type);
                 const component_storage: *ComponentStorage(Component) = world.getComponentStoragePtr(Component);
                 component_pool[i] = component_storage;
-                // Only consider non-optional components for smallest set selection
-                if (comptime !isOptional(field.type)) {
-                    const size = component_storage.packed_array.items.len;
-                    if (size < min_size) {
-                        min_size = size;
-                        candidate_entities = component_storage.packed_array.items;
-                    }
+                if (modifier_type) |_| continue;
+                const size = component_storage.packed_array.items.len;
+                if (size < min_size) {
+                    min_size = size;
+                    candidate_entities = component_storage.packed_array.items;
                 }
             }
 
             // Return a query that will iterate through the smallest set
-            // Users must call hasAllComponents() to filter for entities with all components
+            // Users must call filter() to filter for entities with all required components
             return .{
                 .query_component_pool = component_pool,
                 .entities = candidate_entities,
@@ -386,7 +776,7 @@ pub fn Query(comptime QueryComponents: type) type {
         pub fn getComponentId(comptime C: type) u16 {
             // The order of components become the id
             return inline for (component_fields, 0..) |field, i| {
-                const T = extractOptional(field.type);
+                const T, _ = extractType(field.type);
                 if (C == T) break i;
             } else @compileError("Unknown component type: " ++ @typeName(C));
         }
@@ -426,12 +816,19 @@ pub fn Query(comptime QueryComponents: type) type {
             return sparse_set.*.getPtrMut(entity);
         }
 
-        /// Check if entity has all required components
-        pub fn hasAllComponents(self: Self, entity: Entity) bool {
+        /// Filter entities based on required components
+        pub fn filter(self: Self, entity: Entity) bool {
             return inline for (component_fields) |field| {
-                if (comptime isOptional(field.type)) continue;
-                const Component = extractOptional(field.type);
-                if (!self.getComponentStoragePtr(Component).*.contains(entity))
+                const T, const modifier_type = extractType(field.type);
+                if (modifier_type) |modifier| switch (modifier) {
+                    .optional => continue,
+                    .exclude => {
+                        if (self.getComponentStoragePtr(T).*.contains(entity))
+                            break false;
+                        continue;
+                    },
+                };
+                if (!self.getComponentStoragePtr(T).*.contains(entity))
                     break false;
             } else true;
         }
@@ -579,7 +976,7 @@ pub fn SingleTag(comptime TagComponent: type) type {
 /// ```zig
 /// fn bossEnemySystem(query: TagQuery(struct { Enemy, ?Boss })) !void {
 ///     for (query.entities) |entity| {
-///         if (query.hasAllTags(entity)) {
+///         if (query.filter(entity)) {
 ///             // Process all enemies, check if they're bosses
 ///             if (query.hasTag(entity, Boss)) {
 ///                 // This enemy is a boss
@@ -597,7 +994,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
 
     // Validate that all fields are tag components (zero-sized)
     inline for (tag_fields) |field| {
-        const Tag = extractOptional(field.type);
+        const Tag, _ = extractType(field.type);
         if (!isTagComponent(Tag)) {
             @compileError("TagQuery can only contain tag components (empty structs). Found non-tag: " ++ @typeName(Tag));
         }
@@ -608,7 +1005,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
     const TagPoolType = construct_tag_pool: {
         var query_fields: [length]StructField = undefined;
         inline for (tag_fields, 0..) |field, i| {
-            const Tag = extractOptional(field.type);
+            const Tag, _ = extractType(field.type);
             const StorageType = TagStorage(Tag);
             query_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
@@ -643,21 +1040,19 @@ pub fn TagQuery(comptime QueryTags: type) type {
 
             // Try each tag type and find the one with smallest storage
             inline for (tag_fields, 0..) |field, i| {
-                const Tag = extractOptional(field.type);
+                const Tag, const modifier_type = extractType(field.type);
                 const tag_storage: *TagStorage(Tag) = world.getTagStoragePtr(Tag);
                 tag_pool[i] = tag_storage;
-                // Only consider non-optional tags for smallest set selection
-                if (comptime !isOptional(field.type)) {
-                    const size = tag_storage.packed_array.items.len;
-                    if (size < min_size) {
-                        min_size = size;
-                        candidate_entities = tag_storage.packed_array.items;
-                    }
+                if (modifier_type) |_| continue;
+                const size = tag_storage.packed_array.items.len;
+                if (size < min_size) {
+                    min_size = size;
+                    candidate_entities = tag_storage.packed_array.items;
                 }
             }
 
             // Return a query that will iterate through the smallest set
-            // Users must call hasAllTags() to filter for entities with all required tags
+            // Users must call filter() to filter for entities with all required tags
             return .{
                 .tag_pool = tag_pool,
                 .entities = candidate_entities,
@@ -667,7 +1062,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
         pub fn getTagId(comptime T: type) u16 {
             // The order of tags become the id
             return inline for (tag_fields, 0..) |field, i| {
-                const Tag = extractOptional(field.type);
+                const Tag, _ = extractType(field.type);
                 if (T == Tag) break i;
             } else @compileError("Unknown tag type: " ++ @typeName(T));
         }
@@ -677,12 +1072,19 @@ pub fn TagQuery(comptime QueryTags: type) type {
             return self.tag_pool[id];
         }
 
-        /// Check if entity has all required tags (non-optional tags)
-        pub fn hasAllTags(self: Self, entity: Entity) bool {
+        /// Filter entities based on required tags
+        pub fn filter(self: Self, entity: Entity) bool {
             return inline for (tag_fields) |field| {
-                if (comptime isOptional(field.type)) continue;
-                const Tag = extractOptional(field.type);
-                if (!self.getTagStoragePtr(Tag).*.contains(entity))
+                const T, const modifier_type = extractType(field.type);
+                if (modifier_type) |modifier| switch (modifier) {
+                    .optional => continue,
+                    .exclude => {
+                        if (self.getTagStoragePtr(T).*.contains(entity))
+                            break false;
+                        continue;
+                    },
+                };
+                if (!self.getTagStoragePtr(T).*.contains(entity))
                     break false;
             } else true;
         }
@@ -703,6 +1105,21 @@ fn extractOptional(comptime T: type) type {
         .optional => |Optional| Optional.child,
         else => T,
     };
+}
+
+pub fn Exclude(comptime C: type) type {
+    return struct {
+        pub const Component = C;
+        pub const modifier_type: ModifierType = .exclude;
+    };
+}
+
+fn extractType(comptime T: type) struct { type, ?ModifierType } {
+    if (isOptional(T))
+        return .{ extractOptional(T), .optional };
+    if (@hasDecl(T, "modifier_type"))
+        return .{ T.Component, T.modifier_type };
+    return .{ T, null };
 }
 
 fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn, comptime World: type) type {
@@ -1065,7 +1482,7 @@ test "FixedQuery basic iteration" {
     // Should find e1 and e2 (both have Position and Velocity)
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             count += 1;
             const pos = query.getComponent(entity, Position);
             const vel = query.getComponent(entity, Velocity);
@@ -1102,7 +1519,7 @@ test "FixedQuery with mutable component access" {
     const query = MovementQuery.init(&world);
 
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const vel = query.getComponent(entity, Velocity);
             const pos = query.getComponentMut(entity, Position);
             {
@@ -1129,7 +1546,7 @@ test "FixedWorld system function with Query" {
     const CombatSystem = struct {
         fn system(query: Query(struct { Position, Health })) !void {
             for (query.entities) |entity| {
-                if (query.hasAllComponents(entity)) {
+                if (query.filter(entity)) {
                     const pos = query.getComponent(entity, Position);
                     const health = query.getComponentMut(entity, Health);
                     {
@@ -1204,7 +1621,7 @@ test "FixedQuery three components" {
     // Should only find e1
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             count += 1;
             try std.testing.expectEqual(e1, entity);
         }
@@ -1248,7 +1665,7 @@ test "TagQuery basic iteration with two tags" {
     // Should find e1 and e3 (both have Player and Active)
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             count += 1;
             try std.testing.expect(entity == e1 or entity == e3);
         }
@@ -1295,7 +1712,7 @@ test "TagQuery with three tags" {
     // Should only find e1
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             count += 1;
             try std.testing.expectEqual(e1, entity);
         }
@@ -1314,7 +1731,7 @@ test "TagQuery system function" {
         fn system(query: TagQuery(struct { Enemy, Boss })) !void {
             var count: usize = 0;
             for (query.entities) |entity| {
-                if (query.hasAllTags(entity)) {
+                if (query.filter(entity)) {
                     count += 1;
                 }
             }
@@ -1377,7 +1794,7 @@ test "TagQuery with empty result set" {
 
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             count += 1;
         }
     }
@@ -1616,7 +2033,7 @@ test "Query with optional components" {
     var count: usize = 0;
     var health_count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             count += 1;
             const pos = query.getComponent(entity, Position);
             const vel = query.getComponent(entity, Velocity);
@@ -1665,7 +2082,7 @@ test "Query optional components with mutation" {
 
     // Apply damage to entities with health, move all entities
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponentMut(entity, Position);
             pos.x += 5.0;
 
@@ -1725,7 +2142,7 @@ test "TagQuery with optional tags" {
     var count: usize = 0;
     var boss_count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             count += 1;
             try std.testing.expect(entity == e1 or entity == e2 or entity == e3);
 
@@ -1788,7 +2205,7 @@ test "TagQuery with multiple optional tags" {
     }{};
 
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             stats.total += 1;
             if (query.hasTag(entity, Boss)) stats.boss += 1;
             if (query.hasTag(entity, Active)) stats.active += 1;
@@ -1816,7 +2233,7 @@ test "TagQuery system function with optional tags" {
             var elite_enemies: usize = 0;
 
             for (query.entities) |entity| {
-                if (query.hasAllTags(entity)) {
+                if (query.filter(entity)) {
                     const is_boss = query.hasTag(entity, Boss);
                     const is_elite = query.hasTag(entity, Elite);
 

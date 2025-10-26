@@ -43,7 +43,7 @@ fn activePlayerHealthSystem(query: Query(struct { Player, Active, Health })) !vo
     std.debug.print("Active players with health:\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const health = query.getComponent(entity, Health);
             std.debug.print("  Entity {}: {} HP\n", .{ entity, health.hp });
             count += 1;
@@ -57,7 +57,7 @@ fn enemyPositionSystem(query: Query(struct { Enemy, Position })) !void {
     std.debug.print("Enemies with position:\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position);
             std.debug.print("  Enemy {} at ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
             count += 1;
@@ -71,7 +71,7 @@ fn bossSystem(query: TagQuery(struct { Enemy, Boss })) !void {
     std.debug.print("Boss enemies:\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             std.debug.print("  Boss entity: {}\n", .{entity});
             count += 1;
         }
@@ -87,7 +87,7 @@ fn enemyProcessingSystem(query: TagQuery(struct { Enemy, ?Boss, ?Active })) !voi
     var active_count: usize = 0;
 
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             const is_boss = query.hasTag(entity, Boss);
             const is_active = query.hasTag(entity, Active);
 
@@ -117,7 +117,7 @@ fn combatTargetingSystem(query: Query(struct { Position, Enemy }), commands: any
     const boss_storage = commands.world.getTagStoragePtr(Boss);
 
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position);
 
             // Check if this enemy has the Boss tag

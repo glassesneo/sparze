@@ -96,7 +96,7 @@ fn movementSystem(movement: Group(struct { Position, Velocity })) !void {
 // System with Query (flexible, no group setup required)
 fn combatSystem(query: Query(struct { Position, Health })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position).?;
             if (query.getComponentMut(entity, Health)) |health| {
                 // Process entity
@@ -123,7 +123,7 @@ fn playerSystem(query: SingleTag(Player)) !void {
 
 fn bossEnemySystem(query: TagQuery(struct { Enemy, Boss })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             // Process entities that are both enemies and bosses
         }
     }
@@ -169,7 +169,7 @@ fn playerSystem(query: SingleTag(Player)) !void {
 // Query multiple tags using TagQuery
 fn bossEnemySystem(query: TagQuery(struct { Enemy, Boss })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             // Process entities that are both enemies and bosses
         }
     }
@@ -178,7 +178,7 @@ fn bossEnemySystem(query: TagQuery(struct { Enemy, Boss })) !void {
 // Combine tags with regular components using Query
 fn activePlayerSystem(query: Query(struct { Position, Player, Active })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             // Process active players with position
         }
     }
@@ -207,7 +207,7 @@ fn combatSystem(query: Query(struct { Health, ?Shield })) !void {
     const damage = 15;
     
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const health = query.getComponentMut(entity, Health);
             var actual_damage = damage;
             
@@ -226,7 +226,7 @@ fn combatSystem(query: Query(struct { Health, ?Shield })) !void {
 // TagQuery with optional tags
 fn enemyAISystem(query: TagQuery(struct { Enemy, ?Boss, ?Elite })) !void {
     for (query.entities) |entity| {
-        if (query.hasAllTags(entity)) {
+        if (query.filter(entity)) {
             // Base enemy AI
             
             if (query.hasTag(entity, Boss)) {
@@ -245,7 +245,7 @@ fn enemyAISystem(query: TagQuery(struct { Enemy, ?Boss, ?Elite })) !void {
 - **Required components**: Use `getComponent()` / `getComponentMut()` - asserts component exists
 - **Optional components**: Use `getOptional()` / `getOptionalMut()` - returns `?C` or `?*C`
 - **Optional tags**: Use `hasTag(entity, Tag)` - returns `bool`
-- **Filtering**: `hasAllComponents()` and `hasAllTags()` only check required (non-optional) fields
+- **Filtering**: `filter()` only checks required (non-optional) fields
 
 **Benefits**:
 - **Flexibility**: Match entities with required components while optionally checking others

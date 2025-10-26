@@ -75,7 +75,7 @@ fn combatQuerySystem(query: Query(struct { Position, Health })) !void {
     std.debug.print("Combat query (no group needed):\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
-        if (query.hasAllComponents(entity)) {
+        if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position);
             const health = query.getComponentMut(entity, Health);
             {
