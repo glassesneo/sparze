@@ -56,8 +56,8 @@ zig build run-{example-name}
   - Query filters: Types that filter entities based on component composition
     - `SingleQuery(Component)`: single regular component query filter
     - `SingleTag(Tag)`: single tag component query filter
-    - `Query(struct { A, B, ?C, ... })`: multi-component runtime intersection query filter (mixed tags and regular components, no group setup required)
-    - `TagQuery(struct { A, B, ?C, ... })`: multi-tag runtime intersection query filter (tag components only, no group setup required)
+      - `Query(struct { A, B, ?C, Exclude(D), ... })`: multi-component runtime intersection query filter (mixed tags and regular components, supports optional and exclude modifiers, no group setup required)
+      - `TagQuery(struct { A, B, ?C, Exclude(D), ... })`: multi-tag runtime intersection query filter (tag components only, supports optional and exclude modifiers, no group setup required)
     - `Group(struct { A, B })`: optimized multi-component query filter with pre-allocated group (requires `createGroup()`)
   - `anytype` parameter: Receives `Commands(World)` for deferred entity/component operations
   - `std.mem.Allocator`: Receives the World's allocator for dynamic allocations within systems
@@ -197,9 +197,15 @@ world.removeTag(entity, Active);
 **Performance**: Tags use bit sets for O(1) membership checking and consume only 1 bit per entity index, making them extremely memory-efficient compared to regular components.
 
 
-### Optional Components and Tags
+### Component Modifiers
 
-Both `Query` and `TagQuery` support optional components/tags using the `?Component` or `?Tag` syntax. This allows queries to match entities based on required components while optionally checking for additional components.
+Component modifiers allow you to change how components behave in queries. Sparze supports two modifiers: **Optional** (`?T`) and **Exclude** (`Exclude(T)`).
+
+#### Optional Modifier (`?T`)
+
+The optional modifier (`?T`) allows queries to match entities regardless of whether they have the optional component. This is useful when you want to process entities with a base set of components and optionally handle additional components if present.
+
+**Syntax**: `?ComponentType` or `?TagType`
 
 ```zig
 // Query with optional components
@@ -241,40 +247,150 @@ fn enemyAISystem(query: TagQuery(struct { Enemy, ?Boss, ?Elite })) !void {
 }
 ```
 
-**Optional Component/Tag API**:
+**Optional Component API**:
 - **Required components**: Use `getComponent()` / `getComponentMut()` - asserts component exists
 - **Optional components**: Use `getOptional()` / `getOptionalMut()` - returns `?C` or `?*C`
 - **Optional tags**: Use `hasTag(entity, Tag)` - returns `bool`
-- **Filtering**: `filter()` only checks required (non-optional) fields
+
+#### Exclude Modifier (`Exclude(T)`)
+
+The exclude modifier filters out entities that have the specified component or tag. This is useful for implementing state-based filtering (e.g., excluding dead entities, frozen entities, or static objects).
+
+**Syntax**: `Exclude(ComponentType)` or `Exclude(TagType)`
+
+```zig
+const Exclude = sparze.Exclude;
+
+// Exclude dead enemies from combat
+fn combatSystem(query: Query(struct { Enemy, Health, Exclude(Dead) })) !void {
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            // Only processes living enemies
+            const health = query.getComponentMut(entity, Health);
+            // Apply damage...
+        }
+    }
+}
+
+// Exclude static objects from movement
+fn movementSystem(query: Query(struct { Position, Velocity, Exclude(Static) })) !void {
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            const pos = query.getComponentMut(entity, Position);
+            const vel = query.getComponent(entity, Velocity);
+            pos.x += vel.dx;
+            pos.y += vel.dy;
+        }
+    }
+}
+
+// Multiple excludes - only active enemies (not dead, not frozen, not disabled)
+fn activeEnemySystem(query: TagQuery(struct { Enemy, Exclude(Dead), Exclude(Frozen), Exclude(Disabled) })) !void {
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            // Process only active enemies
+        }
+    }
+}
+```
+
+**Exclude Use Cases**:
+- **State filtering**: `Exclude(Dead)`, `Exclude(Disabled)`, `Exclude(Paused)` - Skip entities in certain states
+- **Object types**: `Exclude(Static)`, `Exclude(Invulnerable)` - Exclude specific object categories
+- **Performance**: `Exclude(Heavy)` - Skip expensive operations for certain entities
+- **Gameplay**: `Exclude(Friendly)`, `Exclude(Boss)` - Filter based on gameplay categories
+
+#### Combining Modifiers
+
+You can combine optional and exclude modifiers in a single query for powerful filtering:
+
+```zig
+// Process all living enemies, optionally applying boss-specific logic
+fn enemyAISystem(query: Query(struct { Position, Enemy, ?Boss, Exclude(Dead), Exclude(Frozen) })) !void {
+    for (query.entities) |entity| {
+        if (query.filter(entity)) {
+            const pos = query.getComponent(entity, Position);
+            
+            // Base AI for all living, unfrozen enemies
+            // ...
+            
+            // Optional: Enhanced AI for bosses
+            if (query.getOptional(entity, Boss)) |_| {
+                // Boss-specific behavior
+            }
+        }
+    }
+}
+```
+
+**Modifier Rules**:
+- **Optional (`?T`)**: Entity matches regardless of component presence; use `getOptional()` to safely access
+- **Exclude (`Exclude(T)`)**: Entity matches only if it does NOT have the component
+- **Filtering**: `filter()` checks required components and excludes, ignoring optional components
+- **Combining**: Use multiple modifiers freely - e.g., `struct { A, ?B, Exclude(C), Exclude(D) }`
 
 **Benefits**:
-- **Flexibility**: Match entities with required components while optionally checking others
-- **Performance**: Query optimization only considers required components/tags for iteration
-- **Type Safety**: Explicit `?Component` syntax shows which components are optional at compile time
-- **Cleaner Code**: Avoid multiple separate queries when some components are optional
+- **Optional**: 
+  - Match entities with required components while optionally checking others
+  - Explicit `?Component` syntax shows optional components at compile time
+  - Avoid multiple separate queries when some components are optional
+- **Exclude**:
+  - Clean state-based filtering without manual checking
+  - Combine multiple excludes for complex filtering logic
+  - Works with both regular components and tags
+- **Performance**: 
+  - Query optimization only considers required (non-optional, non-excluded) components for iteration
+  - Excludes are checked during filtering with O(1) component storage lookup
+- **Type Safety**: 
+  - Compile-time validation of all modifier usage
+  - Clear intent through explicit modifier syntax
+
+**Common Patterns**:
+```zig
+// All living entities with health
+Query(struct { Health, Exclude(Dead) })
+
+// Active players (not frozen or disabled)
+Query(struct { Player, Exclude(Frozen), Exclude(Disabled) })
+
+// Movable entities (not static)
+Query(struct { Position, Velocity, Exclude(Static) })
+
+// Damageable entities with optional shield
+Query(struct { Health, ?Shield, Exclude(Dead), Exclude(Invulnerable) })
+
+// Active enemies with optional boss enhancement
+TagQuery(struct { Enemy, ?Boss, Exclude(Dead), Exclude(Frozen) })
+```
+
 ## Query Filter Comparison
 
-| Filter Type | Component Types | Count | Setup Required | Performance | Use Case |
-|-------------|----------------|-------|----------------|-------------|----------|
-| `SingleQuery(C)` | Regular | 1 | None | O(n) - Fast | Single component iteration |
-| `SingleTag(T)` | Tag | 1 | None | O(n) - Fast | Single tag iteration |
-| `Query(struct { A, B, ?C, ... })` | Mixed | 2+ | None | O(n) - Moderate | Ad-hoc multi-query (tags + components) |
-| `TagQuery(struct { A, B, ?C, ... })` | Tag only | 2+ | None | O(n) - Moderate | Ad-hoc multi-tag queries |
-| `Group(struct { A, B })` | Regular | 2+ | `createGroup()` required | O(n) - Fastest | Hot-path multi-component queries |
+| Filter Type | Component Types | Modifiers | Setup Required | Performance | Use Case |
+|-------------|----------------|-----------|----------------|-------------|----------|
+| `SingleQuery(C)` | Regular | None | None | O(n) - Fast | Single component iteration |
+| `SingleTag(T)` | Tag | None | None | O(n) - Fast | Single tag iteration |
+| `Query(struct { A, B, ... })` | Mixed | `?T`, `Exclude(T)` | None | O(n) - Moderate | Ad-hoc multi-query with flexible filtering |
+| `TagQuery(struct { A, B, ... })` | Tag only | `?T`, `Exclude(T)` | None | O(n) - Moderate | Ad-hoc multi-tag queries with filtering |
+| `Group(struct { A, B })` | Regular | None | `createGroup()` required | O(n) - Fastest | Hot-path multi-component queries |
 
 **When to use each**:
 - **SingleQuery**: Iterating over entities with one regular component
 - **SingleTag**: Iterating over entities with one tag component (explicit type safety)
-- **Query**: Multi-component queries used occasionally or with varying component combinations (can mix tags and regular components)
-- **TagQuery**: Multi-tag queries (tag components only, explicit type safety)
+- **Query**: Multi-component queries with flexible filtering via modifiers (can mix tags and regular components)
+- **TagQuery**: Multi-tag queries with flexible filtering via modifiers (tag components only, explicit type safety)
 - **Group**: Hot-path multi-component queries (e.g., movement, rendering) where performance is critical
 
 **Key differences**:
 - **SingleQuery** and **SingleTag**: Direct iteration over packed arrays (SingleQuery) or bit sets (SingleTag)
 - **Query** and **TagQuery**: Perform runtime intersection, iterating smallest set and checking for others
-- **Query** works with mixed tags and regular components; **TagQuery** enforces tag-only at compile time
+- **Query** works with mixed tags and regular components with modifier support; **TagQuery** enforces tag-only at compile time with modifier support
 - **Group** has pre-organized memory layout with entities stored at start of all component arrays
-- **Group** requires upfront `createGroup()` call and validation; **Query** and **TagQuery** have no setup overhead
+- **Group** requires upfront `createGroup()` call and validation, does not support modifiers; **Query** and **TagQuery** have no setup overhead and support modifiers
+
+**Modifier Support**:
+- **Optional (`?T`)**: Supported by `Query` and `TagQuery` - allows optional component/tag access
+- **Exclude (`Exclude(T)`)**: Supported by `Query` and `TagQuery` - filters out entities with the component/tag
+- **SingleQuery**, **SingleTag**, and **Group**: Do not support modifiers (use `Query`/`TagQuery` if modifiers are needed)
 
 ## Best Practices
 
@@ -411,5 +527,17 @@ try world.getSparseSetPtr(Position).reserve(expected_capacity);
   - Prefer `Group` over `Query` for hot-path multi-component iteration
   - Command buffers are highly optimized with inline storage
   - Use tag components for markers/flags to save memory (1 bit vs full component size)
+  - Use `Exclude` modifier for state-based filtering instead of manual checks
 
-- **Examples**: The `examples/` directory contains implementations showing various patterns (e.g., `system_operations.zig`, `plugin_architecture.zig`, `performance_benchmark.zig`).
+  - **Component Modifiers**: 
+    - Optional (`?T`) allows flexible queries that can handle varying component combinations
+    - Exclude (`Exclude(T)`) provides clean state-based filtering (e.g., exclude dead/frozen entities)
+    - Both modifiers work with `Query` and `TagQuery` but not with `SingleQuery`, `SingleTag`, or `Group`
+
+  - **Examples**: The `examples/` directory contains implementations showing various patterns:
+    - `system_operations.zig` - Basic system patterns and multi-query examples
+    - `plugin_architecture.zig` - Plugin-style architecture
+    - `performance_benchmark.zig` - Performance benchmarks
+    - `tag_components.zig` - Tag component usage and patterns
+    - `optional_components.zig` - Optional component modifier examples
+    - `exclude_example.zig` - Exclude modifier usage and state-based filtering
