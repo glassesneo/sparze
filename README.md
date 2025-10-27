@@ -60,8 +60,11 @@ const sparze = @import("sparze");
 const Position = struct { x: f32, y: f32 };
 const Velocity = struct { x: f32, y: f32 };
 
-// Define World with all component types
-const World = sparze.World(struct { Position, Velocity });
+// Define World with component types and resources
+const World = sparze.World(
+    struct { Position, Velocity }, // Components
+    struct {}                       // Resources (none in this example)
+);
 
 // Declare group type constant (recommended best practice)
 const MovementGroup = struct { Position, Velocity };
@@ -265,7 +268,7 @@ const Player = struct {};
 const Enemy = struct {};
 const Active = struct {};
 
-const World = sparze.World(struct { Position, Player, Enemy, Active });
+const World = sparze.World(struct { Position, Player, Enemy, Active }, struct {});
 
 var world = World.init(allocator);
 defer world.deinit();
@@ -316,6 +319,97 @@ fn activePlayerSystem(query: sparze.Query(struct { Position, Player, Active })) 
 - **Events**: `Damaged`, `Died`, `LeveledUp` (single-frame markers)
 
 **Performance**: Tags use bit sets for O(1) membership checking and are extremely memory-efficient, consuming only 1 bit per entity index instead of storing full component data.
+
+### Resources
+
+Resources are global, singleton data that can be accessed across systems. Unlike components which are attached to entities, resources exist independently and are shared by all systems. They're perfect for storing game state, configuration, and data that doesn't belong to any specific entity.
+
+```zig
+const std = @import("std");
+const sparze = @import("sparze");
+
+// Define resource types
+const DeltaTime = struct { dt: f32 };
+const Score = struct { points: i32, combo: i32 };
+const GameConfig = struct {
+    gravity: f32,
+    max_speed: f32,
+};
+
+// Define components
+const Position = struct { x: f32, y: f32 };
+const Velocity = struct { dx: f32, dy: f32 };
+
+// Create world with both components and resources
+const World = sparze.World(
+    struct { Position, Velocity },          // Components
+    struct { DeltaTime, Score, GameConfig } // Resources
+);
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var world = World.init(allocator);
+    defer world.deinit();
+
+    // Initialize resources - MUST be done before use
+    try world.setResource(DeltaTime, .{ .dt = 0.016 }); // 60 FPS
+    try world.setResource(Score, .{ .points = 0, .combo = 0 });
+    try world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
+
+    // Systems can access resources alongside queries
+    try world.runSystem(physicsSystem);
+    try world.runSystem(scoreSystem);
+
+    // Access resources outside systems
+    const current_score = world.getResource(Score);
+    std.debug.print("Final Score: {d}\n", .{current_score.points});
+}
+
+// System with resource and query parameters
+fn physicsSystem(
+    delta: sparze.Resource(DeltaTime),
+    config: sparze.Resource(GameConfig),
+    query: sparze.SingleQuery(Position),
+) !void {
+    const dt = delta.value.dt;
+    const max_speed = config.value.max_speed;
+    
+    for (query.components) |*pos| {
+        // Use resources in system logic
+        pos.y -= config.value.gravity * dt;
+    }
+}
+
+// System that mutates resources
+fn scoreSystem(score: sparze.Resource(Score)) !void {
+    score.value.points += 100;
+    score.value.combo += 1;
+}
+```
+
+**Resource API**:
+- `world.setResource(R, resource)` - Initialize or update a resource
+- `world.getResource(R)` - Get resource by value (copy)
+- `world.getResourcePtr(R)` - Get const pointer to resource
+- `world.getResourcePtrMut(R)` - Get mutable pointer to resource
+- `sparze.Resource(R)` - System parameter type for resource injection
+
+**Common Use Cases**:
+- **Time**: Delta time, total elapsed time, frame count
+- **Game state**: Score, level, lives, game mode
+- **Configuration**: Physics constants, difficulty settings, game rules
+- **Input**: Keyboard/mouse state, controller input
+- **Rendering**: Camera transform, viewport size
+- **Audio**: Volume settings, music state
+
+**Best Practices**:
+- Always initialize resources with `setResource()` before running systems that use them
+- Use resources for global data, components for per-entity data
+- Keep resources focused and single-purpose
+- Resources are passed to systems as mutable pointers via `Resource(T).value`
 
 ### Optional Components and Tags
 
@@ -384,11 +478,16 @@ fn enemyProcessingSystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Active }
 
 **Entities**: Lightweight 32-bit identifiers (16-bit index + 16-bit version)
 
-**Components**: Plain Zig structs containing data
+**Components**: Plain Zig structs containing data attached to entities
 - **Regular components**: Structs with fields, stored in sparse sets
 - **Tag components**: Empty structs (`struct {}`), stored in bit sets for minimal memory usage
 
-**Systems**: Functions that operate on entities with specific component combinations
+**Resources**: Global, singleton data accessible across all systems
+- Defined at World creation time alongside components
+- Must be initialized with `setResource()` before use
+- Accessed in systems via `Resource(T)` parameter type
+
+**Systems**: Functions that operate on entities with specific component combinations and/or access global resources
 
 **Query Filters**:
 - **SingleQuery(Component)**: Fast iteration over entities with a single regular component
@@ -404,6 +503,7 @@ Query filters are types that filter entities based on component composition, use
 Explore the `examples/` directory for comprehensive demonstrations:
 
 - `basic.zig` - Entity and component basics
+- `resources.zig` - Global resources and state management
 - `optional_components.zig` - Optional components and tags demonstration
 - `plugin_architecture.zig` - Plugin-style architecture
 - `system_operations.zig` - System patterns and multi-query examples
@@ -417,6 +517,7 @@ zig build run-examples
 Run a specific example:
 ```bash
 zig build run-basic
+zig build run-resources
 zig build run-tag_components
 ```
 

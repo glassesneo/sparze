@@ -11,6 +11,7 @@ const examples = [_]Example{
     .{ .name = "tag_components" },
     .{ .name = "query_vs_group_benchmark" },
     .{ .name = "reserve_benchmark" },
+    .{ .name = "resources" },
 };
 
 const Example = struct {

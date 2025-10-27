@@ -15,7 +15,7 @@ const Health = struct {
     hp: i32,
 };
 
-const World = sparze.World(struct { Position, Velocity, Health });
+const World = sparze.World(struct { Position, Velocity, Health }, struct {});
 const Group = sparze.Group;
 const SingleQuery = sparze.SingleQuery;
 const Query = sparze.Query;

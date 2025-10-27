@@ -46,10 +46,17 @@ zig build run-{example-name}
 ### World API
 
 **Component Registration** (`src/world.zig`):
-- World parameterized by component tuple: `World(struct { Position, Velocity, Health })`
+- World parameterized by component tuple: `World(struct { Position, Velocity, Health }, struct {})`
 - All component types known at compile time
 - Component IDs assigned sequentially at compile time (0, 1, 2...)
 - Direct sparse set access without dynamic lookup
+
+**Resource Registration** (`src/world.zig`):
+- World parameterized by component and resource tuples: `World(struct { Position, Velocity }, struct { DeltaTime, Score })`
+- All resource types known at compile time
+- Resources are global, singleton data accessible across systems
+- Resource IDs assigned sequentially at compile time (0, 1, 2...)
+- Resources are left undefined at initialization - must be set via `setResource()` before use
 
 **Systems** (`src/system.zig`):
 - System functions accept parameters that are automatically injected by the World:
@@ -59,6 +66,7 @@ zig build run-{example-name}
       - `Query(struct { A, B, ?C, Exclude(D), ... })`: multi-component runtime intersection query filter (mixed tags and regular components, supports optional and exclude modifiers, no group setup required)
       - `TagQuery(struct { A, B, ?C, Exclude(D), ... })`: multi-tag runtime intersection query filter (tag components only, supports optional and exclude modifiers, no group setup required)
     - `Group(struct { A, B })`: optimized multi-component query filter with pre-allocated group (requires `createGroup()`)
+  - `Resource(ResourceType)`: Global resource access for singleton data
   - `anytype` parameter: Receives `Commands(World)` for deferred entity/component operations
   - `std.mem.Allocator`: Receives the World's allocator for dynamic allocations within systems
 - `world.runSystem(systemFn)`: convenience method for inline system execution
@@ -73,7 +81,10 @@ zig build run-{example-name}
 ### Standard World Pattern
 
 ```zig
-const World = sparze.World(struct { Position, Velocity, Health });
+const World = sparze.World(
+    struct { Position, Velocity, Health }, // Components
+    struct {}                               // Resources (empty if none)
+);
 
 // Validate groups at compile time
 World.validateGroups(.{
@@ -135,6 +146,99 @@ try world.runSystem(playerSystem);
 try world.runSystem(bossEnemySystem);
 ```
 
+### Resources
+
+Resources are global, singleton data that can be accessed across systems. Unlike components which are attached to entities, resources exist independently and are shared by all systems.
+
+```zig
+// Define resource types
+const DeltaTime = struct { dt: f32 };
+const Score = struct { points: i32, combo: i32 };
+const GameConfig = struct {
+    gravity: f32,
+    max_speed: f32,
+};
+
+const World = sparze.World(
+    struct { Position, Velocity },  // Components
+    struct { DeltaTime, Score, GameConfig }  // Resources
+);
+
+var world = World.init(allocator);
+
+// Initialize resources using setResource()
+try world.setResource(DeltaTime, .{ .dt = 0.016 });
+try world.setResource(Score, .{ .points = 0, .combo = 0 });
+try world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
+
+// Access resources in systems using Resource(T)
+fn updatePhysics(
+    delta: Resource(DeltaTime),
+    config: Resource(GameConfig),
+    movement: Group(struct { Position, Velocity }),
+) !void {
+    const dt = delta.value.dt;
+    const gravity = config.value.gravity;
+    
+    const positions = movement.getMutArrayOf(Position);
+    const velocities = movement.getMutArrayOf(Velocity);
+    
+    for (positions, velocities) |*pos, *vel| {
+        vel.y -= gravity * dt;
+        pos.x += vel.x * dt;
+        pos.y += vel.y * dt;
+        
+        // Apply max speed limit
+        const speed = @sqrt(vel.x * vel.x + vel.y * vel.y);
+        if (speed > config.value.max_speed) {
+            const scale = config.value.max_speed / speed;
+            vel.x *= scale;
+            vel.y *= scale;
+        }
+    }
+}
+
+// Mutate resources
+fn scoreSystem(
+    score: Resource(Score),
+    enemies: SingleTag(DefeatedEnemy),
+) !void {
+    for (enemies.entities) |_| {
+        score.value.points += 100;
+        score.value.combo += 1;
+    }
+}
+
+try world.runSystem(updatePhysics);
+try world.runSystem(scoreSystem);
+
+// Get resource value outside systems
+const current_score = world.getResource(Score);
+std.debug.print("Score: {d}\n", .{current_score.points});
+```
+
+**Resource Usage Patterns**:
+- **Game state**: Score, level, game mode, player lives
+- **Configuration**: Physics constants, game rules, difficulty settings
+- **Time**: Delta time, total elapsed time, frame count
+- **Input state**: Keyboard/mouse input, controller state
+- **Render state**: Camera transform, viewport dimensions
+- **Audio state**: Master volume, music/SFX settings
+
+**Resource API**:
+- `world.setResource(R, resource)`: Initialize or update a resource
+- `world.getResource(R)`: Get resource by value (copy)
+- `world.getResourcePtr(R)`: Get const pointer to resource
+- `world.getResourcePtrMut(R)`: Get mutable pointer to resource
+- `Resource(R)` system parameter: Injected as mutable pointer in systems
+
+**Best Practices**:
+- Initialize all resources with `setResource()` after creating the world
+- Use resources for data that doesn't belong to any specific entity
+- Keep resources focused and single-purpose (separate DeltaTime from GameConfig)
+- Resources are always passed as mutable pointers to systems via `Resource(T).value`
+- Prefer immutable resources (config) over mutable ones (state) where possible
+
 ### Tag Components
 
 Tag components are zero-sized marker components used for entity categorization or state flags. They are defined as empty structs and automatically use `TagStorage` for optimized memory usage.
@@ -145,7 +249,7 @@ const Player = struct {};
 const Enemy = struct {};
 const Active = struct {};
 
-const World = sparze.World(struct { Position, Player, Enemy, Active });
+const World = sparze.World(struct { Position, Player, Enemy, Active }, struct {});
 
 var world = World.init(allocator);
 
@@ -464,6 +568,7 @@ fn complexSystem(
 
 **System Parameter Types**:
 - **Query filters**: `SingleQuery`, `SingleTag`, `Query`, `TagQuery`, `Group` - Filter entities by component composition
+- **Resource**: `Resource(T)` - Access global singleton resources
 - **Commands**: `anytype` parameter - Receives `Commands(World)` for deferred entity/component operations
 - **Allocator**: `std.mem.Allocator` - Receives the World's allocator for dynamic allocations
 
@@ -535,6 +640,8 @@ try world.getSparseSetPtr(Position).reserve(expected_capacity);
     - Both modifiers work with `Query` and `TagQuery` but not with `SingleQuery`, `SingleTag`, or `Group`
 
   - **Examples**: The `examples/` directory contains implementations showing various patterns:
+    - `basic.zig` - Entity and component basics
+    - `resources.zig` - Global resources and state management
     - `system_operations.zig` - Basic system patterns and multi-query examples
     - `plugin_architecture.zig` - Plugin-style architecture
     - `performance_benchmark.zig` - Performance benchmarks

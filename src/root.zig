@@ -21,6 +21,7 @@ pub const Group = system_module.Group;
 pub const SingleTag = system_module.SingleTag;
 pub const TagQuery = system_module.TagQuery;
 pub const Exclude = system_module.Exclude;
+pub const Resource = system_module.Resource;
 pub const Commands = system_module.Commands;
 pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;

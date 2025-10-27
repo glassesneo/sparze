@@ -30,6 +30,8 @@ pub const FilterType = enum {
     single_tag,
     /// TagQuery filter: performs runtime intersection for multiple tag components
     tag_query,
+    /// Resource filter: provides access to a global resource
+    resource,
 };
 
 pub const ModifierType = enum {
@@ -63,7 +65,7 @@ test "Query with Exclude modifier - basic usage" {
     const Dead = struct {};
     const Static = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Dead, Static });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Dead, Static }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -116,7 +118,7 @@ test "Query with multiple Exclude modifiers" {
     const Frozen = struct {};
     const Disabled = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Enemy, Dead, Frozen, Disabled });
+    const TestWorld = @import("world.zig").World(struct { Position, Enemy, Dead, Frozen, Disabled }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -189,7 +191,7 @@ test "Query with Exclude and optional components combined" {
     const Dead = struct {};
     const Invulnerable = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Health, Shield, Dead, Invulnerable });
+    const TestWorld = @import("world.zig").World(struct { Position, Health, Shield, Dead, Invulnerable }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -252,7 +254,7 @@ test "Query with Exclude in system function" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Static = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Static });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Static }, struct {});
 
     const MovementSystem = struct {
         var updated_count: usize = 0;
@@ -314,7 +316,7 @@ test "TagQuery with Exclude modifier" {
     const Dead = struct {};
     const Frozen = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Dead, Frozen });
+    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Dead, Frozen }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -366,7 +368,7 @@ test "Query with Exclude - no matches" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Disabled = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Disabled });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Disabled }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -404,7 +406,7 @@ test "Query with Exclude - regular component exclusion" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Armor = struct { value: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Armor });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Armor }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1096,6 +1098,21 @@ pub fn TagQuery(comptime QueryTags: type) type {
     };
 }
 
+pub fn Resource(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const filter_type: FilterType = .resource;
+        pub const ResourceType = T;
+        value: *T,
+
+        pub fn init(value: *T) Self {
+            return .{
+                .value = value,
+            };
+        }
+    };
+}
+
 fn isOptional(comptime T: type) bool {
     return @typeInfo(T) == .optional;
 }
@@ -1222,6 +1239,9 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                             .tag_query => {
                                 args[i] = ArgType.init(world);
                             },
+                            .resource => {
+                                args[i] = ArgType.init(world.getResourcePtrMut(ArgType.ResourceType));
+                            },
                         }
                     } else {
                         @compileError("System parameter must be a query filter type, Commands, or Allocator. Got: " ++ @typeName(ArgType));
@@ -1239,7 +1259,7 @@ test "FixedSingleQuery basic iteration" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1276,7 +1296,7 @@ test "FixedGroup query basic usage" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1316,7 +1336,7 @@ test "FixedGroup query basic usage" {
 test "FixedWorld system function with SingleQuery" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position });
+    const TestWorld = @import("world.zig").World(struct { Position }, struct {});
 
     const UpdatePositions = struct {
         fn system(query: SingleQuery(Position)) !void {
@@ -1354,7 +1374,7 @@ test "FixedWorld system function with Group" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {});
 
     const MovementSystem = struct {
         fn system(group: Group(struct { Position, Velocity })) !void {
@@ -1401,7 +1421,7 @@ test "FixedWorld system with multiple queries" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health }, struct {});
 
     const ComplexSystem = struct {
         fn system(
@@ -1451,7 +1471,7 @@ test "FixedQuery basic iteration" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1497,7 +1517,7 @@ test "FixedQuery with mutable component access" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1541,7 +1561,7 @@ test "FixedWorld system function with Query" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health }, struct {});
 
     const CombatSystem = struct {
         fn system(query: Query(struct { Position, Health })) !void {
@@ -1591,7 +1611,7 @@ test "FixedQuery three components" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1634,7 +1654,7 @@ test "TagQuery basic iteration with two tags" {
     const Active = struct {};
     const Enemy = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Player, Active, Enemy });
+    const TestWorld = @import("world.zig").World(struct { Player, Active, Enemy }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1679,7 +1699,7 @@ test "TagQuery with three tags" {
     const Boss = struct {};
     const Enemy = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Player, Active, Boss, Enemy });
+    const TestWorld = @import("world.zig").World(struct { Player, Active, Boss, Enemy }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1725,7 +1745,7 @@ test "TagQuery system function" {
     const Enemy = struct {};
     const Boss = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Boss });
+    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Boss }, struct {});
 
     const BossEnemySystem = struct {
         fn system(query: TagQuery(struct { Enemy, Boss })) !void {
@@ -1772,7 +1792,7 @@ test "TagQuery with empty result set" {
     const Enemy = struct {};
     const Boss = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Boss });
+    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Boss }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1804,7 +1824,7 @@ test "TagQuery with empty result set" {
 test "System function with Allocator parameter" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position });
+    const TestWorld = @import("world.zig").World(struct { Position }, struct {});
 
     const AllocatorSystem = struct {
         fn system(allocator: std.mem.Allocator) !void {
@@ -1832,7 +1852,7 @@ test "System function with Allocator parameter" {
 test "System function with Allocator and query filter parameters" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position });
+    const TestWorld = @import("world.zig").World(struct { Position }, struct {});
 
     const MixedSystem = struct {
         fn system(allocator: std.mem.Allocator, query: SingleQuery(Position)) !void {
@@ -1871,7 +1891,7 @@ test "System function with Allocator and query filter parameters" {
 test "System function with Allocator and Commands parameters" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position });
+    const TestWorld = @import("world.zig").World(struct { Position }, struct {});
 
     const SpawnSystem = struct {
         fn system(allocator: std.mem.Allocator, commands: anytype) !void {
@@ -1914,7 +1934,7 @@ test "System function with Allocator, query filter, and Commands parameters" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {});
 
     const ComplexSystem = struct {
         fn system(
@@ -1972,7 +1992,7 @@ test "System function with Allocator, query filter, and Commands parameters" {
 }
 
 test "System function verifies allocator is world allocator" {
-    const TestWorld = @import("world.zig").World(struct {});
+    const TestWorld = @import("world.zig").World(struct {}, struct {});
 
     const CheckAllocatorSystem = struct {
         var captured_allocator: ?std.mem.Allocator = null;
@@ -2001,7 +2021,7 @@ test "Query with optional components" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Health }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2058,7 +2078,7 @@ test "Query optional components with mutation" {
     const Position = struct { x: f32, y: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Health });
+    const TestWorld = @import("world.zig").World(struct { Position, Health }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2106,7 +2126,7 @@ test "TagQuery with optional tags" {
     const Boss = struct {};
     const Active = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Boss, Active });
+    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Boss, Active }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2166,7 +2186,7 @@ test "TagQuery with multiple optional tags" {
     const Active = struct {};
     const Elite = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Enemy, Boss, Active, Elite });
+    const TestWorld = @import("world.zig").World(struct { Enemy, Boss, Active, Elite }, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2224,7 +2244,7 @@ test "TagQuery system function with optional tags" {
     const Boss = struct {};
     const Elite = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Enemy, Boss, Elite });
+    const TestWorld = @import("world.zig").World(struct { Enemy, Boss, Elite }, struct {});
 
     const EnemySystem = struct {
         fn system(query: TagQuery(struct { Enemy, ?Boss, ?Elite })) !void {

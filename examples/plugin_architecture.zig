@@ -25,7 +25,7 @@ const App = struct {
             }
         }
         const Components = std.meta.Tuple(&components);
-        return sparze.World(Components);
+        return sparze.World(Components, struct {});
     }
 };
 

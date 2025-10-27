@@ -11,7 +11,7 @@ const Health = struct { hp: i32 };
 const Armor = struct { defense: i32 };
 
 // Define World type
-const World = sparze.World(struct { Position, Velocity, Health, Armor });
+const World = sparze.World(struct { Position, Velocity, Health, Armor }, struct {});
 
 // Declare group type constants for better readability and maintainability
 const MovementGroup = struct { Position, Velocity };
