@@ -13,15 +13,17 @@ pub const GroupInfo = sparse_set_module.GroupInfo;
 const world_module = @import("world.zig");
 pub const World = world_module.World;
 
+const filter_module = @import("filter.zig");
+pub const FilterType = filter_module.FilterType;
+pub const SingleQuery = filter_module.SingleQuery;
+pub const Query = filter_module.Query;
+pub const Group = filter_module.Group;
+pub const SingleTag = filter_module.SingleTag;
+pub const TagQuery = filter_module.TagQuery;
+pub const Exclude = filter_module.Exclude;
+pub const Resource = filter_module.Resource;
+
 const system_module = @import("system.zig");
-pub const FilterType = system_module.FilterType;
-pub const SingleQuery = system_module.SingleQuery;
-pub const Query = system_module.Query;
-pub const Group = system_module.Group;
-pub const SingleTag = system_module.SingleTag;
-pub const TagQuery = system_module.TagQuery;
-pub const Exclude = system_module.Exclude;
-pub const Resource = system_module.Resource;
 pub const Commands = system_module.Commands;
 pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;
