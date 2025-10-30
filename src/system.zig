@@ -532,7 +532,9 @@ pub fn CommandBuffer(comptime World: type) type {
                         world.removeComponentById(cmd.entity, comp_data.type_id);
                     },
                     .destroy_entity => {
-                        world.destroyEntity(cmd.entity);
+                        if (world.isAlive(cmd.entity)) {
+                            world.destroyEntity(cmd.entity);
+                        }
                     },
                 }
             }
@@ -1110,4 +1112,76 @@ test "Commands createEntityWith convenience method" {
     const vel_query = SingleQuery(Velocity).init(world.getSparseSetPtr(Velocity));
     try std.testing.expectEqual(@as(usize, 1), vel_query.entities.len);
     try std.testing.expectEqual(@as(f32, 1.0), vel_query.components[0].dx);
+}
+
+test "Commands destroyEntity handles multiple destroy commands for same entity" {
+    const Health = struct { hp: i32 };
+
+    const TestWorld = @import("world.zig").World(struct { Health }, struct {}, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create an entity
+    const entity = world.createEntity();
+    try world.addComponent(entity, Health, .{ .hp = 100 });
+
+    // System that destroys the same entity multiple times
+    const DestroySystem1 = struct {
+        var target: ?entity_module.Entity = null;
+
+        fn system(commands: anytype) !void {
+            if (target) |e| {
+                try commands.destroyEntity(e);
+            }
+        }
+    };
+
+    const DestroySystem2 = struct {
+        var target: ?entity_module.Entity = null;
+
+        fn system(commands: anytype) !void {
+            if (target) |e| {
+                try commands.destroyEntity(e);
+            }
+        }
+    };
+
+    const DestroySystem3 = struct {
+        var target: ?entity_module.Entity = null;
+
+        fn system(commands: anytype) !void {
+            if (target) |e| {
+                try commands.destroyEntity(e);
+            }
+        }
+    };
+
+    // Set the target entity for all systems
+    DestroySystem1.target = entity;
+    DestroySystem2.target = entity;
+    DestroySystem3.target = entity;
+
+    // Verify entity is alive before systems run
+    try std.testing.expect(world.isAlive(entity));
+    try std.testing.expect(world.hasComponent(entity, Health));
+
+    world.beginFrame();
+    // Run multiple systems that all try to destroy the same entity
+    try world.runSystem(DestroySystem1.system);
+    try world.runSystem(DestroySystem2.system);
+    try world.runSystem(DestroySystem3.system);
+    // Entity should still be alive during frame (commands are deferred)
+    try std.testing.expect(world.isAlive(entity));
+
+    // Execute commands - should not crash even though entity is destroyed 3 times
+    try world.endFrame();
+
+    // Verify entity is destroyed after frame ends
+    try std.testing.expect(!world.isAlive(entity));
+    try std.testing.expect(!world.hasComponent(entity, Health));
 }
