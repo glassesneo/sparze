@@ -268,7 +268,7 @@ fn collisionDetection(
         for (positions.entities) |entity_b| {
             if (entity_a == entity_b) continue;
             // Collision logic...
-            try writer.send(.{ .entityA = entity_a, .entityB = entity_b });
+            try writer.enqueue(.{ .entityA = entity_a, .entityB = entity_b });
         }
     }
 }
@@ -278,10 +278,10 @@ fn collisionResponse(
     reader: EventReader(Collision),
     writer: EventWriter(Damage),
 ) !void {
-    for (reader.read()) |collision| {
+    for (reader.queue) |collision| {
         // Process collision and send damage events
-        try writer.send(.{ .entity = collision.entityA, .amount = 10 });
-        try writer.send(.{ .entity = collision.entityB, .amount = 10 });
+        try writer.enqueue(.{ .entity = collision.entityA, .amount = 10 });
+        try writer.enqueue(.{ .entity = collision.entityB, .amount = 10 });
     }
 }
 
@@ -304,9 +304,9 @@ try world.endFrame();  // Flush commands
 
 **Event System Parameters**:
 - `EventReader(E)`: Read-only access to events from previous frame
-  - API: `reader.read()` returns `[]const E`
+  - API: `reader.queue`: `[]const E`
 - `EventWriter(E)`: Write-only access to send events to current frame
-  - API: `try writer.send(event)`
+  - API: `try writer.enqueue(event)`
 
 **Event Usage Patterns**:
 - **System communication**: Damage events, collision events, spawn requests
