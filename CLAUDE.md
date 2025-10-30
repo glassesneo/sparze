@@ -83,7 +83,8 @@ zig build run-{example-name}
 ```zig
 const World = sparze.World(
     struct { Position, Velocity, Health }, // Components
-    struct {}                               // Resources (empty if none)
+    struct {},                              // Resources (empty if none)
+    struct {}                               // Events (empty if none)
 );
 
 // Validate groups at compile time
@@ -239,6 +240,90 @@ std.debug.print("Score: {d}\n", .{current_score.points});
 - Resources are always passed as mutable pointers to systems via `Resource(T).value`
 - Prefer immutable resources (config) over mutable ones (state) where possible
 
+### Events
+
+Events provide frame-based communication between systems. Events sent in frame N are consumed in frame N+1, ensuring stable and predictable event handling with no mid-frame mutations.
+
+```zig
+// Define event types
+const Collision = struct { entityA: Entity, entityB: Entity };
+const Damage = struct { entity: Entity, amount: i32 };
+const Death = struct { entity: Entity };
+
+const World = sparze.World(
+    struct { Position, Velocity, Health },  // Components
+    struct {},  // Resources
+    struct { Collision, Damage, Death },  // Events
+);
+
+var world = World.init(allocator);
+
+// System that sends events
+fn collisionDetection(
+    positions: Query(struct { Position }),
+    writer: EventWriter(Collision),
+) !void {
+    // Detect collisions between entities
+    for (positions.entities) |entity_a| {
+        for (positions.entities) |entity_b| {
+            if (entity_a == entity_b) continue;
+            // Collision logic...
+            try writer.send(.{ .entityA = entity_a, .entityB = entity_b });
+        }
+    }
+}
+
+// System that reads events from previous frame
+fn collisionResponse(
+    reader: EventReader(Collision),
+    writer: EventWriter(Damage),
+) !void {
+    for (reader.read()) |collision| {
+        // Process collision and send damage events
+        try writer.send(.{ .entity = collision.entityA, .amount = 10 });
+        try writer.send(.{ .entity = collision.entityB, .amount = 10 });
+    }
+}
+
+// Frame loop
+world.beginFrame(); // Swap buffers: events from N-1 → readable, events from N → writable
+try world.runSystem(collisionDetection);  // Writes to frame N
+try world.runSystem(collisionResponse);   // Reads from frame N-1
+try world.endFrame();  // Flush commands
+```
+
+**Event Lifecycle**:
+1. **Frame N**: Systems write events to the write buffer using `EventWriter`
+2. **`beginFrame()`**: Swap buffers - write buffer becomes read buffer, new write buffer is cleared
+3. **Frame N+1**: Systems read events from read buffer using `EventReader`
+
+**Event Storage**:
+- All events use `ArrayList` for storage - dynamic and unbounded
+- Events grow as needed with minimal overhead
+- Memory scales automatically with actual usage
+
+**Event System Parameters**:
+- `EventReader(E)`: Read-only access to events from previous frame
+  - API: `reader.read()` returns `[]const E`
+- `EventWriter(E)`: Write-only access to send events to current frame
+  - API: `try writer.send(event)`
+
+**Event Usage Patterns**:
+- **System communication**: Damage events, collision events, spawn requests
+- **State changes**: Entity death, level completion, game over
+- **Input handling**: Key press events, mouse click events
+- **Gameplay**: Pickup collected, quest completed, achievement unlocked
+
+**Best Practices**:
+- Events are frame-delayed by design for stability (N → N+1)
+- Use commands for immediate entity/component operations
+- Keep event types focused and single-purpose
+- Event data should be small and copyable
+- Always use `beginFrame()` / `endFrame()` for proper event lifecycle management
+- Events are cleared automatically each frame after swapping
+
+**Example**: See `examples/events.zig` for a complete demonstration of the event system with collision detection, damage, and death handling.
+
 ### Tag Components
 
 Tag components are zero-sized marker components used for entity categorization or state flags. They are defined as empty structs and automatically use `TagStorage` for optimized memory usage.
@@ -249,7 +334,7 @@ const Player = struct {};
 const Enemy = struct {};
 const Active = struct {};
 
-const World = sparze.World(struct { Position, Player, Enemy, Active }, struct {});
+const World = sparze.World(struct { Position, Player, Enemy, Active }, struct {}, struct {});
 
 var world = World.init(allocator);
 

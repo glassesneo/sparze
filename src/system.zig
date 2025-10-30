@@ -49,7 +49,7 @@ test "Query with Exclude modifier - basic usage" {
     const Dead = struct {};
     const Static = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Dead, Static }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Dead, Static }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -102,7 +102,7 @@ test "Query with multiple Exclude modifiers" {
     const Frozen = struct {};
     const Disabled = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Enemy, Dead, Frozen, Disabled }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Enemy, Dead, Frozen, Disabled }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -175,7 +175,7 @@ test "Query with Exclude and optional components combined" {
     const Dead = struct {};
     const Invulnerable = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Health, Shield, Dead, Invulnerable }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Health, Shield, Dead, Invulnerable }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -238,7 +238,7 @@ test "Query with Exclude in system function" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Static = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Static }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Static }, struct {}, struct {});
 
     const MovementSystem = struct {
         var updated_count: usize = 0;
@@ -300,7 +300,7 @@ test "TagQuery with Exclude modifier" {
     const Dead = struct {};
     const Frozen = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Dead, Frozen }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Dead, Frozen }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -352,7 +352,7 @@ test "Query with Exclude - no matches" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Disabled = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Disabled }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Disabled }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -390,7 +390,7 @@ test "Query with Exclude - regular component exclusion" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Armor = struct { value: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Armor }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Armor }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -750,6 +750,12 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                             .resource => {
                                 args[i] = ArgType.init(world.getResourcePtrMut(ArgType.ResourceType));
                             },
+                            .event_reader => {
+                                args[i] = ArgType.init(world.getEventStoragePtr(ArgType.EventType));
+                            },
+                            .event_writer => {
+                                args[i] = ArgType.init(world.getEventStoragePtrMut(ArgType.EventType));
+                            },
                         }
                     } else {
                         @compileError("System parameter must be a query filter type, Commands, or Allocator. Got: " ++ @typeName(ArgType));
@@ -766,7 +772,7 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
 test "System function with Allocator parameter" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position }, struct {}, struct {});
 
     const AllocatorSystem = struct {
         fn system(allocator: std.mem.Allocator) !void {
@@ -794,7 +800,7 @@ test "System function with Allocator parameter" {
 test "System function with Allocator and query filter parameters" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position }, struct {}, struct {});
 
     const MixedSystem = struct {
         fn system(allocator: std.mem.Allocator, query: SingleQuery(Position)) !void {
@@ -833,7 +839,7 @@ test "System function with Allocator and query filter parameters" {
 test "System function with Allocator and Commands parameters" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position }, struct {}, struct {});
 
     const SpawnSystem = struct {
         fn system(allocator: std.mem.Allocator, commands: anytype) !void {
@@ -876,7 +882,7 @@ test "System function with Allocator, query filter, and Commands parameters" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {}, struct {});
 
     const ComplexSystem = struct {
         fn system(
@@ -934,7 +940,7 @@ test "System function with Allocator, query filter, and Commands parameters" {
 }
 
 test "System function verifies allocator is world allocator" {
-    const TestWorld = @import("world.zig").World(struct {}, struct {});
+    const TestWorld = @import("world.zig").World(struct {}, struct {}, struct {});
 
     const CheckAllocatorSystem = struct {
         var captured_allocator: ?std.mem.Allocator = null;
@@ -963,7 +969,7 @@ test "Commands with frame-based execution" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Enemy = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Enemy }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Enemy }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1017,7 +1023,7 @@ test "Commands remove and destroy operations" {
     const Health = struct { hp: i32 };
     const Dead = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Health, Dead }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Health, Dead }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1074,7 +1080,7 @@ test "Commands createEntityWith convenience method" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {});
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -9,7 +9,7 @@ const Position = struct { x: f32, y: f32 };
 const Velocity = struct { x: f32, y: f32 };
 
 // Define World type
-const World = sparze.World(struct { Position, Velocity }, struct {});
+const World = sparze.World(struct { Position, Velocity }, struct {}, struct {});
 
 // Declare group type constant for better readability and maintainability
 const MovementGroup = struct { Position, Velocity };

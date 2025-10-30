@@ -22,11 +22,16 @@ pub const SingleTag = filter_module.SingleTag;
 pub const TagQuery = filter_module.TagQuery;
 pub const Exclude = filter_module.Exclude;
 pub const Resource = filter_module.Resource;
+pub const EventReader = filter_module.EventReader;
+pub const EventWriter = filter_module.EventWriter;
 
 const system_module = @import("system.zig");
 pub const Commands = system_module.Commands;
 pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;
+
+const event_storage_module = @import("core/event_storage.zig");
+pub const EventStorage = event_storage_module.EventStorage;
 
 test {
     std.testing.refAllDecls(@This());

@@ -13,7 +13,7 @@ const Frozen = struct {};
 const Static = struct {};
 const Boss = struct {};
 
-const World = sparze.World(struct { Position, Velocity, Health, Enemy, Dead, Frozen, Static, Boss }, struct {});
+const World = sparze.World(struct { Position, Velocity, Health, Enemy, Dead, Frozen, Static, Boss }, struct {}, struct {});
 const Query = sparze.Query;
 const TagQuery = sparze.TagQuery;
 const Exclude = sparze.Exclude;

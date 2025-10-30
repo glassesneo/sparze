@@ -33,6 +33,7 @@ const Dead = struct {};
 const World = sparze.World(
     struct { Position, Velocity, Health, Player, Enemy, Collectible, Dead },
     struct { DeltaTime, Score, GameConfig, GameState },
+    struct {},
 );
 
 // Physics system using multiple resources

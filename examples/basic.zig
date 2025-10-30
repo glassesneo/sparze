@@ -8,7 +8,7 @@ const Position = struct {
     y: f32,
 };
 
-const World = sparze.World(struct { Position }, struct {});
+const World = sparze.World(struct { Position }, struct {}, struct {});
 
 // Spawn a couple of entities using Commands (deferred component ops)
 fn spawnSystem(commands: anytype) !void {

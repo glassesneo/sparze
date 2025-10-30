@@ -6,7 +6,7 @@ const Velocity = struct { dx: f32, dy: f32 };
 const Health = struct { hp: i32 };
 const Shield = struct { value: i32 };
 
-const World = sparze.World(struct { Position, Velocity, Health, Shield }, struct {});
+const World = sparze.World(struct { Position, Velocity, Health, Shield }, struct {}, struct {});
 const Query = sparze.Query;
 
 /// Movement system processes all entities with Position and Velocity,

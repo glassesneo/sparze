@@ -17,7 +17,7 @@ const Enemy = struct {};
 const Active = struct {};
 const Boss = struct {};
 
-const World = sparze.World(struct { Position, Health, Player, Enemy, Active, Boss }, struct {});
+const World = sparze.World(struct { Position, Health, Player, Enemy, Active, Boss }, struct {}, struct {});
 const SingleTag = sparze.SingleTag;
 const TagQuery = sparze.TagQuery;
 const Query = sparze.Query;

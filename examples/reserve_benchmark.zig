@@ -6,7 +6,7 @@ const Velocity = struct { dx: f32, dy: f32 };
 const Health = struct { hp: i32 };
 const Armor = struct { value: i32 };
 
-const World = sparze.World(struct { Position, Velocity, Health, Armor }, struct {});
+const World = sparze.World(struct { Position, Velocity, Health, Armor }, struct {}, struct {});
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
