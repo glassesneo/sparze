@@ -26,6 +26,7 @@ A high-performance Entity Component System (ECS) library for Zig with compile-ti
   - **Query**: Runtime intersection queries for multiple components with optional component support (no setup required)
   - **TagQuery**: Runtime intersection queries for multiple tag components with optional tag support
   - **Group**: Optimized multi-component iteration with cache-friendly layout
+  - **CombinationIterator**: Iterate over all unique pairs of entities from a query
   - Automatic query resolution and dependency injection
   - Support for multiple query parameters per system
   - Optional components/tags using `?Component` or `?Tag` syntax
@@ -493,6 +494,7 @@ fn enemyProcessingSystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Active }
 - **SingleQuery(Component)**: Fast iteration over entities with a single regular component
 - **SingleTag(Tag)**: Fast iteration over entities with a single tag component
 - **Query(struct { A, B, ?C, ... })**: Flexible runtime intersection for multiple components (mixed tags and regular components, supports optional components)
+  - **CombinationIterator**: Via `query.combinations()` - iterates over all unique pairs of entities from a Query
 - **TagQuery(struct { A, B, ?C, ... })**: Runtime intersection for multiple tag components only (supports optional tags)
 - **Group(struct { A, B })**: Optimized multi-component iteration requiring upfront `createGroup()` call for maximum performance
 
@@ -503,6 +505,7 @@ Query filters are types that filter entities based on component composition, use
 Explore the `examples/` directory for comprehensive demonstrations:
 
 - `basic.zig` - Entity and component basics
+- `combination_iterator.zig` - Iterating over all unique pairs of entities (collision detection example)
 - `resources.zig` - Global resources and state management
 - `optional_components.zig` - Optional components and tags demonstration
 - `plugin_architecture.zig` - Plugin-style architecture
@@ -517,6 +520,7 @@ zig build run-examples
 Run a specific example:
 ```bash
 zig build run-basic
+zig build run-combination_iterator
 zig build run-resources
 zig build run-tag_components
 ```

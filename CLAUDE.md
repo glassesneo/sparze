@@ -141,6 +141,19 @@ fn bossEnemySystem(query: TagQuery(struct { Enemy, Boss })) !void {
     }
 }
 
+// System with CombinationIterator (all unique pairs)
+fn collisionSystem(mut_query: Query(struct { Position, Radius })) !void {
+    var query = mut_query;
+    var iter = query.combinations();
+    
+    while (iter.next()) |pair| {
+        const entity_a = pair[0];
+        const entity_b = pair[1];
+        // Check collision between entity_a and entity_b
+        // Each pair is visited exactly once (no duplicates)
+    }
+}
+
 try world.runSystem(movementSystem);
 try world.runSystem(combatSystem);
 try world.runSystem(playerSystem);
@@ -551,6 +564,59 @@ Query(struct { Health, ?Shield, Exclude(Dead), Exclude(Invulnerable) })
 // Active enemies with optional boss enhancement
 TagQuery(struct { Enemy, ?Boss, Exclude(Dead), Exclude(Frozen) })
 ```
+
+### Query CombinationIterator
+
+The `CombinationIterator` provides an efficient way to iterate over all unique pairs of entities from a Query. This is particularly useful for collision detection, interaction systems, or any scenario where you need to check all pairs of entities without duplicates.
+
+**Usage**:
+```zig
+fn collisionDetectionSystem(mut_query: Query(struct { Position, Radius })) !void {
+    var query = mut_query;
+    var iter = query.combinations();
+    
+    while (iter.next()) |pair| {
+        const entity_a = pair[0];
+        const entity_b = pair[1];
+        
+        const pos_a = query.getComponent(entity_a, Position);
+        const pos_b = query.getComponent(entity_b, Position);
+        const radius_a = query.getComponent(entity_a, Radius);
+        const radius_b = query.getComponent(entity_b, Radius);
+        
+        // Calculate distance and check for collision
+        const dx = pos_b.x - pos_a.x;
+        const dy = pos_b.y - pos_a.y;
+        const distance = @sqrt(dx * dx + dy * dy);
+        
+        if (distance < radius_a.value + radius_b.value) {
+            // Handle collision between entity_a and entity_b
+        }
+    }
+}
+```
+
+**Behavior**:
+- Returns all unique pairs `(entity_i, entity_j)` where `i < j`
+- For N entities that pass the filter, generates C(N,2) = N×(N-1)/2 pairs
+- Example: [e1, e2, e3, e4] produces pairs: (e1,e2), (e1,e3), (e1,e4), (e2,e3), (e2,e4), (e3,e4)
+- Both entities in each pair are guaranteed to pass the query's filter
+- No duplicate pairs (e.g., both (e1,e2) and (e2,e1) are not generated)
+- No self-pairs (e.g., (e1,e1) is never generated)
+
+**Use Cases**:
+- **Collision detection**: Check all entities against each other for collisions
+- **Interaction systems**: Process interactions between all pairs of entities
+- **Spatial queries**: Find nearby entities, proximity checks
+- **Relationship systems**: Establish connections or relationships between entities
+- **Physics**: Constraint solving, force application between pairs
+
+**Performance**:
+- O(N²) complexity for N entities - appropriate for small to medium entity counts
+- Filter is applied during iteration, skipping entities that don't match
+- Each pair is visited exactly once, reducing redundant checks by 50%
+
+**Example**: See `examples/combination_iterator.zig` for a complete collision detection implementation.
 
 ## Query Filter Comparison
 

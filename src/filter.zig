@@ -216,6 +216,65 @@ pub fn Query(comptime QueryComponents: type) type {
                     break false;
             } else true;
         }
+
+        pub fn iterator(self: *Self) Iterator {
+            return Iterator{
+                .query = self,
+            };
+        }
+
+        /// Returns an iterator over all unique pairs of entities
+        pub fn combinations(self: *Self) CombinationIterator {
+            return CombinationIterator{
+                .query = self,
+            };
+        }
+
+        pub const Iterator = struct {
+            index: usize = 0,
+            query: *Query(QueryComponents),
+
+            pub fn next(self: *Iterator) ?Entity {
+                const index = self.index;
+                for (self.query.entities[index..]) |entity| {
+                    self.index += 1;
+                    if (!self.query.filter(entity)) continue;
+                    return entity;
+                } else return null;
+            }
+        };
+
+        pub const CombinationIterator = struct {
+            i: usize = 0,
+            j: usize = 1,
+            query: *Query(QueryComponents),
+
+            pub fn next(self: *CombinationIterator) ?struct { Entity, Entity } {
+                const entities = self.query.entities;
+
+                // Continue searching for the next valid pair
+                while (self.i < entities.len) {
+                    while (self.j < entities.len) {
+                        const entity_i = entities[self.i];
+                        const entity_j = entities[self.j];
+
+                        // Move to next pair for subsequent call
+                        self.j += 1;
+
+                        // Check if both entities pass the filter
+                        if (self.query.filter(entity_i) and self.query.filter(entity_j)) {
+                            return .{ entity_i, entity_j };
+                        }
+                    }
+
+                    // Move to next i and reset j
+                    self.i += 1;
+                    self.j = self.i + 1;
+                }
+
+                return null;
+            }
+        };
     };
 }
 
@@ -1790,6 +1849,158 @@ test "Query with optional components" {
     try std.testing.expectEqual(@as(usize, 2), count);
     // Only e1 has health
     try std.testing.expectEqual(@as(usize, 1), health_count);
+}
+
+test "Query CombinationIterator - all unique pairs" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {}, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create 4 entities with Position and Velocity
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 1.0, .y = 1.0 });
+    try world.addComponent(e1, Velocity, .{ .dx = 0.1, .dy = 0.1 });
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 2.0, .y = 2.0 });
+    try world.addComponent(e2, Velocity, .{ .dx = 0.2, .dy = 0.2 });
+
+    const e3 = world.createEntity();
+    try world.addComponent(e3, Position, .{ .x = 3.0, .y = 3.0 });
+    try world.addComponent(e3, Velocity, .{ .dx = 0.3, .dy = 0.3 });
+
+    const e4 = world.createEntity();
+    try world.addComponent(e4, Position, .{ .x = 4.0, .y = 4.0 });
+    try world.addComponent(e4, Velocity, .{ .dx = 0.4, .dy = 0.4 });
+
+    // Create query and iterator
+    var query = Query(struct { Position, Velocity }).init(&world);
+    var iter = Query(struct { Position, Velocity }).CombinationIterator{
+        .query = &query,
+    };
+
+    // Expected pairs (all unique combinations): (e1,e2), (e1,e3), (e1,e4), (e2,e3), (e2,e4), (e3,e4)
+    // That's C(4,2) = 6 pairs
+    var pairs: std.ArrayList(struct { Entity, Entity }) = .{};
+    defer pairs.deinit(allocator);
+
+    while (iter.next()) |pair| {
+        try pairs.append(allocator, pair);
+    }
+
+    // Should have exactly 6 pairs
+    try std.testing.expectEqual(@as(usize, 6), pairs.items.len);
+
+    // Verify expected pairs (order matters based on entity indices)
+    const expected_pairs = [_]struct { Entity, Entity }{
+        .{ e1, e2 }, .{ e1, e3 }, .{ e1, e4 },
+        .{ e2, e3 }, .{ e2, e4 }, .{ e3, e4 },
+    };
+
+    for (expected_pairs, 0..) |expected, i| {
+        try std.testing.expectEqual(expected[0], pairs.items[i][0]);
+        try std.testing.expectEqual(expected[1], pairs.items[i][1]);
+    }
+}
+
+test "Query CombinationIterator - with filtering" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {}, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create entities - some with both components, some with only Position
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 1.0, .y = 1.0 });
+    try world.addComponent(e1, Velocity, .{ .dx = 0.1, .dy = 0.1 });
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 2.0, .y = 2.0 });
+    // No velocity - should be filtered out
+
+    const e3 = world.createEntity();
+    try world.addComponent(e3, Position, .{ .x = 3.0, .y = 3.0 });
+    try world.addComponent(e3, Velocity, .{ .dx = 0.3, .dy = 0.3 });
+
+    const e4 = world.createEntity();
+    try world.addComponent(e4, Position, .{ .x = 4.0, .y = 4.0 });
+    try world.addComponent(e4, Velocity, .{ .dx = 0.4, .dy = 0.4 });
+
+    // Create query and iterator
+    var query = Query(struct { Position, Velocity }).init(&world);
+    var iter = Query(struct { Position, Velocity }).CombinationIterator{
+        .query = &query,
+    };
+
+    // Collect pairs
+    var pairs: std.ArrayList(struct { Entity, Entity }) = .{};
+    defer pairs.deinit(allocator);
+
+    while (iter.next()) |pair| {
+        try pairs.append(allocator, pair);
+    }
+
+    // Should have 3 pairs: (e1,e3), (e1,e4), (e3,e4)
+    // e2 is excluded because it doesn't have Velocity
+    try std.testing.expectEqual(@as(usize, 3), pairs.items.len);
+
+    // Verify e2 is not in any pair
+    for (pairs.items) |pair| {
+        try std.testing.expect(pair[0] != e2 and pair[1] != e2);
+    }
+}
+
+test "Query CombinationIterator - empty and single entity" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+
+    const TestWorld = @import("world.zig").World(struct { Position, Velocity }, struct {}, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Test with no entities
+    {
+        var query = Query(struct { Position, Velocity }).init(&world);
+        var iter = Query(struct { Position, Velocity }).CombinationIterator{
+            .query = &query,
+        };
+
+        try std.testing.expect(iter.next() == null);
+    }
+
+    // Test with single entity (no pairs possible)
+    {
+        const e1 = world.createEntity();
+        try world.addComponent(e1, Position, .{ .x = 1.0, .y = 1.0 });
+        try world.addComponent(e1, Velocity, .{ .dx = 0.1, .dy = 0.1 });
+
+        var query = Query(struct { Position, Velocity }).init(&world);
+        var iter = Query(struct { Position, Velocity }).CombinationIterator{
+            .query = &query,
+        };
+
+        try std.testing.expect(iter.next() == null);
+    }
 }
 
 test "Query optional components with mutation" {
