@@ -10,6 +10,7 @@ const examples = [_]Example{
     .{ .name = "system_operations" },
     .{ .name = "movement_example" },
     .{ .name = "multiple_groups" },
+    .{ .name = "optional_components" },
     .{ .name = "performance_benchmark" },
     .{ .name = "tag_components" },
     .{ .name = "query_vs_group_benchmark" },

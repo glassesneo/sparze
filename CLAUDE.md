@@ -826,7 +826,6 @@ try world.getSparseSetPtr(Position).reserve(expected_capacity);
 - Commands use inline array `[max_component_size]u8` instead of heap-allocated `[]u8`
 - Eliminates `allocator.dupe()` call per command
 - `max_component_size` computed at comptime per World
-- Results in 77.8x faster command buffer operations (98.7% speedup)
 
 ### Internal Details
 

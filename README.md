@@ -506,9 +506,14 @@ Explore the `examples/` directory for comprehensive demonstrations:
 
 - `basic.zig` - Entity and component basics
 - `combination_iterator.zig` - Iterating over all unique pairs of entities (collision detection example)
-- `resources.zig` - Global resources and state management
+- `cross_product.zig` - Cross-product iteration between different entity types
+- `events.zig` - Event system demonstration with collision detection
+- `exclude_example.zig` - Exclude modifier for filtering entities
+- `movement_example.zig` - Simple movement system using groups
+- `multiple_groups.zig` - Multiple non-overlapping groups with validation
 - `optional_components.zig` - Optional components and tags demonstration
 - `plugin_architecture.zig` - Plugin-style architecture
+- `resources.zig` - Global resources and state management
 - `system_operations.zig` - System patterns and multi-query examples
 - `tag_components.zig` - Tag component usage and patterns
 
@@ -521,7 +526,15 @@ Run a specific example:
 ```bash
 zig build run-basic
 zig build run-combination_iterator
+zig build run-cross_product
+zig build run-events
+zig build run-exclude_example
+zig build run-movement_example
+zig build run-multiple_groups
+zig build run-optional_components
+zig build run-plugin_architecture
 zig build run-resources
+zig build run-system_operations
 zig build run-tag_components
 ```
 
