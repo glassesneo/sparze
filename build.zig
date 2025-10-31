@@ -3,6 +3,7 @@ const std = @import("std");
 const examples = [_]Example{
     .{ .name = "basic" },
     .{ .name = "combination_iterator" },
+    .{ .name = "cross_product" },
     .{ .name = "events" },
     .{ .name = "exclude_example" },
     .{ .name = "plugin_architecture" },

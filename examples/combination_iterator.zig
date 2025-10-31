@@ -22,8 +22,7 @@ fn collisionDetectionSystem(mut_query: sparze.Query(struct { Position, Radius })
 
     var collision_count: usize = 0;
     while (iter.next()) |pair| {
-        const entity_a = pair[0];
-        const entity_b = pair[1];
+        const entity_a, const entity_b = pair;
 
         const pos_a = query.getComponent(entity_a, Position);
         const pos_b = query.getComponent(entity_b, Position);

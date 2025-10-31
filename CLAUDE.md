@@ -618,6 +618,87 @@ fn collisionDetectionSystem(mut_query: Query(struct { Position, Radius })) !void
 
 **Example**: See `examples/combination_iterator.zig` for a complete collision detection implementation.
 
+### Query CrossProductIterator
+
+The `CrossProductIterator` provides iteration over the Cartesian product of two different queries. This enables checking all pairs of entities between two distinct entity sets, which is particularly useful for collision detection between different entity types (e.g., projectiles vs enemies), interaction systems, or any scenario where you need to process all combinations across two separate queries.
+
+**Usage**:
+```zig
+fn collisionDetectionSystem(
+    mut_projectile_query: Query(struct { Projectile, Transform, Collider }),
+    mut_enemy_query: Query(struct { Enemy, Transform, Collider }),
+    collision_writer: EventWriter(CollisionEvent),
+) !void {
+    var projectile_query = mut_projectile_query;
+    var enemy_query = mut_enemy_query;
+
+    // Create cross-product iterator between projectiles and enemies
+    var cross = projectile_query.crossProduct(&enemy_query);
+
+    while (cross.next()) |pair| {
+        const proj_entity, const enemy_entity = pair;
+
+        // Get components from respective queries
+        const proj_transform = projectile_query.getComponent(proj_entity, Transform);
+        const proj_collider = projectile_query.getComponent(proj_entity, Collider);
+        const enemy_transform = enemy_query.getComponent(enemy_entity, Transform);
+        const enemy_collider = enemy_query.getComponent(enemy_entity, Collider);
+
+        // Check collision
+        const dx = proj_transform.x - enemy_transform.x;
+        const dy = proj_transform.y - enemy_transform.y;
+        const dist_sq = dx * dx + dy * dy;
+        const radius_sum = proj_collider.radius + enemy_collider.radius;
+
+        if (dist_sq < radius_sum * radius_sum) {
+            try collision_writer.enqueue(.{
+                .projectile = proj_entity,
+                .enemy = enemy_entity,
+            });
+        }
+    }
+}
+```
+
+**Behavior**:
+- Returns all pairs `(entity_i, entity_j)` where `entity_i` is from query1 and `entity_j` is from query2
+- For N entities in query1 and M entities in query2, generates N×M pairs
+- Example: 3 projectiles × 5 enemies = 15 pairs
+- Applies filters from both queries during iteration
+- Unlike CombinationIterator, can produce duplicate pairs if queries overlap
+- Can produce self-pairs if the same entity exists in both queries
+
+**Supported Query Types**:
+- `Query` × `Query`: Multi-component queries with filter support
+- `SingleQuery` × `SingleQuery`: Single-component queries
+- `SingleTag` × `SingleTag`: Single-tag queries
+- `TagQuery` × `TagQuery`: Multi-tag queries with filter support
+- `Group` × `Group`: Optimized group queries
+- **Mixed types**: Any combination (e.g., `SingleTag` × `Query`)
+
+**Use Cases**:
+- **Collision detection**: Check projectiles against enemies, bullets against players
+- **Interaction systems**: Process interactions between different entity types
+- **Targeting systems**: Find targets for AI entities, weapon systems
+- **Area of effect**: Check spells/explosions against all entities in range
+- **Pickup systems**: Check players against collectibles
+
+**Performance**:
+- O(N×M) complexity for N entities in query1 and M entities in query2
+- Filters are applied during iteration, skipping invalid entities
+- Appropriate when you need to check all combinations between two distinct sets
+- More efficient than nested loops with manual filtering
+
+**Comparison with CombinationIterator**:
+- **CombinationIterator**: All unique pairs *within* a single query (i < j)
+  - Use case: Check all entities of the same type against each other
+  - Example: Collision between all enemies
+- **CrossProductIterator**: All pairs *between* two queries (i × j)
+  - Use case: Check entities of different types against each other
+  - Example: Collision between projectiles and enemies
+
+**Example**: See `examples/cross_product.zig` for a complete implementation demonstrating projectile vs enemy collision detection.
+
 ## Query Filter Comparison
 
 | Filter Type | Component Types | Modifiers | Setup Required | Performance | Use Case |

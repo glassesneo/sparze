@@ -61,6 +61,11 @@ pub fn SingleQuery(comptime QueryComponent: type) type {
                 .components = sparse_set.components.items,
             };
         }
+
+        /// Returns a cross-product iterator with another query
+        pub fn crossProduct(self: *Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
+            return SimpleCrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
+        }
     };
 }
 
@@ -275,6 +280,128 @@ pub fn Query(comptime QueryComponents: type) type {
                 return null;
             }
         };
+
+        /// Returns a cross-product iterator with another query
+        pub fn crossProduct(self: *Self, other: anytype) CrossProductIterator(Self, @TypeOf(other.*)) {
+            return CrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
+        }
+    };
+}
+
+/// CrossProductIterator provides iteration over the Cartesian product of two queries.
+///
+/// This iterator enables checking all pairs of entities between two different queries,
+/// which is particularly useful for collision detection, interaction systems, or any
+/// scenario where you need to check all entities from one query against all entities
+/// from another query.
+///
+/// This version applies filters from both queries during iteration, used with Query and TagQuery types.
+///
+/// Example:
+/// ```zig
+/// fn collisionSystem(
+///     projectile_query: Query(struct { Projectile, Transform, Collider }),
+///     enemy_query: Query(struct { Enemy, Transform, Collider }),
+/// ) !void {
+///     var cross = projectile_query.crossProduct(&enemy_query);
+///     while (cross.next()) |pair| {
+///         const proj_entity, const enemy_entity = pair;
+///         // Check collision between proj_entity and enemy_entity
+///     }
+/// }
+/// ```
+pub fn CrossProductIterator(comptime Query1: type, comptime Query2: type) type {
+    return struct {
+        const Self = @This();
+
+        query1: *Query1,
+        query2: *Query2,
+        i: usize = 0,
+        j: usize = 0,
+
+        pub fn init(query1: *Query1, query2: *Query2) Self {
+            return .{
+                .query1 = query1,
+                .query2 = query2,
+            };
+        }
+
+        /// Returns the next pair of entities from the cross product.
+        /// Returns null when all pairs have been exhausted.
+        pub fn next(self: *Self) ?struct { Entity, Entity } {
+            // Nested iteration: for each entity in query1, iterate all entities in query2
+            while (self.i < self.query1.entities.len) {
+                while (self.j < self.query2.entities.len) {
+                    const entity1 = self.query1.entities[self.i];
+                    const entity2 = self.query2.entities[self.j];
+                    self.j += 1;
+
+                    // Apply filters from both queries
+                    if (self.query1.filter(entity1) and self.query2.filter(entity2)) {
+                        return .{ entity1, entity2 };
+                    }
+                }
+                self.i += 1;
+                self.j = 0;
+            }
+            return null;
+        }
+    };
+}
+
+/// SimpleCrossProductIterator provides iteration over the Cartesian product of two queries
+/// without filter application. Used with SingleQuery, SingleTag, and Group types.
+///
+/// Unlike CrossProductIterator, this version assumes all entities in both queries are valid
+/// and doesn't call filter() methods. This is appropriate for SingleQuery and SingleTag
+/// which represent pre-filtered sets of entities.
+///
+/// Example:
+/// ```zig
+/// fn collisionSystem(
+///     projectile_tags: SingleTag(Projectile),
+///     enemy_tags: SingleTag(Enemy),
+/// ) !void {
+///     var cross = projectile_tags.crossProduct(&enemy_tags);
+///     while (cross.next()) |pair| {
+///         const proj_entity, const enemy_entity = pair;
+///         // Check collision between proj_entity and enemy_entity
+///     }
+/// }
+/// ```
+pub fn SimpleCrossProductIterator(comptime Query1: type, comptime Query2: type) type {
+    return struct {
+        const Self = @This();
+
+        query1: *Query1,
+        query2: *Query2,
+        i: usize = 0,
+        j: usize = 0,
+
+        pub fn init(query1: *Query1, query2: *Query2) Self {
+            return .{
+                .query1 = query1,
+                .query2 = query2,
+            };
+        }
+
+        /// Returns the next pair of entities from the cross product.
+        /// Returns null when all pairs have been exhausted.
+        pub fn next(self: *Self) ?struct { Entity, Entity } {
+            // Nested iteration: for each entity in query1, iterate all entities in query2
+            while (self.i < self.query1.entities.len) {
+                while (self.j < self.query2.entities.len) {
+                    const entity1 = self.query1.entities[self.i];
+                    const entity2 = self.query2.entities[self.j];
+                    self.j += 1;
+
+                    return .{ entity1, entity2 };
+                }
+                self.i += 1;
+                self.j = 0;
+            }
+            return null;
+        }
     };
 }
 
@@ -380,6 +507,11 @@ pub fn Group(comptime GroupComponents: type) type {
         pub fn getMutArrayOf(self: Self, comptime C: type) []C {
             return self.getSparseSetPtr(C).getGroupComponentsMut();
         }
+
+        /// Returns a cross-product iterator with another query
+        pub fn crossProduct(self: *Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
+            return SimpleCrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
+        }
     };
 }
 
@@ -396,6 +528,11 @@ pub fn SingleTag(comptime TagComponent: type) type {
             return .{
                 .entities = tag_storage.packed_array.items,
             };
+        }
+
+        /// Returns a cross-product iterator with another query
+        pub fn crossProduct(self: *Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
+            return SimpleCrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
         }
     };
 }
@@ -535,6 +672,11 @@ pub fn TagQuery(comptime QueryTags: type) type {
         /// Check if entity has a specific tag (for optional tags)
         pub fn hasTag(self: Self, entity: Entity, comptime T: type) bool {
             return self.getTagStoragePtr(T).*.contains(entity);
+        }
+
+        /// Returns a cross-product iterator with another query
+        pub fn crossProduct(self: *Self, other: anytype) CrossProductIterator(Self, @TypeOf(other.*)) {
+            return CrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
         }
     };
 }
@@ -2049,4 +2191,341 @@ test "Query optional components with mutation" {
     // Verify only e1 took damage
     try std.testing.expectEqual(@as(i32, 90), world.getComponent(e1, Health).?.hp);
     try std.testing.expect(world.getComponent(e2, Health) == null);
+}
+
+test "CrossProductIterator - Query × Query basic usage" {
+    const Projectile = struct {};
+    const Enemy = struct {};
+    const Transform = struct { x: f32, y: f32 };
+    const Collider = struct { radius: f32 };
+
+    const TestWorld = @import("world.zig").World(
+        struct { Projectile, Enemy, Transform, Collider },
+        struct {},
+        struct {},
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create projectiles
+    const p1 = world.createEntity();
+    try world.addTag(p1, Projectile);
+    try world.addComponent(p1, Transform, .{ .x = 10.0, .y = 20.0 });
+    try world.addComponent(p1, Collider, .{ .radius = 5.0 });
+
+    const p2 = world.createEntity();
+    try world.addTag(p2, Projectile);
+    try world.addComponent(p2, Transform, .{ .x = 30.0, .y = 40.0 });
+    try world.addComponent(p2, Collider, .{ .radius = 5.0 });
+
+    // Create enemies
+    const e1 = world.createEntity();
+    try world.addTag(e1, Enemy);
+    try world.addComponent(e1, Transform, .{ .x = 15.0, .y = 25.0 });
+    try world.addComponent(e1, Collider, .{ .radius = 10.0 });
+
+    const e2 = world.createEntity();
+    try world.addTag(e2, Enemy);
+    try world.addComponent(e2, Transform, .{ .x = 35.0, .y = 45.0 });
+    try world.addComponent(e2, Collider, .{ .radius = 10.0 });
+
+    const e3 = world.createEntity();
+    try world.addTag(e3, Enemy);
+    try world.addComponent(e3, Transform, .{ .x = 100.0, .y = 100.0 });
+    try world.addComponent(e3, Collider, .{ .radius = 10.0 });
+
+    // Create queries
+    var projectile_query = Query(struct { Projectile, Transform, Collider }).init(&world);
+    var enemy_query = Query(struct { Enemy, Transform, Collider }).init(&world);
+
+    // Iterate cross product
+    var cross = projectile_query.crossProduct(&enemy_query);
+    var pair_count: usize = 0;
+
+    while (cross.next()) |pair| {
+        pair_count += 1;
+        const proj_entity, const enemy_entity = pair;
+
+        // Verify entities are valid
+        try std.testing.expect(proj_entity == p1 or proj_entity == p2);
+        try std.testing.expect(enemy_entity == e1 or enemy_entity == e2 or enemy_entity == e3);
+    }
+
+    // Should have 2 projectiles × 3 enemies = 6 pairs
+    try std.testing.expectEqual(@as(usize, 6), pair_count);
+}
+
+test "CrossProductIterator - Query × Query with filtering" {
+    const Projectile = struct {};
+    const Enemy = struct {};
+    const Active = struct {};
+    const Transform = struct { x: f32, y: f32 };
+
+    const TestWorld = @import("world.zig").World(
+        struct { Projectile, Enemy, Active, Transform },
+        struct {},
+        struct {},
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create active projectiles
+    const p1 = world.createEntity();
+    try world.addTag(p1, Projectile);
+    try world.addTag(p1, Active);
+    try world.addComponent(p1, Transform, .{ .x = 10.0, .y = 20.0 });
+
+    const p2 = world.createEntity();
+    try world.addTag(p2, Projectile);
+    try world.addTag(p2, Active);
+    try world.addComponent(p2, Transform, .{ .x = 30.0, .y = 40.0 });
+
+    // Create inactive projectile (should be filtered out)
+    const p_inactive = world.createEntity();
+    try world.addTag(p_inactive, Projectile);
+    try world.addComponent(p_inactive, Transform, .{ .x = 50.0, .y = 60.0 });
+
+    // Create active enemies
+    const e1 = world.createEntity();
+    try world.addTag(e1, Enemy);
+    try world.addTag(e1, Active);
+    try world.addComponent(e1, Transform, .{ .x = 15.0, .y = 25.0 });
+
+    const e2 = world.createEntity();
+    try world.addTag(e2, Enemy);
+    try world.addTag(e2, Active);
+    try world.addComponent(e2, Transform, .{ .x = 35.0, .y = 45.0 });
+
+    // Create inactive enemy (should be filtered out)
+    const e_inactive = world.createEntity();
+    try world.addTag(e_inactive, Enemy);
+    try world.addComponent(e_inactive, Transform, .{ .x = 100.0, .y = 100.0 });
+
+    // Create queries that require Active tag
+    var projectile_query = Query(struct { Projectile, Active, Transform }).init(&world);
+    var enemy_query = Query(struct { Enemy, Active, Transform }).init(&world);
+
+    // Iterate cross product
+    var cross = projectile_query.crossProduct(&enemy_query);
+    var pair_count: usize = 0;
+
+    while (cross.next()) |pair| {
+        pair_count += 1;
+        const proj_entity, const enemy_entity = pair;
+
+        // Verify only active entities are included
+        try std.testing.expect(proj_entity == p1 or proj_entity == p2);
+        try std.testing.expect(proj_entity != p_inactive);
+        try std.testing.expect(enemy_entity == e1 or enemy_entity == e2);
+        try std.testing.expect(enemy_entity != e_inactive);
+    }
+
+    // Should have 2 active projectiles × 2 active enemies = 4 pairs
+    try std.testing.expectEqual(@as(usize, 4), pair_count);
+}
+
+test "CrossProductIterator - SimpleCrossProductIterator with SingleTag" {
+    const Projectile = struct {};
+    const Enemy = struct {};
+
+    const TestWorld = @import("world.zig").World(
+        struct { Projectile, Enemy },
+        struct {},
+        struct {},
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create projectiles
+    const p1 = world.createEntity();
+    try world.addTag(p1, Projectile);
+
+    const p2 = world.createEntity();
+    try world.addTag(p2, Projectile);
+
+    const p3 = world.createEntity();
+    try world.addTag(p3, Projectile);
+
+    // Create enemies
+    const e1 = world.createEntity();
+    try world.addTag(e1, Enemy);
+
+    const e2 = world.createEntity();
+    try world.addTag(e2, Enemy);
+
+    // Create queries
+    var projectile_query = SingleTag(Projectile).init(world.getTagStoragePtr(Projectile));
+    var enemy_query = SingleTag(Enemy).init(world.getTagStoragePtr(Enemy));
+
+    // Iterate cross product
+    var cross = projectile_query.crossProduct(&enemy_query);
+    var pair_count: usize = 0;
+
+    while (cross.next()) |pair| {
+        pair_count += 1;
+        const proj_entity, const enemy_entity = pair;
+
+        // Verify entities are valid
+        try std.testing.expect(proj_entity == p1 or proj_entity == p2 or proj_entity == p3);
+        try std.testing.expect(enemy_entity == e1 or enemy_entity == e2);
+    }
+
+    // Should have 3 projectiles × 2 enemies = 6 pairs
+    try std.testing.expectEqual(@as(usize, 6), pair_count);
+}
+
+test "CrossProductIterator - empty queries" {
+    const Projectile = struct {};
+    const Enemy = struct {};
+    const Transform = struct { x: f32, y: f32 };
+
+    const TestWorld = @import("world.zig").World(
+        struct { Projectile, Enemy, Transform },
+        struct {},
+        struct {},
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Don't create any entities
+
+    // Create queries
+    var projectile_query = Query(struct { Projectile, Transform }).init(&world);
+    var enemy_query = Query(struct { Enemy, Transform }).init(&world);
+
+    // Iterate cross product
+    var cross = projectile_query.crossProduct(&enemy_query);
+
+    // Should have no pairs
+    try std.testing.expect(cross.next() == null);
+}
+
+test "CrossProductIterator - asymmetric sizes" {
+    const Projectile = struct {};
+    const Enemy = struct {};
+
+    const TestWorld = @import("world.zig").World(
+        struct { Projectile, Enemy },
+        struct {},
+        struct {},
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create many projectiles
+    var projectiles: [10]Entity = undefined;
+    for (&projectiles) |*proj| {
+        proj.* = world.createEntity();
+        try world.addTag(proj.*, Projectile);
+    }
+
+    // Create few enemies
+    const e1 = world.createEntity();
+    try world.addTag(e1, Enemy);
+
+    const e2 = world.createEntity();
+    try world.addTag(e2, Enemy);
+
+    // Create queries
+    var projectile_query = SingleTag(Projectile).init(world.getTagStoragePtr(Projectile));
+    var enemy_query = SingleTag(Enemy).init(world.getTagStoragePtr(Enemy));
+
+    // Iterate cross product
+    var cross = projectile_query.crossProduct(&enemy_query);
+    var pair_count: usize = 0;
+
+    while (cross.next()) |_| {
+        pair_count += 1;
+    }
+
+    // Should have 10 projectiles × 2 enemies = 20 pairs
+    try std.testing.expectEqual(@as(usize, 20), pair_count);
+}
+
+test "CrossProductIterator - mixed query types" {
+    const Projectile = struct {};
+    const Enemy = struct {};
+    const Transform = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+
+    const TestWorld = @import("world.zig").World(
+        struct { Projectile, Enemy, Transform, Velocity },
+        struct {},
+        struct {},
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create projectiles (using SingleTag)
+    const p1 = world.createEntity();
+    try world.addTag(p1, Projectile);
+
+    const p2 = world.createEntity();
+    try world.addTag(p2, Projectile);
+
+    // Create enemies with Transform and Velocity (using Query)
+    const e1 = world.createEntity();
+    try world.addTag(e1, Enemy);
+    try world.addComponent(e1, Transform, .{ .x = 15.0, .y = 25.0 });
+    try world.addComponent(e1, Velocity, .{ .dx = 1.0, .dy = 2.0 });
+
+    const e2 = world.createEntity();
+    try world.addTag(e2, Enemy);
+    try world.addComponent(e2, Transform, .{ .x = 35.0, .y = 45.0 });
+    try world.addComponent(e2, Velocity, .{ .dx = -1.0, .dy = -2.0 });
+
+    // Create enemy without Velocity (should be filtered out)
+    const e3 = world.createEntity();
+    try world.addTag(e3, Enemy);
+    try world.addComponent(e3, Transform, .{ .x = 100.0, .y = 100.0 });
+
+    // Create queries: SingleTag × Query
+    var projectile_query = SingleTag(Projectile).init(world.getTagStoragePtr(Projectile));
+    var enemy_query = Query(struct { Enemy, Transform, Velocity }).init(&world);
+
+    // Iterate cross product
+    var cross = projectile_query.crossProduct(&enemy_query);
+    var pair_count: usize = 0;
+
+    while (cross.next()) |pair| {
+        pair_count += 1;
+        const proj_entity, const enemy_entity = pair;
+
+        try std.testing.expect(proj_entity == p1 or proj_entity == p2);
+        try std.testing.expect(enemy_entity == e1 or enemy_entity == e2);
+        try std.testing.expect(enemy_entity != e3); // e3 filtered out
+    }
+
+    // Should have 2 projectiles × 2 enemies (with velocity) = 4 pairs
+    try std.testing.expectEqual(@as(usize, 4), pair_count);
 }
