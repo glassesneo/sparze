@@ -142,13 +142,11 @@ fn bossEnemySystem(query: TagQuery(struct { Enemy, Boss })) !void {
 }
 
 // System with CombinationIterator (all unique pairs)
-fn collisionSystem(mut_query: Query(struct { Position, Radius })) !void {
-    var query = mut_query;
+fn collisionSystem(query: Query(struct { Position, Radius })) !void {
     var iter = query.combinations();
-    
+
     while (iter.next()) |pair| {
-        const entity_a = pair[0];
-        const entity_b = pair[1];
+        const entity_a, const entity_b = pair;
         // Check collision between entity_a and entity_b
         // Each pair is visited exactly once (no duplicates)
     }
@@ -571,24 +569,22 @@ The `CombinationIterator` provides an efficient way to iterate over all unique p
 
 **Usage**:
 ```zig
-fn collisionDetectionSystem(mut_query: Query(struct { Position, Radius })) !void {
-    var query = mut_query;
+fn collisionDetectionSystem(query: Query(struct { Position, Radius })) !void {
     var iter = query.combinations();
-    
+
     while (iter.next()) |pair| {
-        const entity_a = pair[0];
-        const entity_b = pair[1];
-        
+        const entity_a, const entity_b = pair;
+
         const pos_a = query.getComponent(entity_a, Position);
         const pos_b = query.getComponent(entity_b, Position);
         const radius_a = query.getComponent(entity_a, Radius);
         const radius_b = query.getComponent(entity_b, Radius);
-        
+
         // Calculate distance and check for collision
         const dx = pos_b.x - pos_a.x;
         const dy = pos_b.y - pos_a.y;
         const distance = @sqrt(dx * dx + dy * dy);
-        
+
         if (distance < radius_a.value + radius_b.value) {
             // Handle collision between entity_a and entity_b
         }
@@ -625,13 +621,10 @@ The `CrossProductIterator` provides iteration over the Cartesian product of two 
 **Usage**:
 ```zig
 fn collisionDetectionSystem(
-    mut_projectile_query: Query(struct { Projectile, Transform, Collider }),
-    mut_enemy_query: Query(struct { Enemy, Transform, Collider }),
+    projectile_query: Query(struct { Projectile, Transform, Collider }),
+    enemy_query: Query(struct { Enemy, Transform, Collider }),
     collision_writer: EventWriter(CollisionEvent),
 ) !void {
-    var projectile_query = mut_projectile_query;
-    var enemy_query = mut_enemy_query;
-
     // Create cross-product iterator between projectiles and enemies
     var cross = projectile_query.crossProduct(&enemy_query);
 

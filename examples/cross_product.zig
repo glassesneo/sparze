@@ -31,13 +31,10 @@ const World = sparze.World(
 /// System that detects collisions between projectiles and enemies
 /// using the CrossProductIterator API
 fn collisionDetectionSystem(
-    mut_projectile_query: sparze.Query(struct { Projectile, Transform, Collider, sparze.Exclude(Dead) }),
-    mut_enemy_query: sparze.Query(struct { Enemy, Transform, Collider, sparze.Exclude(Dead) }),
+    projectile_query: sparze.Query(struct { Projectile, Transform, Collider, sparze.Exclude(Dead) }),
+    enemy_query: sparze.Query(struct { Enemy, Transform, Collider, sparze.Exclude(Dead) }),
     collision_writer: sparze.EventWriter(CollisionEvent),
 ) !void {
-    var projectile_query = mut_projectile_query;
-    var enemy_query = mut_enemy_query;
-
     // Use cross product iterator to check all projectiles against all enemies
     var cross = projectile_query.crossProduct(&enemy_query);
 

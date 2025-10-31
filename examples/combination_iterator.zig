@@ -14,10 +14,9 @@ const World = sparze.World(
 
 // Collision detection using CombinationIterator
 // This demonstrates checking all unique pairs of entities for collisions
-fn collisionDetectionSystem(mut_query: sparze.Query(struct { Position, Radius })) !void {
+fn collisionDetectionSystem(query: sparze.Query(struct { Position, Radius })) !void {
     std.debug.print("\n=== Collision Detection (All Pairs) ===\n", .{});
 
-    var query = mut_query;
     var iter = query.combinations();
 
     var collision_count: usize = 0;

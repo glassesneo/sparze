@@ -63,7 +63,7 @@ pub fn SingleQuery(comptime QueryComponent: type) type {
         }
 
         /// Returns a cross-product iterator with another query
-        pub fn crossProduct(self: *Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
+        pub fn crossProduct(self: *const Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
             return SimpleCrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
         }
     };
@@ -229,7 +229,7 @@ pub fn Query(comptime QueryComponents: type) type {
         }
 
         /// Returns an iterator over all unique pairs of entities
-        pub fn combinations(self: *Self) CombinationIterator {
+        pub fn combinations(self: *const Self) CombinationIterator {
             return CombinationIterator{
                 .query = self,
             };
@@ -237,7 +237,7 @@ pub fn Query(comptime QueryComponents: type) type {
 
         pub const Iterator = struct {
             index: usize = 0,
-            query: *Query(QueryComponents),
+            query: *const Query(QueryComponents),
 
             pub fn next(self: *Iterator) ?Entity {
                 const index = self.index;
@@ -252,7 +252,7 @@ pub fn Query(comptime QueryComponents: type) type {
         pub const CombinationIterator = struct {
             i: usize = 0,
             j: usize = 1,
-            query: *Query(QueryComponents),
+            query: *const Query(QueryComponents),
 
             pub fn next(self: *CombinationIterator) ?struct { Entity, Entity } {
                 const entities = self.query.entities;
@@ -282,7 +282,7 @@ pub fn Query(comptime QueryComponents: type) type {
         };
 
         /// Returns a cross-product iterator with another query
-        pub fn crossProduct(self: *Self, other: anytype) CrossProductIterator(Self, @TypeOf(other.*)) {
+        pub fn crossProduct(self: *const Self, other: anytype) CrossProductIterator(Self, @TypeOf(other.*)) {
             return CrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
         }
     };
@@ -314,12 +314,12 @@ pub fn CrossProductIterator(comptime Query1: type, comptime Query2: type) type {
     return struct {
         const Self = @This();
 
-        query1: *Query1,
-        query2: *Query2,
+        query1: *const Query1,
+        query2: *const Query2,
         i: usize = 0,
         j: usize = 0,
 
-        pub fn init(query1: *Query1, query2: *Query2) Self {
+        pub fn init(query1: *const Query1, query2: *const Query2) Self {
             return .{
                 .query1 = query1,
                 .query2 = query2,
@@ -373,12 +373,12 @@ pub fn SimpleCrossProductIterator(comptime Query1: type, comptime Query2: type) 
     return struct {
         const Self = @This();
 
-        query1: *Query1,
-        query2: *Query2,
+        query1: *const Query1,
+        query2: *const Query2,
         i: usize = 0,
         j: usize = 0,
 
-        pub fn init(query1: *Query1, query2: *Query2) Self {
+        pub fn init(query1: *const Query1, query2: *const Query2) Self {
             return .{
                 .query1 = query1,
                 .query2 = query2,
@@ -509,7 +509,7 @@ pub fn Group(comptime GroupComponents: type) type {
         }
 
         /// Returns a cross-product iterator with another query
-        pub fn crossProduct(self: *Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
+        pub fn crossProduct(self: *const Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
             return SimpleCrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
         }
     };
@@ -531,7 +531,7 @@ pub fn SingleTag(comptime TagComponent: type) type {
         }
 
         /// Returns a cross-product iterator with another query
-        pub fn crossProduct(self: *Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
+        pub fn crossProduct(self: *const Self, other: anytype) SimpleCrossProductIterator(Self, @TypeOf(other.*)) {
             return SimpleCrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
         }
     };
@@ -675,7 +675,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
         }
 
         /// Returns a cross-product iterator with another query
-        pub fn crossProduct(self: *Self, other: anytype) CrossProductIterator(Self, @TypeOf(other.*)) {
+        pub fn crossProduct(self: *const Self, other: anytype) CrossProductIterator(Self, @TypeOf(other.*)) {
             return CrossProductIterator(Self, @TypeOf(other.*)).init(self, other);
         }
     };
