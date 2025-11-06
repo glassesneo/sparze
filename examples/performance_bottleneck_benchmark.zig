@@ -56,6 +56,10 @@ pub fn main() !void {
             var world = World.init(allocator);
             defer world.deinit();
 
+            // Reserve capacity for entities to avoid reallocation
+            try world.getSparseSetPtrMut(Position).reserve(entity_count);
+            try world.getSparseSetPtrMut(Radius).reserve(entity_count);
+
             // Create entities with components
             var i: usize = 0;
             while (i < entity_count) : (i += 1) {
@@ -112,6 +116,12 @@ pub fn main() !void {
         for (scenarios) |scenario| {
             var world = World.init(allocator);
             defer world.deinit();
+
+            // Reserve capacity for projectiles and enemies to avoid reallocation
+            try world.getTagStoragePtr(Projectile).reserve(scenario.projectiles);
+            try world.getTagStoragePtr(Enemy).reserve(scenario.enemies);
+            try world.getSparseSetPtrMut(Position).reserve(scenario.projectiles + scenario.enemies);
+            try world.getSparseSetPtrMut(Radius).reserve(scenario.projectiles + scenario.enemies);
 
             // Create projectile entities
             var i: usize = 0;
@@ -230,3 +240,4 @@ fn printBenchmark(name: []const u8, iterations: usize, elapsed_ns: i128) void {
 
     std.debug.print("{s}: {d:.2}ms total, {d:.3}µs per iteration ({d} iterations)\n", .{ name, elapsed_ms, per_iter_us, iterations });
 }
+

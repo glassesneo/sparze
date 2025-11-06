@@ -66,6 +66,12 @@ fn benchmarkSingleFrameQuery(allocator: std.mem.Allocator) !void {
         var world = World.init(allocator);
         defer world.deinit();
 
+        // Reserve capacity for 10000 entities to avoid reallocation
+        try world.getSparseSetPtrMut(Position).reserve(entity_count);
+        try world.getSparseSetPtrMut(Velocity).reserve(entity_count);
+        try world.getSparseSetPtrMut(Health).reserve(entity_count / 3);
+        try world.getSparseSetPtrMut(Armor).reserve(entity_count / 5);
+
         // Create entities
         var i: usize = 0;
         while (i < entity_count) : (i += 1) {
@@ -496,3 +502,4 @@ fn printBenchmarkResult(name: []const u8, iterations: usize, elapsed_ns: i128) v
 
     std.debug.print("  {s:<30} {d:>10.3}µs per iteration ({d:>6} total iterations, {d:.2}ms)\n", .{ name, per_iter_us, iterations, elapsed_ms });
 }
+

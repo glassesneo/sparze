@@ -68,11 +68,32 @@ pub fn SparseSet(comptime C: type) type {
         }
 
         /// Reserve capacity for the specified number of components to reduce reallocations.
+        /// Also pre-allocates sparse pages to avoid on-demand page allocation overhead.
         /// Useful before bulk inserts (e.g., when loading a scene).
         /// Complexity: O(1) if capacity is already sufficient, otherwise O(n) where n = new capacity.
         pub fn reserve(self: *Self, capacity: usize) !void {
             try self.packed_array.ensureTotalCapacity(self.allocator, capacity);
             try self.components.ensureTotalCapacity(self.allocator, capacity);
+
+            // Pre-allocate sparse pages to avoid allocation spikes during bulk inserts
+            // Calculate required pages: ceiling(capacity / page_size)
+            const required_pages = (capacity + page_size - 1) / page_size;
+            try self.reservePages(required_pages);
+        }
+
+        /// Reserve sparse pages to reduce on-demand page allocation overhead.
+        /// Pre-allocates the specified number of pages (starting from page 0).
+        /// Useful for bulk entity creation scenarios to avoid allocation spikes.
+        /// Complexity: O(page_count) where page_count = number of pages to allocate.
+        pub fn reservePages(self: *Self, page_count: usize) !void {
+            const max_page = @min(page_count, max_pages);
+            for (0..max_page) |page_idx| {
+                if (self.sparse_pages[page_idx] == null) {
+                    const new_page = try self.allocator.create(SparsePage);
+                    new_page.* = SparsePage.init();
+                    self.sparse_pages[page_idx] = new_page;
+                }
+            }
         }
 
         /// Get or create a sparse page for the given entity
@@ -221,7 +242,7 @@ pub fn SparseSet(comptime C: type) type {
             const sparse_index = getIndex(entity);
             const page_idx = sparse_index >> page_shift;
             const slot_idx = sparse_index & page_mask;
-            
+
             const page = self.sparse_pages[page_idx] orelse return;
             const dense_index = page.slots[slot_idx] orelse return;
 
@@ -240,7 +261,7 @@ pub fn SparseSet(comptime C: type) type {
             const sparse_index = getIndex(entity);
             const page_idx = sparse_index >> page_shift;
             const slot_idx = sparse_index & page_mask;
-            
+
             const page = self.sparse_pages[page_idx] orelse return;
             const dense_index = page.slots[slot_idx] orelse return;
 
@@ -535,3 +556,4 @@ test "SparseSet pointer consistency across operations" {
     try std.testing.expect(set.getPtr(entity2) == null);
     try std.testing.expect(set.getPtrMut(entity2) == null);
 }
+

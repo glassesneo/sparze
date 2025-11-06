@@ -1,4 +1,3 @@
-
 name: Zig CI
 
 on:
@@ -37,3 +36,23 @@ jobs:
       - name: Run Examples
         run: |
           zig build run-examples
+      - name: Run Performance Benchmarks
+        run: |
+          echo "=== Running Performance Benchmarks ===" > benchmark_results.txt
+          echo "" >> benchmark_results.txt
+          echo "--- Reserve Benchmark ---" >> benchmark_results.txt
+          zig build run-reserve_benchmark >> benchmark_results.txt 2>&1 || true
+          echo "" >> benchmark_results.txt
+          echo "--- Performance Benchmark ---" >> benchmark_results.txt
+          zig build run-performance_benchmark >> benchmark_results.txt 2>&1 || true
+          echo "" >> benchmark_results.txt
+          echo "--- Performance Bottleneck Benchmark ---" >> benchmark_results.txt
+          zig build run-performance_bottleneck_benchmark >> benchmark_results.txt 2>&1 || true
+          echo "" >> benchmark_results.txt
+          cat benchmark_results.txt
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: benchmark_results.txt
+          retention-days: 30
