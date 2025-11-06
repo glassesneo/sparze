@@ -147,12 +147,17 @@ pub fn SparseSet(comptime C: type) type {
             const slot_idx = sparse_index & page_mask;
 
             // Check if entity already has a component (replace)
-            if (self.hasIndex(entity)) {
-                const page = self.sparse_pages[page_idx].?;
-                const dense_index = page.slots[slot_idx].?;
-                self.components.items[dense_index] = component;
-                // packed_array.items[dense_index] already contains entity, no need to rewrite
-                return;
+            // Optimized: check page/slot directly instead of calling hasIndex()
+            if (self.sparse_pages[page_idx]) |page| {
+                if (page.slots[slot_idx]) |dense_index| {
+                    // Verify entity version matches
+                    if (dense_index < self.packed_array.items.len and
+                        entity == self.packed_array.items[dense_index])
+                    {
+                        self.components.items[dense_index] = component;
+                        return;
+                    }
+                }
             }
 
             // Get or create the page for this entity
@@ -212,13 +217,13 @@ pub fn SparseSet(comptime C: type) type {
 
         /// Move entity to group area (at the beginning of packed array)
         pub fn moveToGroup(self: *Self, entity: Entity) void {
-            if (!self.contains(entity)) return;
-
+            // Optimized: check page/slot directly instead of calling contains()
             const sparse_index = getIndex(entity);
             const page_idx = sparse_index >> page_shift;
             const slot_idx = sparse_index & page_mask;
-            const page = self.sparse_pages[page_idx].?;
-            const dense_index = page.slots[slot_idx].?;
+            
+            const page = self.sparse_pages[page_idx] orelse return;
+            const dense_index = page.slots[slot_idx] orelse return;
 
             // If already in group area, nothing to do
             if (dense_index < self.group_info.size) return;
@@ -231,13 +236,13 @@ pub fn SparseSet(comptime C: type) type {
 
         /// Move entity out of group area
         pub fn moveFromGroup(self: *Self, entity: Entity) void {
-            if (!self.contains(entity)) return;
-
+            // Optimized: check page/slot directly instead of calling contains()
             const sparse_index = getIndex(entity);
             const page_idx = sparse_index >> page_shift;
             const slot_idx = sparse_index & page_mask;
-            const page = self.sparse_pages[page_idx].?;
-            const dense_index = page.slots[slot_idx].?;
+            
+            const page = self.sparse_pages[page_idx] orelse return;
+            const dense_index = page.slots[slot_idx] orelse return;
 
             // If not in group area, nothing to do
             if (dense_index >= self.group_info.size) return;

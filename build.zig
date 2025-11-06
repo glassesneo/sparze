@@ -12,6 +12,7 @@ const examples = [_]Example{
     .{ .name = "multiple_groups" },
     .{ .name = "optional_components" },
     .{ .name = "performance_benchmark" },
+    .{ .name = "performance_bottleneck_benchmark" },
     .{ .name = "tag_components" },
     .{ .name = "query_vs_group_benchmark" },
     .{ .name = "reserve_benchmark" },
