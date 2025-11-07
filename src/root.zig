@@ -33,6 +33,19 @@ pub const createSystemFunction = system_module.createSystemFunction;
 const event_storage_module = @import("core/event_storage.zig");
 pub const EventStorage = event_storage_module.EventStorage;
 
+// Serialization module
+pub const serialization = struct {
+    pub const traits = @import("serialization/traits.zig");
+    pub const format = @import("serialization/format.zig");
+    pub const world = @import("serialization/world.zig");
+
+    // Re-export common serialization functions
+    pub const isPOD = traits.isPOD;
+    pub const hasCustomSerializer = traits.hasCustomSerializer;
+    pub const getSerializer = traits.getSerializer;
+    pub const ComponentSerializer = traits.ComponentSerializer;
+};
+
 test {
     std.testing.refAllDecls(@This());
 }

@@ -692,6 +692,150 @@ fn collisionDetectionSystem(
 
 **Example**: See `examples/cross_product.zig` for a complete implementation demonstrating projectile vs enemy collision detection.
 
+### Serialization and Deserialization
+
+Sparze provides high-performance binary serialization for complete world state persistence. The system supports POD types automatically and allows custom serializers for complex types.
+
+**Core Features**:
+- **Hybrid serialization**: Automatic for POD types, custom serializers for complex types
+- **Type safety**: FNV-1a hash validation prevents type mismatches between save and load
+- **Full reproducibility**: Entities (with versioning), components, resources, and events (read buffer only)
+- **Data integrity**: CRC32 checksums detect file corruption
+- **Performance optimized**: Buffered I/O, minimal allocations, optimized for ECS data structures
+
+**Basic Usage**:
+```zig
+const World = sparze.World(
+    struct { Position, Velocity, Health },
+    struct { DeltaTime, Score },
+    struct { Collision },
+);
+
+var world = World.init(allocator);
+defer world.deinit();
+
+// ... populate world ...
+
+// Serialize to writer
+const file = try std.fs.cwd().createFile("save.bin", .{});
+defer file.close();
+try world.serialize(file.writer());
+
+// Deserialize from reader
+const load_file = try std.fs.cwd().openFile("save.bin", .{});
+defer load_file.close();
+try world.deserialize(load_file.reader());
+
+// Note: Groups must be recreated after deserialization
+try world.createGroup(struct { Position, Velocity });
+```
+
+**Custom Serializers**:
+
+For types that aren't POD (contain pointers, slices, or dynamic allocations), provide a custom `Serializer`:
+
+```zig
+const Name = struct {
+    buffer: [64]u8 = undefined,
+    len: usize = 0,
+
+    // Custom serializer - only writes actual name length, not full buffer
+    pub const Serializer = struct {
+        pub fn serialize(name: Name, writer: anytype) !void {
+            try writer.writeInt(u16, @intCast(name.len), .little);
+            try writer.writeAll(name.buffer[0..name.len]);
+        }
+
+        pub fn deserialize(reader: anytype) !Name {
+            const len = try reader.readInt(u16, .little);
+            var name = Name{};
+            name.len = len;
+            try reader.readNoEof(name.buffer[0..len]);
+            return name;
+        }
+    };
+};
+```
+
+**POD Detection**:
+
+The serialization system automatically detects POD (Plain Old Data) types:
+- Primitive types: `int`, `float`, `bool`, `enum`, `void`
+- Arrays of POD types
+- Structs where all fields are POD
+- **NOT POD**: pointers, slices, optionals, unions, error unions
+
+Use `sparze.serialization.isPOD(T)` to check if a type is POD at compile time.
+
+**What Gets Serialized**:
+- **Entities**: Complete entity registry including version numbers and free list state
+- **Components**: All component data (regular and tag components)
+  - SparseSet: Sparse pages, dense arrays, group boundaries
+  - TagStorage: Bit sets and packed entity arrays
+- **Resources**: All initialized resource values
+- **Events**: Read buffer only (events from previous frame)
+
+**What Does NOT Get Serialized**:
+- **Groups**: Must call `createGroup()` after deserialization
+- **Command buffers**: Cleared after serialization
+- **Event write buffer**: Only read buffer is serialized
+
+**Binary Format**:
+```
+[Header]
+- Magic number: "SPZE"
+- Format version
+- Type metadata hash (validates component/resource/event types match)
+- Entity/component/resource/event counts
+
+[EntityRegistry] - Full state including free list
+[Components] - Per-type: metadata, sparse pages, dense arrays, component data
+[Tags] - Per-type: metadata, bit sets, entity arrays
+[Resources] - Per-type: metadata, resource data
+[Events] - Per-type: metadata, read buffer only
+[CRC32 Checksum] - Data integrity validation
+```
+
+**API Reference**:
+
+```zig
+// World methods
+pub fn serialize(self: *const Self, writer: anytype) !void
+pub fn deserialize(self: *Self, reader: anytype) !void
+pub fn serializeToFile(self: *const Self, path: []const u8) !void  // Convenience
+pub fn deserializeFromFile(self: *Self, path: []const u8) !void    // Convenience
+
+// Serialization module (sparze.serialization)
+pub fn isPOD(comptime T: type) bool
+pub fn hasCustomSerializer(comptime T: type) bool
+pub fn getSerializer(comptime T: type) type
+pub fn ComponentSerializer(comptime T: type) type  // Trait interface
+```
+
+**Error Handling**:
+
+Deserialization validates type compatibility and data integrity:
+- `error.InvalidMagicNumber`: Not a valid Sparze save file
+- `error.UnsupportedFormatVersion`: Format version mismatch
+- `error.TypeMismatch`: Component/resource/event types don't match
+- `error.ComponentCountMismatch`: Different number of component types
+- `error.ChecksumMismatch`: File corruption detected
+
+**Best Practices**:
+1. **Always recreate groups** after deserialization - they are not persisted
+2. **Use custom serializers** for types with dynamic allocations or pointers
+3. **Version your save format** if you need backward compatibility (use custom wrapper)
+4. **Validate deserialization** - check return values and handle errors gracefully
+5. **Consider compression** - wrap the writer/reader in a compression stream for smaller files
+
+**Performance Characteristics**:
+- Serialization: O(n) where n = number of entities × components
+- Deserialization: O(n) with same characteristics
+- Memory: Buffered I/O (64KB buffers) minimizes syscalls
+- Type validation: O(1) hash comparison at load time
+
+**Example**: See `examples/serialization.zig` for a complete demonstration including custom serializers, resources, and validation.
+
 ## Query Filter Comparison
 
 | Filter Type | Component Types | Modifiers | Setup Required | Performance | Use Case |

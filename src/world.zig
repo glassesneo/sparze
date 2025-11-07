@@ -719,6 +719,61 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             const system = comptime system_module.createSystemFunction(Self, system_fn);
             try system(self);
         }
+
+        /// Serialize the World to a writer
+        /// Writes complete world state including entities, components, resources, and events (read buffer only)
+        ///
+        /// Example:
+        /// ```zig
+        /// const file = try std.fs.cwd().createFile("save.spze", .{});
+        /// defer file.close();
+        /// try world.serialize(file.writer());
+        /// ```
+        pub fn serialize(self: *const Self, writer: anytype) !void {
+            const world_ser = @import("serialization/world.zig");
+            try world_ser.serialize(self, Components, Resources, Events, writer);
+        }
+
+        /// Deserialize the World from a reader
+        /// Loads complete world state including entities, components, resources, and events
+        /// Validates type metadata hash to ensure compatibility
+        ///
+        /// Note: Groups must be recreated after deserialization via createGroup()
+        ///
+        /// Example:
+        /// ```zig
+        /// const file = try std.fs.cwd().openFile("save.spze", .{});
+        /// defer file.close();
+        /// try world.deserialize(file.reader());
+        /// ```
+        pub fn deserialize(self: *Self, reader: anytype) !void {
+            const world_ser = @import("serialization/world.zig");
+            try world_ser.deserialize(self, Components, Resources, Events, reader);
+        }
+
+        /// Serialize the World to a file
+        /// Convenience method that handles file I/O
+        ///
+        /// Example:
+        /// ```zig
+        /// try world.serializeToFile("save.spze");
+        /// ```
+        pub fn serializeToFile(self: *const Self, path: []const u8) !void {
+            const world_ser = @import("serialization/world.zig");
+            try world_ser.serializeToFile(self, Components, Resources, Events, path);
+        }
+
+        /// Deserialize the World from a file
+        /// Convenience method that handles file I/O
+        ///
+        /// Example:
+        /// ```zig
+        /// try world.deserializeFromFile("save.spze");
+        /// ```
+        pub fn deserializeFromFile(self: *Self, path: []const u8) !void {
+            const world_ser = @import("serialization/world.zig");
+            try world_ser.deserializeFromFile(self, Components, Resources, Events, path);
+        }
     };
 }
 

@@ -17,6 +17,7 @@ const examples = [_]Example{
     .{ .name = "query_vs_group_benchmark" },
     .{ .name = "reserve_benchmark" },
     .{ .name = "resources" },
+    .{ .name = "serialization" },
 };
 
 const Example = struct {
