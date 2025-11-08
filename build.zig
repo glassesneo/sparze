@@ -18,6 +18,7 @@ const examples = [_]Example{
     .{ .name = "reserve_benchmark" },
     .{ .name = "resources" },
     .{ .name = "serialization" },
+    .{ .name = "commands_serialization" },
 };
 
 const Example = struct {

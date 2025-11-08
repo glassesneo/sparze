@@ -632,6 +632,40 @@ pub fn Commands(comptime World: type) type {
         pub fn destroyEntity(self: Self, entity: Entity) !void {
             try self.command_buffer.recordDestroyEntity(entity);
         }
+
+        /// Serialize World state to writer
+        ///
+        /// Note: Pending commands in the command buffer are NOT serialized.
+        /// Best practice: serialize between frames (after endFrame(), before beginFrame()).
+        /// Groups must be recreated after deserialization.
+        pub fn serialize(self: Self, writer: anytype) !void {
+            return self.world.serialize(writer);
+        }
+
+        /// Deserialize World state from reader
+        ///
+        /// Note: This replaces the current World state. Any pending commands are cleared.
+        /// Groups must be recreated after deserialization using world.createGroup().
+        pub fn deserialize(self: Self, reader: anytype) !void {
+            return self.world.deserialize(reader);
+        }
+
+        /// Serialize World state to file (convenience wrapper)
+        ///
+        /// Note: Pending commands in the command buffer are NOT serialized.
+        /// Best practice: serialize between frames (after endFrame(), before beginFrame()).
+        /// Groups must be recreated after deserialization.
+        pub fn serializeToFile(self: Self, path: []const u8) !void {
+            return self.world.serializeToFile(path);
+        }
+
+        /// Deserialize World state from file (convenience wrapper)
+        ///
+        /// Note: This replaces the current World state. Any pending commands are cleared.
+        /// Groups must be recreated after deserialization using world.createGroup().
+        pub fn deserializeFromFile(self: Self, path: []const u8) !void {
+            return self.world.deserializeFromFile(path);
+        }
     };
 }
 
