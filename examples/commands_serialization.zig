@@ -45,6 +45,9 @@ const World = sparze.World(
     struct {},
 );
 
+// Define Group for optimization (not serialized, must be recreated after load)
+const MovementGroup = struct { Position, Health };
+
 /// Gameplay system that modifies game state
 fn gameplaySystem(
     positions: sparze.SingleQuery(Position),
@@ -103,7 +106,35 @@ fn spawnEnemiesSystem(commands: anytype) !void {
     }
 }
 
-/// Print game state
+/// Setup group system (called after world creation)
+fn setupGroupSystem(world: *World) !void {
+    try world.createGroup(MovementGroup);
+    std.debug.print("✅ MovementGroup created for optimized iteration\n", .{});
+}
+
+/// Group-based movement system (fast iteration)
+fn groupMovementSystem(group: sparze.Group(MovementGroup)) !void {
+    // Optimize: group provides direct array access, no per-entity queries
+    const positions = group.getMutArrayOf(Position);
+    const healths = group.getArrayOf(Health);
+
+    // Move all entities with Position+Health efficiently
+    for (positions, healths) |*pos, health| {
+        // Only move entities with health > 0
+        if (health.current > 0) {
+            pos.x += 2.0; // Smaller movement for group demo
+            pos.y += 1.0;
+        }
+    }
+}
+
+/// Recreate group after deserialization
+fn recreateGroupSystem(world: *World) !void {
+    try world.createGroup(MovementGroup);
+    std.debug.print("✅ MovementGroup recreated after deserialization\n", .{});
+}
+
+/// Print game state (enhanced with group info)
 fn printGameState(world: *World) !void {
     const positions = world.getSparseSetPtr(Position);
     const healths = world.getSparseSetPtr(Health);
@@ -122,6 +153,22 @@ fn printGameState(world: *World) !void {
     std.debug.print("Inventories: {d}\n", .{inventories.packed_array.items.len});
     std.debug.print("Players: {d}\n", .{players.packed_array.items.len});
     std.debug.print("Enemies: {d}\n", .{enemies.packed_array.items.len});
+
+    // Show group membership
+    if (world.getGroup(MovementGroup) != null) {
+        const group_entities = world.getGroupEntities(MovementGroup).?;
+        const group_positions = world.getGroupComponents(MovementGroup, Position).?;
+        const group_healths = world.getGroupComponents(MovementGroup, Health).?;
+        std.debug.print("MovementGroup: {d} entities (Position+Health)\n", .{group_entities.len});
+        if (group_positions.len > 0) {
+            std.debug.print("  - First group position: ({d:.1}, {d:.1})\n", .{ group_positions[0].x, group_positions[0].y });
+        }
+        if (group_healths.len > 0) {
+            std.debug.print("  - First group health: {d}/{d}\n", .{ group_healths[0].current, group_healths[0].max });
+        }
+    } else {
+        std.debug.print("MovementGroup: Not created\n", .{});
+    }
 
     // Print first position if exists
     if (positions.packed_array.items.len > 0) {
@@ -164,6 +211,9 @@ pub fn main() !void {
     try world.runSystem(spawnEnemiesSystem);
     try world.endFrame(); // Flush commands
 
+    // Setup group for optimized iteration
+    try setupGroupSystem(&world);
+
     // Give player some items
     {
         const inventories = world.getSparseSetPtrMut(Inventory);
@@ -178,11 +228,11 @@ pub fn main() !void {
 
     try printGameState(&world);
 
-    // Phase 2: Run gameplay
-    std.debug.print("\n⚔️  Phase 2: Run Gameplay\n", .{});
-    std.debug.print("-------------------------\n", .{});
+    // Phase 2: Run gameplay (using Group for optimization)
+    std.debug.print("\n⚔️  Phase 2: Run Gameplay (with Group)\n", .{});
+    std.debug.print("------------------------------------\n", .{});
 
-    try world.runSystem(gameplaySystem);
+    try world.runSystem(groupMovementSystem);
     try world.endFrame();
 
     try printGameState(&world);
@@ -202,11 +252,11 @@ pub fn main() !void {
     try world.endFrame();
 
     // Phase 4: Continue gameplay (more modifications)
-    std.debug.print("\n⚔️  Phase 4: Continue Gameplay\n", .{});
-    std.debug.print("-------------------------\n", .{});
+    std.debug.print("\n⚔️  Phase 4: Continue Gameplay (with Group)\n", .{});
+    std.debug.print("---------------------------------------\n", .{});
 
-    try world.runSystem(gameplaySystem);
-    try world.runSystem(gameplaySystem); // Run twice to make significant changes
+    try world.runSystem(groupMovementSystem);
+    try world.runSystem(groupMovementSystem); // Run twice to make significant changes
     try world.endFrame();
 
     // Modify score significantly
@@ -231,6 +281,9 @@ pub fn main() !void {
 
     try world.runSystem(LoadSystem.load);
     try world.endFrame();
+
+    // Recreate group after deserialization (groups are not serialized)
+    try recreateGroupSystem(&world);
 
     try printGameState(&world);
 

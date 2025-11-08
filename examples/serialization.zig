@@ -140,6 +140,10 @@ pub fn main() !void {
 
     try printWorldState(&world, "Original World State");
 
+    // Create and validate a Group for hot-path iteration (not serialized)
+    const MovementGroup = struct { Position, Velocity };
+    try world.createGroup(MovementGroup);
+
     // Serialize to file
     const save_path = "examples/world_save.spze";
     std.debug.print("\n💾 Serializing world to '{s}'...\n", .{save_path});
@@ -169,10 +173,20 @@ pub fn main() !void {
     try world.deserializeFromFile(save_path);
     std.debug.print("✅ Loaded!\n", .{});
 
+    // After deserialization, groups must be recreated. Recreate MovementGroup.
+    try world.createGroup(MovementGroup);
+    std.debug.print("ℹ️ Recreated MovementGroup after deserialization.\n", .{});
+
     try printWorldState(&world, "Restored World State");
 
     // Verify data integrity
     std.debug.print("\n🔍 Verifying data integrity...\n", .{});
+
+    // Additionally verify that the MovementGroup was repopulated correctly
+    const movement_entities = world.getGroupEntities(MovementGroup).?;
+    const movement_positions = world.getGroupComponents(MovementGroup, Position).?;
+    const movement_velocities = world.getGroupComponents(MovementGroup, Velocity).?;
+    std.debug.print("MovementGroup entities: {d}, positions: {d}, velocities: {d}\n", .{ movement_entities.len, movement_positions.len, movement_velocities.len });
 
     const restored_score = world.getResource(Score);
     if (restored_score.points == 1000 and restored_score.combo == 5) {
