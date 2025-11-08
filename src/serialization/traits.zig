@@ -41,6 +41,17 @@ pub fn hasCustomSerializer(comptime T: type) bool {
     return @hasDecl(T, "Serializer");
 }
 
+/// Check if a type should be serialized based on optional 'serialized' declaration
+/// Types with `serialized: false` will be excluded from serialization
+/// Types without the declaration or with `serialized: true` will be included
+pub fn shouldSerialize(comptime T: type) bool {
+    if (@hasDecl(T, "serialized")) {
+        return T.serialized;
+    }
+    // Default: include in serialization if no declaration present
+    return true;
+}
+
 /// Get the serializer for a type (custom or default POD)
 pub fn getSerializer(comptime T: type) type {
     if (hasCustomSerializer(T)) {
@@ -115,4 +126,34 @@ test "hasCustomSerializer" {
 
     try std.testing.expect(!hasCustomSerializer(Simple));
     try std.testing.expect(hasCustomSerializer(WithSerializer));
+}
+
+test "shouldSerialize default behavior" {
+    const NormalType = struct { x: f32, y: i32 };
+
+    try std.testing.expect(shouldSerialize(NormalType));
+}
+
+test "shouldSerialize opt-out behavior" {
+    const ExcludedType = struct {
+        x: f32,
+        pub const serialized = false;
+    };
+
+    try std.testing.expect(!shouldSerialize(ExcludedType));
+}
+
+test "shouldSerialize with custom serializer" {
+    const ExcludedWithSerializer = struct {
+        x: f32,
+        pub const serialized = false;
+        pub const Serializer = struct {
+            pub fn serialize(_: @This(), _: anytype) !void {}
+            pub fn deserialize(_: anytype) !@This() {
+                return .{ .x = 0 };
+            }
+        };
+    };
+
+    try std.testing.expect(!shouldSerialize(ExcludedWithSerializer));
 }

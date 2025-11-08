@@ -9,6 +9,7 @@ const traits = @import("traits.zig");
 
 const component_storage_module = @import("../core/component_storage.zig");
 const isTagComponent = component_storage_module.isTagComponent;
+const ComponentStorage = component_storage_module.ComponentStorage;
 
 /// Serialize World to writer
 pub fn serialize(
@@ -50,6 +51,12 @@ pub fn serialize(
     // Serialize component pools
     inline for (component_fields, 0..) |field, i| {
         const Component = field.type;
+
+        // Skip components that opt out of serialization at comptime
+        if (comptime !traits.shouldSerialize(Component)) {
+            continue;
+        }
+
         const component_id: u16 = @intCast(i);
         const type_name_hash = format.hashTypeName(Component);
 
@@ -68,6 +75,12 @@ pub fn serialize(
     // Serialize resources
     inline for (resource_fields, 0..) |field, i| {
         const Resource = field.type;
+
+        // Skip resources that opt out of serialization at comptime
+        if (comptime !traits.shouldSerialize(Resource)) {
+            continue;
+        }
+
         const resource_id: u16 = @intCast(i);
         const type_name_hash = format.hashTypeName(Resource);
 
@@ -86,6 +99,12 @@ pub fn serialize(
     // Serialize events (read buffer only)
     inline for (event_fields, 0..) |field, i| {
         const Event = field.type;
+
+        // Skip events that opt out of serialization at comptime
+        if (comptime !traits.shouldSerialize(Event)) {
+            continue;
+        }
+
         const event_id: u16 = @intCast(i);
         const type_name_hash = format.hashTypeName(Event);
 
@@ -156,6 +175,14 @@ pub fn deserialize(
     inline for (component_fields, 0..) |field, i| {
         const Component = field.type;
 
+        // Skip components that opt out of deserialization at comptime
+        if (comptime !traits.shouldSerialize(Component)) {
+            // Initialize to default/empty state for excluded components
+            world.component_pool[i].deinit();
+            world.component_pool[i] = ComponentStorage(Component).init(world.allocator);
+            continue;
+        }
+
         // Read component metadata
         const component_id = try r.readInt(u16, .little);
         if (component_id != i) return error.ComponentIdMismatch;
@@ -189,6 +216,13 @@ pub fn deserialize(
     inline for (resource_fields, 0..) |field, i| {
         const Resource = field.type;
 
+        // Skip resources that opt out of deserialization at comptime
+        if (comptime !traits.shouldSerialize(Resource)) {
+            // Resources that opt out of serialization are left in their current state
+            // or can be re-initialized by the user as needed
+            continue;
+        }
+
         // Read resource metadata
         const resource_id = try r.readInt(u16, .little);
         if (resource_id != i) return error.ResourceIdMismatch;
@@ -213,6 +247,14 @@ pub fn deserialize(
     // Deserialize events (read buffer only)
     inline for (event_fields, 0..) |field, i| {
         const Event = field.type;
+
+        // Skip events that opt out of deserialization at comptime
+        if (comptime !traits.shouldSerialize(Event)) {
+            // Clear both buffers for excluded events
+            world.event_pool[i].read_buffer.clearRetainingCapacity();
+            world.event_pool[i].write_buffer.clearRetainingCapacity();
+            continue;
+        }
 
         // Read event metadata
         const event_id = try r.readInt(u16, .little);

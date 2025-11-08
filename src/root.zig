@@ -44,6 +44,7 @@ pub const serialization = struct {
     pub const hasCustomSerializer = traits.hasCustomSerializer;
     pub const getSerializer = traits.getSerializer;
     pub const ComponentSerializer = traits.ComponentSerializer;
+    pub const shouldSerialize = traits.shouldSerialize;
 };
 
 test {
