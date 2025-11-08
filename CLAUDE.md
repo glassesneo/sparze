@@ -703,7 +703,7 @@ Sparze provides high-performance binary serialization for complete world state p
 - **Data integrity**: CRC32 checksums detect file corruption
 - **Performance optimized**: Buffered I/O, minimal allocations, optimized for ECS data structures
 
-**Basic Usage**:
+**Basic Usage (World API)**:
 ```zig
 const World = sparze.World(
     struct { Position, Velocity, Health },
@@ -729,6 +729,40 @@ try world.deserialize(load_file.reader());
 // Note: Groups must be recreated after deserialization
 try world.createGroup(struct { Position, Velocity });
 ```
+
+**Using Commands API**:
+
+For architectures where systems only access Commands (not World directly), use the Commands serialization API:
+
+```zig
+// Save game system - uses Commands only
+fn saveGameSystem(commands: anytype) !void {
+    try commands.serializeToFile("save.spze");
+}
+
+// Load game system - uses Commands only
+fn loadGameSystem(commands: anytype) !void {
+    try commands.deserializeFromFile("save.spze");
+}
+
+// Run in game loop
+try world.runSystem(saveGameSystem);
+try world.endFrame();
+
+// Later...
+try world.runSystem(loadGameSystem);
+try world.endFrame();
+```
+
+Commands serialization methods:
+- `commands.serialize(writer)` - Serialize to writer
+- `commands.deserialize(reader)` - Deserialize from reader
+- `commands.serializeToFile(path)` - Convenience: serialize to file
+- `commands.deserializeFromFile(path)` - Convenience: deserialize from file
+
+**Note**: Pending commands in the buffer are NOT serialized. Best practice is to serialize between frames (after `endFrame()`, before `beginFrame()`).
+
+**Example**: See `examples/commands_serialization.zig` for a complete game-style example using only Commands API.
 
 **Custom Serializers**:
 

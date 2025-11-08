@@ -31,6 +31,14 @@ A high-performance Entity Component System (ECS) library for Zig with compile-ti
   - Support for multiple query parameters per system
   - Optional components/tags using `?Component` or `?Tag` syntax
 
+- **World State Persistence**
+  - Binary serialization for complete world state (entities, components, resources, events)
+  - Hybrid approach: automatic POD serialization, custom serializers for complex types
+  - Type-safe with FNV-1a hash validation
+  - CRC32 checksums for data integrity
+  - High-performance buffered I/O (64KB buffers)
+  - Available through both World and Commands APIs
+
 ## Quick Start
 
 ### Installation
@@ -475,6 +483,129 @@ fn enemyProcessingSystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Active }
 - AI systems with base behavior and optional enhancements (e.g., Enemy with optional Boss or Elite behaviors)
 - Status systems that display all available information (e.g., entity info with optional Health, Armor, Status effects)
 
+### Serialization and Persistence
+
+Sparze provides high-performance binary serialization for complete world state persistence. The system supports POD types automatically and allows custom serializers for complex types.
+
+#### World API
+
+```zig
+const std = @import("std");
+const sparze = @import("sparze");
+
+const Position = struct { x: f32, y: f32 };
+const Velocity = struct { x: f32, y: f32 };
+const Score = struct { points: i32 };
+
+const World = sparze.World(
+    struct { Position, Velocity },
+    struct { Score },
+    struct {},
+);
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var world = World.init(allocator);
+    defer world.deinit();
+
+    // ... populate world with entities and components ...
+    try world.setResource(Score, .{ .points = 100 });
+
+    // Save world state
+    const save_file = try std.fs.cwd().createFile("save.spze", .{});
+    defer save_file.close();
+    try world.serialize(save_file.writer());
+
+    // Load world state
+    const load_file = try std.fs.cwd().openFile("save.spze", .{});
+    defer load_file.close();
+    try world.deserialize(load_file.reader());
+
+    // Note: Groups must be recreated after deserialization
+    try world.createGroup(struct { Position, Velocity });
+}
+```
+
+#### Commands API
+
+For architectures where systems only access Commands (not World directly), use the Commands serialization API:
+
+```zig
+// Save system - uses Commands only
+fn saveGameSystem(commands: anytype) !void {
+    try commands.serializeToFile("save.spze");
+}
+
+// Load system - uses Commands only
+fn loadGameSystem(commands: anytype) !void {
+    try commands.deserializeFromFile("save.spze");
+}
+
+// Run in game loop
+try world.runSystem(saveGameSystem);
+try world.endFrame();
+
+// Later...
+try world.runSystem(loadGameSystem);
+try world.endFrame();
+```
+
+**Serialization API**:
+- `world.serialize(writer)` / `commands.serialize(writer)` - Serialize to writer
+- `world.deserialize(reader)` / `commands.deserialize(reader)` - Deserialize from reader
+- `world.serializeToFile(path)` / `commands.serializeToFile(path)` - Convenience: save to file
+- `world.deserializeFromFile(path)` / `commands.deserializeFromFile(path)` - Convenience: load from file
+
+#### Custom Serializers
+
+For types that aren't POD (contain pointers, slices, or dynamic allocations), provide a custom `Serializer`:
+
+```zig
+const Name = struct {
+    buffer: [64]u8 = undefined,
+    len: usize = 0,
+
+    // Custom serializer - only writes actual name length
+    pub const Serializer = struct {
+        pub fn serialize(name: Name, writer: anytype) !void {
+            try writer.writeInt(u16, @intCast(name.len), .little);
+            try writer.writeAll(name.buffer[0..name.len]);
+        }
+
+        pub fn deserialize(reader: anytype) !Name {
+            const len = try reader.readInt(u16, .little);
+            var name = Name{};
+            name.len = len;
+            try reader.readNoEof(name.buffer[0..len]);
+            return name;
+        }
+    };
+};
+```
+
+**What Gets Serialized**:
+- Entities (complete entity registry including version numbers and free list state)
+- Components (all component data for regular and tag components)
+- Resources (all initialized resource values)
+- Events (read buffer only - events from previous frame)
+
+**What Does NOT Get Serialized**:
+- Groups (must call `createGroup()` after deserialization)
+- Command buffers (cleared after serialization)
+- Event write buffer (only read buffer is serialized)
+
+**Features**:
+- **Type safety**: FNV-1a hash validation ensures loaded data matches expected types
+- **Data integrity**: CRC32 checksums detect file corruption
+- **Performance**: Buffered I/O (64KB buffers) minimizes syscalls
+- **Hybrid approach**: Automatic POD serialization, custom serializers for complex types
+- **Binary format**: `.spze` files (Sparze serialization format)
+
+See `examples/serialization.zig` and `examples/commands_serialization.zig` for complete examples.
+
 ## Core Concepts
 
 **Entities**: Lightweight 32-bit identifiers (16-bit index + 16-bit version)
@@ -514,6 +645,8 @@ Explore the `examples/` directory for comprehensive demonstrations:
 - `optional_components.zig` - Optional components and tags demonstration
 - `plugin_architecture.zig` - Plugin-style architecture
 - `resources.zig` - Global resources and state management
+- `serialization.zig` - World state persistence with custom serializers
+- `commands_serialization.zig` - Save/load using Commands API only
 - `system_operations.zig` - System patterns and multi-query examples
 - `tag_components.zig` - Tag component usage and patterns
 
@@ -534,6 +667,8 @@ zig build run-multiple_groups
 zig build run-optional_components
 zig build run-plugin_architecture
 zig build run-resources
+zig build run-serialization
+zig build run-commands_serialization
 zig build run-system_operations
 zig build run-tag_components
 ```
