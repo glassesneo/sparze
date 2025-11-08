@@ -759,8 +759,9 @@ Commands serialization methods:
 - `commands.deserialize(reader)` - Deserialize from reader
 - `commands.serializeToFile(path)` - Convenience: serialize to file
 - `commands.deserializeFromFile(path)` - Convenience: deserialize from file
+- `commands.createGroup(GroupComponents)` - Create optimized group (call after deserialization)
 
-**Note**: Pending commands in the buffer are NOT serialized. Best practice is to serialize between frames (after `endFrame()`, before `beginFrame()`).
+**Note**: Pending commands in the buffer are NOT serialized. Best practice is to serialize between frames (after `endFrame()`, before `beginFrame()`). Groups must be recreated after deserialization using `commands.createGroup()`.
 
 **Example**: See `examples/commands_serialization.zig` for a complete game-style example using only Commands API.
 

@@ -107,8 +107,8 @@ fn spawnEnemiesSystem(commands: anytype) !void {
 }
 
 /// Setup group system (called after world creation)
-fn setupGroupSystem(world: *World) !void {
-    try world.createGroup(MovementGroup);
+fn setupGroupSystem(commands: anytype) !void {
+    try commands.createGroup(MovementGroup);
     std.debug.print("✅ MovementGroup created for optimized iteration\n", .{});
 }
 
@@ -129,8 +129,8 @@ fn groupMovementSystem(group: sparze.Group(MovementGroup)) !void {
 }
 
 /// Recreate group after deserialization
-fn recreateGroupSystem(world: *World) !void {
-    try world.createGroup(MovementGroup);
+fn recreateGroupSystem(commands: anytype) !void {
+    try commands.createGroup(MovementGroup);
     std.debug.print("✅ MovementGroup recreated after deserialization\n", .{});
 }
 
@@ -212,7 +212,8 @@ pub fn main() !void {
     try world.endFrame(); // Flush commands
 
     // Setup group for optimized iteration
-    try setupGroupSystem(&world);
+    try world.runSystem(setupGroupSystem);
+    try world.endFrame(); // Flush commands
 
     // Give player some items
     {
@@ -283,7 +284,8 @@ pub fn main() !void {
     try world.endFrame();
 
     // Recreate group after deserialization (groups are not serialized)
-    try recreateGroupSystem(&world);
+    try world.runSystem(recreateGroupSystem);
+    try world.endFrame();
 
     try printGameState(&world);
 
