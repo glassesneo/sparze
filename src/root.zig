@@ -48,6 +48,8 @@ pub const serialization = struct {
 };
 
 test {
+    _ = @import("test_filter.zig");
+    _ = @import("test_system.zig");
     std.testing.refAllDecls(@This());
 }
 

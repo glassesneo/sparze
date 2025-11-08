@@ -21,6 +21,7 @@ const getVersion = entity_module.getVersion;
 /// Memory layout:
 /// - DynamicBitSet: One bit per entity index for fast contains() checks
 /// - ArrayList(Entity): Packed array of entities with this tag for iteration
+/// - ArrayList(u32): Reverse index mapping entity index -> packed array index for O(1) removal
 ///
 /// Use cases:
 /// - Marker components (e.g., `const Player = struct {};`)
@@ -29,7 +30,7 @@ const getVersion = entity_module.getVersion;
 ///
 /// Complexity:
 /// - set(): O(1) amortized
-/// - unset(): O(n) where n = number of tagged entities
+/// - unset(): O(1)
 /// - contains(): O(1)
 /// - iteration: O(n) where n = number of tagged entities
 pub fn TagStorage(comptime C: type) type {
@@ -40,6 +41,7 @@ pub fn TagStorage(comptime C: type) type {
         allocator: Allocator,
         packed_array: ArrayList(Entity),
         tag_bit_set: DynamicBitSet,
+        sparse_to_dense: ArrayList(u32), // Reverse index: entity index -> packed array index
 
         /// Initialize a new TagStorage with the given allocator.
         /// The storage starts empty with no allocated capacity.
@@ -55,19 +57,21 @@ pub fn TagStorage(comptime C: type) type {
                 .allocator = allocator,
                 .packed_array = .{},
                 .tag_bit_set = .{},
+                .sparse_to_dense = .{},
             };
         }
 
-        /// Deinitialize the TagStorage, freeing internal buffers.
+        /// Deinitialize TagStorage, freeing internal buffers.
         /// All entities and bit set data will be deallocated.
         pub fn deinit(self: *Self) void {
             self.packed_array.deinit(self.allocator);
             self.tag_bit_set.deinit(self.allocator);
+            self.sparse_to_dense.deinit(self.allocator);
         }
 
         /// Reserve capacity for the specified number of tags to reduce reallocations.
         /// Useful before bulk inserts (e.g., when loading a scene).
-        /// Only affects the packed entity array; bit set grows dynamically.
+        /// Reserves both packed entity array and reverse index.
         ///
         /// Complexity: O(1) if capacity is already sufficient, otherwise O(n) where n = new capacity.
         ///
@@ -80,6 +84,7 @@ pub fn TagStorage(comptime C: type) type {
         /// ```
         pub fn reserve(self: *Self, capacity: usize) !void {
             try self.packed_array.ensureTotalCapacity(self.allocator, capacity);
+            try self.sparse_to_dense.ensureTotalCapacity(self.allocator, capacity);
         }
 
         fn castEntityIndex(entity: Entity) usize {
@@ -104,17 +109,33 @@ pub fn TagStorage(comptime C: type) type {
                 try self.tag_bit_set.resize(self.allocator, index + 1, false);
             }
 
+            // Ensure reverse index capacity matches bit set capacity
+            if (index >= self.sparse_to_dense.capacity) {
+                try self.sparse_to_dense.ensureTotalCapacity(self.allocator, index + 1);
+                // Initialize new slots to max u32 (sentinel for unset)
+                const old_len = self.sparse_to_dense.items.len;
+                try self.sparse_to_dense.resize(self.allocator, index + 1);
+                @memset(self.sparse_to_dense.items[old_len..], std.math.maxInt(u32));
+            } else if (index >= self.sparse_to_dense.items.len) {
+                // Capacity sufficient but length too short; extend length to index+1
+                const old_len = self.sparse_to_dense.items.len;
+                try self.sparse_to_dense.resize(self.allocator, index + 1);
+                @memset(self.sparse_to_dense.items[old_len..], std.math.maxInt(u32));
+            }
+
             // Check if already set
             if (self.tag_bit_set.isSet(index)) return;
 
+            const packed_index = @as(u32, @intCast(self.packed_array.items.len));
             try self.packed_array.append(self.allocator, entity);
             self.tag_bit_set.set(index);
+            self.sparse_to_dense.items[index] = packed_index;
         }
 
         /// Remove the tag from an entity.
         /// If the entity doesn't have the tag, this is a no-op.
         ///
-        /// Complexity: O(n) where n = number of tagged entities (due to linear search)
+        /// Complexity: O(1)
         ///
         /// Note: Uses swap-remove on the packed array, so entity order is not preserved.
         ///
@@ -129,15 +150,15 @@ pub fn TagStorage(comptime C: type) type {
             if (index >= self.tag_bit_set.capacity()) return;
             if (!self.tag_bit_set.isSet(index)) return;
 
-            // Find entity in packed array and remove it
-            for (self.packed_array.items, 0..) |e, i| {
-                if (e == entity) {
-                    _ = self.packed_array.swapRemove(i);
-                    break;
-                }
-            }
-
+            const packed_index = self.sparse_to_dense.items[index];
+            const last_entity = self.packed_array.swapRemove(packed_index);
             self.tag_bit_set.unset(index);
+
+            // If we removed the last element, no need to update reverse index
+            if (packed_index < self.packed_array.items.len) {
+                const last_entity_index = castEntityIndex(last_entity);
+                self.sparse_to_dense.items[last_entity_index] = packed_index;
+            }
         }
 
         /// Check whether an entity has this tag.
@@ -157,3 +178,4 @@ pub fn TagStorage(comptime C: type) type {
         }
     };
 }
+
