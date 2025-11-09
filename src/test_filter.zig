@@ -1490,3 +1490,51 @@ test "CrossProductIterator - asymmetric sizes" {
     // Should have 10 projectiles × 2 enemies = 20 pairs
     try std.testing.expectEqual(@as(usize, 20), pair_count);
 }
+
+test "Tag storage - sequential entity destruction edge case" {
+    // This test reproduces a bug where destroying entities with tags in sequence
+    // would cause an index out of bounds error due to stale sparse_to_dense indices.
+    // The bug occurred when:
+    // 1. Two entities have the same tag
+    // 2. First entity destroyed → swapRemove in packed array
+    // 3. Second entity destroyed → access to stale sparse_to_dense index
+
+    const Enemy = struct {};
+    const Position = struct { x: f32, y: f32 };
+
+    const TestWorld = @import("world.zig").World(
+        struct { Position, Enemy },
+        struct {},
+        struct {},
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create two entities with the Enemy tag
+    const e1 = world.createEntity();
+    try world.addComponent(e1, Position, .{ .x = 10.0, .y = 20.0 });
+    try world.addTag(e1, Enemy);
+
+    const e2 = world.createEntity();
+    try world.addComponent(e2, Position, .{ .x = 30.0, .y = 40.0 });
+    try world.addTag(e2, Enemy);
+
+    // Verify both entities have the tag
+    try std.testing.expect(world.getTagStorage(Enemy).contains(e1));
+    try std.testing.expect(world.getTagStorage(Enemy).contains(e2));
+
+    // Destroy first entity - this triggers swapRemove in tag storage
+    world.destroyEntity(e1);
+
+    // Destroy second entity - before the fix, this would cause index out of bounds
+    // because the sparse_to_dense reverse index wasn't properly maintained
+    world.destroyEntity(e2);
+
+    // Test passes if we reach here without panicking
+    try std.testing.expect(true);
+}

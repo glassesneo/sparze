@@ -151,11 +151,18 @@ pub fn TagStorage(comptime C: type) type {
             if (!self.tag_bit_set.isSet(index)) return;
 
             const packed_index = self.sparse_to_dense.items[index];
-            const last_entity = self.packed_array.swapRemove(packed_index);
-            self.tag_bit_set.unset(index);
 
-            // If we removed the last element, no need to update reverse index
-            if (packed_index < self.packed_array.items.len) {
+            // Read the last element BEFORE swapRemove (which will move it)
+            const last_element_index = self.packed_array.items.len - 1;
+            const will_swap = packed_index < last_element_index;
+            const last_entity = if (will_swap) self.packed_array.items[last_element_index] else undefined;
+
+            _ = self.packed_array.swapRemove(packed_index);
+            self.tag_bit_set.unset(index);
+            self.sparse_to_dense.items[index] = std.math.maxInt(u32); // Invalidate reverse index
+
+            // Update the reverse index for the swapped entity
+            if (will_swap) {
                 const last_entity_index = castEntityIndex(last_entity);
                 self.sparse_to_dense.items[last_entity_index] = packed_index;
             }
