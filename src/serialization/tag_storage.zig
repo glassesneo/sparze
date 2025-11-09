@@ -16,13 +16,29 @@ pub fn serialize(
 
     // Write bitset data (u64 words)
     if (capacity > 0) {
-        const mask_count = (capacity + 63) / 64; // Number of u64 masks
+        const mask_count = (capacity + 63) / 64; // Number of u64 masks in wire format
         try writer.writeInt(u32, @intCast(mask_count), .little);
 
         // Access bitset masks directly
         const masks = tag_storage.tag_bit_set.masks;
-        for (masks[0..mask_count]) |mask| {
-            try writer.writeInt(u64, mask, .little);
+        
+        if (@bitSizeOf(usize) == 64) {
+            // 64-bit platform: masks are already u64
+            for (masks[0..mask_count]) |mask| {
+                try writer.writeInt(u64, mask, .little);
+            }
+        } else {
+            // 32-bit platform: combine pairs of u32 masks into u64
+            // Calculate actual number of usize masks present
+            const usize_mask_count = (capacity + 31) / 32;
+            for (0..mask_count) |i| {
+                const low_idx = i * 2;
+                const high_idx = low_idx + 1;
+                const low: u64 = if (low_idx < usize_mask_count) masks[low_idx] else 0;
+                const high: u64 = if (high_idx < usize_mask_count) masks[high_idx] else 0;
+                const combined: u64 = low | (high << 32);
+                try writer.writeInt(u64, combined, .little);
+            }
         }
     } else {
         try writer.writeInt(u32, 0, .little);
@@ -61,8 +77,28 @@ pub fn deserialize(
 
         // Read masks
         const masks = tag_storage.tag_bit_set.masks;
-        for (masks[0..mask_count]) |*mask| {
-            mask.* = try reader.readInt(u64, .little);
+        
+        if (@bitSizeOf(usize) == 64) {
+            // 64-bit platform: read u64 directly into usize masks
+            for (masks[0..mask_count]) |*mask| {
+                mask.* = try reader.readInt(u64, .little);
+            }
+        } else {
+            // 32-bit platform: split u64 into pairs of u32 masks
+            // Calculate actual number of usize masks present
+            const usize_mask_count = (capacity + 31) / 32;
+            for (0..mask_count) |i| {
+                const combined = try reader.readInt(u64, .little);
+                const low_idx = i * 2;
+                const high_idx = low_idx + 1;
+                
+                if (low_idx < usize_mask_count) {
+                    masks[low_idx] = @intCast(combined & 0xFFFFFFFF);
+                }
+                if (high_idx < usize_mask_count) {
+                    masks[high_idx] = @intCast((combined >> 32) & 0xFFFFFFFF);
+                }
+            }
         }
     }
 

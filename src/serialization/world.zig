@@ -324,7 +324,9 @@ pub fn deserializeFromFile(
     defer file.close();
 
     const file_size = try file.getEndPos();
-    const buffer = try world.allocator.alloc(u8, file_size);
+    const file_size_usize = std.math.cast(usize, file_size) orelse
+        return error.FileTooLarge;
+    const buffer = try world.allocator.alloc(u8, file_size_usize);
     defer world.allocator.free(buffer);
 
     _ = try file.readAll(buffer);

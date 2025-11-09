@@ -8,6 +8,9 @@ Build commands
 # Run tests
 zig build test
 
+# Run tests with wasm target
+zig build test-wasm
+
 # Build all examples
 zig build examples
 
@@ -16,11 +19,14 @@ zig build run-examples
 
 # Run a specific example
 zig build run-{example-name}
+
+# Run a build with wasm target
+zig build {command-name} -Dtarget=wasm32-wasi
 ```
 
 What Sparze is
 
-- A compile-time Entity Component System (ECS) in Zig: component and resource types are known at compile time for zero runtime lookup overhead and strong type safety.
+- A compile-time Entity Component System (ECS) in Zig: component, resource and event types are known at compile time for zero runtime lookup overhead and strong type safety.
 
 Core data structures (where to look)
 
