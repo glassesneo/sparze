@@ -1,6 +1,6 @@
 const std = @import("std");
-const entity_mod = @import("../core/entity.zig");
-const sparse_set_mod = @import("../core/sparse_set.zig");
+const entity_mod = @import("../entity/entity.zig");
+const sparse_set_mod = @import("../storage/sparse_set.zig");
 const traits = @import("traits.zig");
 
 const Entity = entity_mod.Entity;
@@ -70,8 +70,8 @@ pub fn deserialize(
     comptime Component: type,
     allocator: std.mem.Allocator,
     reader: anytype,
-) !@import("../core/sparse_set.zig").SparseSet(Component) {
-    const SparseSetType = @import("../core/sparse_set.zig").SparseSet(Component);
+) !@import("../storage/sparse_set.zig").SparseSet(Component) {
+    const SparseSetType = @import("../storage/sparse_set.zig").SparseSet(Component);
     const Serializer = traits.getSerializer(Component);
 
     var sparse_set = SparseSetType.init(allocator);
@@ -133,7 +133,7 @@ const testing = std.testing;
 
 test "SparseSet serialization empty" {
     const Component = struct { x: f32, y: f32 };
-    const SparseSetType = @import("../core/sparse_set.zig").SparseSet(Component);
+    const SparseSetType = @import("../storage/sparse_set.zig").SparseSet(Component);
 
     var buffer: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -156,7 +156,7 @@ test "SparseSet serialization empty" {
 
 test "SparseSet serialization with components" {
     const Component = struct { x: f32, y: f32 };
-    const SparseSetType = @import("../core/sparse_set.zig").SparseSet(Component);
+    const SparseSetType = @import("../storage/sparse_set.zig").SparseSet(Component);
 
     var buffer: [1024 * 64]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -201,7 +201,7 @@ test "SparseSet serialization with components" {
 
 test "SparseSet serialization with group" {
     const Component = struct { value: u32 };
-    const SparseSetType = @import("../core/sparse_set.zig").SparseSet(Component);
+    const SparseSetType = @import("../storage/sparse_set.zig").SparseSet(Component);
 
     var buffer: [1024 * 64]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -236,7 +236,7 @@ test "SparseSet serialization with group" {
 
 test "SparseSet serialization multiple pages" {
     const Component = struct { id: u16 };
-    const SparseSetType = @import("../core/sparse_set.zig").SparseSet(Component);
+    const SparseSetType = @import("../storage/sparse_set.zig").SparseSet(Component);
 
     var buffer: [1024 * 128]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);

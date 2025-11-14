@@ -4,21 +4,21 @@ const StructField = std.builtin.Type.StructField;
 const Allocator = std.mem.Allocator;
 pub const ArrayList = std.ArrayList;
 
-const entity_module = @import("core/entity.zig");
+const entity_module = @import("entity/entity.zig");
 const EntityRegistry = entity_module.EntityRegistry;
 const Entity = entity_module.Entity;
 
-const sparse_set_module = @import("core/sparse_set.zig");
+const sparse_set_module = @import("storage/sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 
-const tag_storage_module = @import("core/tag_storage.zig");
+const tag_storage_module = @import("storage/tag_storage.zig");
 const TagStorage = tag_storage_module.TagStorage;
 
-const component_storage_module = @import("core/component_storage.zig");
+const component_storage_module = @import("storage/component_storage.zig");
 const ComponentStorage = component_storage_module.ComponentStorage;
 const isTagComponent = component_storage_module.isTagComponent;
 
-const filter_module = @import("filter.zig");
+const filter_module = @import("query/filter.zig");
 pub const SingleQuery = filter_module.SingleQuery;
 pub const Query = filter_module.Query;
 pub const Group = filter_module.Group;
@@ -28,10 +28,10 @@ pub const Resource = filter_module.Resource;
 pub const EventReader = filter_module.EventReader;
 pub const EventWriter = filter_module.EventWriter;
 
-const event_storage_module = @import("core/event_storage.zig");
+const event_storage_module = @import("storage/event_storage.zig");
 pub const EventStorage = event_storage_module.EventStorage;
 
-const system_module = @import("system.zig");
+const system_module = @import("system/system.zig");
 pub const Commands = system_module.Commands;
 pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;
