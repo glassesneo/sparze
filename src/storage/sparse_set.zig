@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const entity_module = @import("entity.zig");
+const entity_module = @import("../entity/entity.zig");
 pub const max_entities = entity_module.max_entities;
 const EntityRegistry = entity_module.EntityRegistry;
 const Entity = entity_module.Entity;
