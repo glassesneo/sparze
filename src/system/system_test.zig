@@ -756,7 +756,7 @@ test "Commands destroyEntity handles multiple destroy commands for same entity" 
 
     // System that destroys the same entity multiple times
     const DestroySystem1 = struct {
-        var target: ?@import("core/entity.zig").Entity = null;
+        var target: ?@import("../entity/entity.zig").Entity = null;
 
         fn system(commands: anytype) !void {
             if (target) |e| {
@@ -766,7 +766,7 @@ test "Commands destroyEntity handles multiple destroy commands for same entity" 
     };
 
     const DestroySystem2 = struct {
-        var target: ?@import("core/entity.zig").Entity = null;
+        var target: ?@import("../entity/entity.zig").Entity = null;
 
         fn system(commands: anytype) !void {
             if (target) |e| {
@@ -776,7 +776,7 @@ test "Commands destroyEntity handles multiple destroy commands for same entity" 
     };
 
     const DestroySystem3 = struct {
-        var target: ?@import("core/entity.zig").Entity = null;
+        var target: ?@import("../entity/entity.zig").Entity = null;
 
         fn system(commands: anytype) !void {
             if (target) |e| {
