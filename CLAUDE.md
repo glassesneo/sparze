@@ -37,7 +37,7 @@ A compile-time Entity Component System (ECS) in Zig where component, resource, a
 
 ### Entity system
 
-**Location:** `src/core/entity.zig`
+**Location:** `src/entity/entity.zig`
 
 - **Entity**: 32-bit identifier (`u32`) composed of:
   - Lower 16 bits: entity index (up to 65,535 entities)
@@ -50,7 +50,7 @@ A compile-time Entity Component System (ECS) in Zig where component, resource, a
 
 ### Component storage
 
-**Location:** `src/core/component_storage.zig`
+**Location:** `src/storage/component_storage.zig`
 
 Sparze automatically selects storage based on component type:
 
@@ -59,7 +59,7 @@ Sparze automatically selects storage based on component type:
 
 #### SparseSet
 
-**Location:** `src/core/sparse_set.zig`
+**Location:** `src/storage/sparse_set.zig`
 
 - Paginated sparse array (4096 entities per page, 16 pages max)
 - Packed dense arrays for entities and components
@@ -74,7 +74,7 @@ Sparze automatically selects storage based on component type:
 
 #### TagStorage
 
-**Location:** `src/core/tag_storage.zig`
+**Location:** `src/storage/tag_storage.zig`
 
 - DynamicBitSet for presence checking (1 bit per entity)
 - Packed entity array for iteration
@@ -114,7 +114,7 @@ World(
 
 ## System functions
 
-**Location:** `src/system.zig`
+**Location:** `src/system/system.zig`
 
 System functions are registered and executed by the World via `world.runSystem(systemFn)`. They receive parameters through automatic injection and cannot directly accept `World` as a parameter.
 
@@ -165,7 +165,7 @@ Execute with: `try world.runSystem(movementSystem);`
 
 ## Query Filters
 
-**Location:** `src/filter.zig`
+**Location:** `src/query/filter.zig`
 
 Query Filters allow system functions to iterate entities with specific components or tags. All filters are injected as parameters into system functions.
 
@@ -293,7 +293,7 @@ World.validateGroups(.{ MovementGroup, RenderGroup }); // Compile error
 
 ## Filter Modifiers
 
-**Location:** `src/filter.zig`
+**Location:** `src/query/filter.zig`
 
 Filter modifiers customize how Query and TagQuery match entities. They are **only supported by Query and TagQuery**, not by SingleQuery, SingleTag, or Group.
 
@@ -332,7 +332,7 @@ fn aiSystem(query: Query(struct { Enemy, Exclude(Player) })) !void {
 
 ## Commands API
 
-**Location:** `src/system.zig`
+**Location:** `src/system/system.zig`
 
 Commands provide deferred entity/component operations that are safe to execute during iteration. System functions receive Commands via an `anytype` parameter.
 
@@ -403,7 +403,7 @@ fn updateSystem(
 
 ## Events
 
-**Location:** `src/core/event_storage.zig`, `src/filter.zig`
+**Location:** `src/storage/event_storage.zig`, `src/query/filter.zig`
 
 Events provide frame-delayed communication between system functions via double-buffered storage.
 
@@ -453,7 +453,7 @@ fn collisionResponseSystem(
 
 ## Iterator types
 
-**Location:** `src/filter.zig`
+**Location:** `src/query/filter.zig`
 
 ### combinations()
 
@@ -681,21 +681,21 @@ Comprehensive usage examples and performance benchmarks:
 
 | Structure | Location | Purpose |
 |-----------|----------|---------|
-| Entity | `src/core/entity.zig` | 32-bit ID with version recycling |
-| EntityRegistry | `src/core/entity.zig` | Entity lifecycle management |
-| SparseSet | `src/core/sparse_set.zig` | Regular component storage |
-| TagStorage | `src/core/tag_storage.zig` | Tag component storage (bitset) |
-| EventStorage | `src/core/event_storage.zig` | Double-buffered event queue |
-| ComponentStorage | `src/core/component_storage.zig` | Storage type selection |
+| Entity | `src/entity/entity.zig` | 32-bit ID with version recycling |
+| EntityRegistry | `src/entity/entity.zig` | Entity lifecycle management |
+| SparseSet | `src/storage/sparse_set.zig` | Regular component storage |
+| TagStorage | `src/storage/tag_storage.zig` | Tag component storage (bitset) |
+| EventStorage | `src/storage/event_storage.zig` | Double-buffered event queue |
+| ComponentStorage | `src/storage/component_storage.zig` | Storage type selection |
 
 ### Main API
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | World | `src/world.zig` | Central ECS coordinator |
-| System functions | `src/system.zig` | System execution & parameter injection |
-| Commands | `src/system.zig` | Deferred entity/component operations |
-| Query Filters | `src/filter.zig` | Entity iteration with component matching |
+| System functions | `src/system/system.zig` | System execution & parameter injection |
+| Commands | `src/system/system.zig` | Deferred entity/component operations |
+| Query Filters | `src/query/filter.zig` | Entity iteration with component matching |
 | Serialization | `src/serialization/` | Binary save/load with type safety |
 
 ### Design principles
