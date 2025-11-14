@@ -7,7 +7,7 @@ const sparse_set_ser = @import("sparse_set.zig");
 const tag_storage_ser = @import("tag_storage.zig");
 const traits = @import("traits.zig");
 
-const component_storage_module = @import("../core/component_storage.zig");
+const component_storage_module = @import("../storage/component_storage.zig");
 const isTagComponent = component_storage_module.isTagComponent;
 const ComponentStorage = component_storage_module.ComponentStorage;
 

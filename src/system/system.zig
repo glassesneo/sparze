@@ -1,20 +1,20 @@
 const std = @import("std");
 const StructField = std.builtin.Type.StructField;
 
-const entity_module = @import("core/entity.zig");
+const entity_module = @import("../entity/entity.zig");
 const Entity = entity_module.Entity;
 
-const sparse_set_module = @import("core/sparse_set.zig");
+const sparse_set_module = @import("../storage/sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 
-const tag_storage_module = @import("core/tag_storage.zig");
+const tag_storage_module = @import("../storage/tag_storage.zig");
 const TagStorage = tag_storage_module.TagStorage;
 
-const component_storage_module = @import("core/component_storage.zig");
+const component_storage_module = @import("../storage/component_storage.zig");
 const ComponentStorage = component_storage_module.ComponentStorage;
 const isTagComponent = component_storage_module.isTagComponent;
 
-const filter_module = @import("filter.zig");
+const filter_module = @import("../query/filter.zig");
 pub const FilterType = filter_module.FilterType;
 const SingleQuery = filter_module.SingleQuery;
 const SingleTag = filter_module.SingleTag;
@@ -49,7 +49,7 @@ test "Query with Exclude modifier - basic usage" {
     const Dead = struct {};
     const Static = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Dead, Static }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Dead, Static }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -102,7 +102,7 @@ test "Query with multiple Exclude modifiers" {
     const Frozen = struct {};
     const Disabled = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Enemy, Dead, Frozen, Disabled }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Enemy, Dead, Frozen, Disabled }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -175,7 +175,7 @@ test "Query with Exclude and optional components combined" {
     const Dead = struct {};
     const Invulnerable = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Health, Shield, Dead, Invulnerable }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Health, Shield, Dead, Invulnerable }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -238,7 +238,7 @@ test "Query with Exclude in system function" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Static = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Static }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Static }, struct {}, struct {});
 
     const MovementSystem = struct {
         var updated_count: usize = 0;
@@ -300,7 +300,7 @@ test "TagQuery with Exclude modifier" {
     const Dead = struct {};
     const Frozen = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Player, Enemy, Dead, Frozen }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Player, Enemy, Dead, Frozen }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -352,7 +352,7 @@ test "Query with Exclude - no matches" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Disabled = struct {};
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Disabled }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Disabled }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -390,7 +390,7 @@ test "Query with Exclude - regular component exclusion" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Armor = struct { value: i32 };
 
-    const TestWorld = @import("world.zig").World(struct { Position, Velocity, Armor }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Armor }, struct {}, struct {});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

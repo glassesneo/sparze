@@ -1,20 +1,20 @@
 const std = @import("std");
 const StructField = std.builtin.Type.StructField;
 
-const entity_module = @import("core/entity.zig");
+const entity_module = @import("../entity/entity.zig");
 const Entity = entity_module.Entity;
 
-const sparse_set_module = @import("core/sparse_set.zig");
+const sparse_set_module = @import("../storage/sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
 
-const tag_storage_module = @import("core/tag_storage.zig");
+const tag_storage_module = @import("../storage/tag_storage.zig");
 const TagStorage = tag_storage_module.TagStorage;
 
-const component_storage_module = @import("core/component_storage.zig");
+const component_storage_module = @import("../storage/component_storage.zig");
 const ComponentStorage = component_storage_module.ComponentStorage;
 const isTagComponent = component_storage_module.isTagComponent;
 
-const event_storage_module = @import("core/event_storage.zig");
+const event_storage_module = @import("../storage/event_storage.zig");
 const EventStorage = event_storage_module.EventStorage;
 
 /// FilterType identifies the type of query filter used in system parameters.

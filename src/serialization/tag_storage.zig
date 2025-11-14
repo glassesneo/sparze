@@ -1,5 +1,5 @@
 const std = @import("std");
-const entity_mod = @import("../core/entity.zig");
+const entity_mod = @import("../entity/entity.zig");
 const Entity = entity_mod.Entity;
 
 /// Serialize TagStorage to writer
@@ -59,8 +59,8 @@ pub fn deserialize(
     comptime Tag: type,
     allocator: std.mem.Allocator,
     reader: anytype,
-) !@import("../core/tag_storage.zig").TagStorage(Tag) {
-    const TagStorageType = @import("../core/tag_storage.zig").TagStorage(Tag);
+) !@import("../storage/tag_storage.zig").TagStorage(Tag) {
+    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
 
     var tag_storage = TagStorageType.init(allocator);
     errdefer tag_storage.deinit();
@@ -122,7 +122,7 @@ const testing = std.testing;
 
 test "TagStorage serialization empty" {
     const Tag = struct {};
-    const TagStorageType = @import("../core/tag_storage.zig").TagStorage(Tag);
+    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
 
     var buffer: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -144,7 +144,7 @@ test "TagStorage serialization empty" {
 
 test "TagStorage serialization with entities" {
     const Tag = struct {};
-    const TagStorageType = @import("../core/tag_storage.zig").TagStorage(Tag);
+    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
 
     var buffer: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -184,7 +184,7 @@ test "TagStorage serialization with entities" {
 
 test "TagStorage serialization many entities" {
     const Tag = struct {};
-    const TagStorageType = @import("../core/tag_storage.zig").TagStorage(Tag);
+    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
 
     var buffer: [1024 * 64]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -220,7 +220,7 @@ test "TagStorage serialization many entities" {
 
 test "TagStorage serialization sparse indices" {
     const Tag = struct {};
-    const TagStorageType = @import("../core/tag_storage.zig").TagStorage(Tag);
+    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
 
     var buffer: [1024 * 64]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
