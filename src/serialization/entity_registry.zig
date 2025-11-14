@@ -1,5 +1,5 @@
 const std = @import("std");
-const entity_mod = @import("../core/entity.zig");
+const entity_mod = @import("../entity/entity.zig");
 const Entity = entity_mod.Entity;
 const EntityIndex = entity_mod.EntityIndex;
 const EntityRegistry = entity_mod.EntityRegistry;
