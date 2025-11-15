@@ -255,11 +255,14 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                 const GroupType = @field(groups, group_field.name);
                 const group_fields = comptime std.meta.fields(GroupType);
                 inline for (group_fields) |field| {
-                    _ = getComponentId(field.type);
+                    // Extract actual component type (unwrap Free())
+                    const ComponentType = extractComponent(field.type);
+                    _ = getComponentId(ComponentType);
                 }
             }
 
-            // Check each pair of groups for overlap
+            // Check each pair of groups for OWNED component overlap
+            // Free components can be shared between groups
             inline for (group_list, 0..) |group1_field, i| {
                 const Group1Type = @field(groups, group1_field.name);
                 const group1_fields = comptime std.meta.fields(Group1Type);
@@ -271,10 +274,20 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                     const group2_fields = comptime std.meta.fields(Group2Type);
 
                     inline for (group1_fields) |field1| {
+                        // Only check owned components
+                        if (isFree(field1.type)) continue;
+
                         inline for (group2_fields) |field2| {
-                            if (field1.type == field2.type) {
-                                @compileError("Groups have overlapping component: " ++ @typeName(field1.type) ++
-                                    " appears in both " ++ @typeName(Group1Type) ++ " and " ++ @typeName(Group2Type));
+                            // Only check owned components
+                            if (isFree(field2.type)) continue;
+
+                            const comp1 = extractComponent(field1.type);
+                            const comp2 = extractComponent(field2.type);
+
+                            if (comp1 == comp2) {
+                                @compileError("Groups have overlapping OWNED component: " ++ @typeName(comp1) ++
+                                    " appears as owned in both " ++ @typeName(Group1Type) ++ " and " ++ @typeName(Group2Type) ++
+                                    ". Use Free(" ++ @typeName(comp1) ++ ") in one of the groups to mark it as free (not owned).");
                             }
                         }
                     }
