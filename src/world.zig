@@ -275,11 +275,11 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
 
                     inline for (group1_fields) |field1| {
                         // Only check owned components
-                        if (isFree(field1.type)) continue;
+                        if (comptime isFree(field1.type)) continue;
 
                         inline for (group2_fields) |field2| {
                             // Only check owned components
-                            if (isFree(field2.type)) continue;
+                            if (comptime isFree(field2.type)) continue;
 
                             const comp1 = extractComponent(field1.type);
                             const comp2 = extractComponent(field2.type);
