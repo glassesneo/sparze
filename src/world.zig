@@ -578,7 +578,10 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
 
             // Allocate and copy component IDs
             var owned_component_ids = try self.allocator.alloc(u16, owned_count);
+            errdefer self.allocator.free(owned_component_ids);
+
             var free_component_ids = try self.allocator.alloc(u16, free_count);
+            errdefer self.allocator.free(free_component_ids);
 
             inline for (owned_ids, 0..) |id, i| {
                 owned_component_ids[i] = id;
