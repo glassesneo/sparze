@@ -133,9 +133,9 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         };
 
         pub const max_resource_size: comptime_int = blk: {
-            if (component_pool_length == 0) break :blk 1;
+            if (resource_pool_length == 0) break :blk 1;
             var max_size: comptime_int = 1;
-            for (component_fields) |field| {
+            for (resource_fields) |field| {
                 const size = @sizeOf(field.type);
                 if (size > max_size) max_size = size;
             }
