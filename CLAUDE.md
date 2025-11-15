@@ -1,113 +1,152 @@
 # CLAUDE.md
 
-A concise guide for working with the Sparze codebase (Zig ECS library).
+Comprehensive guide for Sparze (Zig ECS library).
 
-Build commands
+## Build Commands
 
 ```bash
-# Run tests
 zig build test
-
-# Run tests with wasm target
 zig build test-wasm
-
-# Build all examples
 zig build examples
-
-# Run all examples sequentially
 zig build run-examples
-
-# Run a specific example
 zig build run-{example-name}
-
-# Run a build with wasm target
-zig build {command-name} -Dtarget=wasm32-wasi
+zig build {command} -Dtarget=wasm32-wasi
 ```
 
-What Sparze is
+## What Sparze Is
 
-- A compile-time Entity Component System (ECS) in Zig: component, resource and event types are known at compile time for zero runtime lookup overhead and strong type safety.
+Compile-time ECS: component, resource, and event types known at compile time.
 
-Core data structures (where to look)
+- Zero runtime lookup
+- Strong type safety
+- Cache-friendly layouts, pagination, groups
+- Minimal API
 
-- Entity (`src/core/entity.zig`): 32-bit id (16-bit index, 16-bit version) with version-based recycling and an `EntityRegistry` free list.
-- SparseSet (`src/core/sparse_set.zig`): paginated sparse array (4096 entities/page), packed dense arrays, O(1) lookups, and group-aware layout for fast iteration.
-- TagStorage (`src/core/tag_storage.zig`): optimized bitset-backed storage for zero-sized tag components (1 bit/entity) and packed entity arrays.
+## Module Documentation
 
-World API (overview)
+- **[Entity System](src/entity/CLAUDE.md)**: Entity IDs, EntityRegistry
+- **[Storage](src/storage/CLAUDE.md)**: ComponentStorage, SparseSet, TagStorage, EventStorage
+- **[Query Filters](src/query/CLAUDE.md)**: SingleQuery, Query, Group, TagQuery, modifiers
+- **[System Functions](src/system/CLAUDE.md)**: Parameter injection, Commands
 
-- World is parameterized by component, resource, and event tuples, e.g. `World(struct { Position, Velocity }, struct { DeltaTime }, struct { Collision })`.
-- Component/resource/event IDs are assigned at compile time; component storage is directly accessible (no dynamic lookup).
-- Resources are singletons that must be initialized via `setResource()` before use.
+## World API
 
-Systems and injection
+**Location:** `src/world.zig`
 
-- System functions receive injected parameters from the World. Common parameter types:
-  - Query filters: `SingleQuery(T)`, `SingleTag(T)`, `Query(struct { ... })`, `TagQuery(struct { ... })`, `Group(struct { ... })` (groups require `createGroup()`).
-  - `Resource(T)`: access to global resources inside systems.
-  - `anytype` parameter: receives `Commands(World)` for deferred operations.
-  - `std.mem.Allocator`: World's allocator for temporary allocations.
-- Convenience: `world.runSystem(systemFn)` and `createSystemFunction(World, fn)`.
-- Validate groups at compile time using `World.validateGroups(...)` to ensure groups do not overlap.
+```zig
+World(
+    Components: struct { Position, Velocity, ... },
+    Resources: struct { DeltaTime, GameState, ... },
+    Events: struct { Collision, SpawnEvent, ... }
+)
+```
 
-Commands API
+**Cannot be used directly in system functions** - use injected parameters.
 
-- `Commands(World)` provides deferred entity/component operations via `CommandBuffer`.
-- Systems receive commands via `anytype` parameter: `fn system(commands: anytype) !void`.
-- Operations are executed at `world.endFrame()`, ensuring safe iteration.
-- Group management: `commands.createGroup(GroupComponents)` creates groups from within systems.
+**Key methods**: `init`, `deinit`, `createEntity`, `destroyEntity`, `addComponent`, `addTag`, `removeComponent`, `removeTag`, `setResource`, `getResource`, `createGroup`, `validateGroups`, `beginFrame`, `endFrame`, `runSystem`
 
-Queries & iterators (summary)
+## Resources
 
-- `SingleQuery(C)`: iterate a single regular component (packed array).
-- `SingleTag(T)`: iterate entities with a tag (bitset-backed).
-- `Query(struct { ... })`: ad-hoc multi-component query supporting optional (`?T`) and exclude (`Exclude(T)`) modifiers.
-- `TagQuery(struct { ... })`: like `Query` but tag-only.
-- `Group(struct { ... })`: pre-organized, fastest multi-component iteration (requires creation and validation).
-- Pair iterators:
-  - `combinations()` — unique pairs within one query (i < j).
-  - `crossProduct(&other)` — Cartesian product across two queries (N×M pairs).
+Global singletons accessible via `Resource(T)` injection.
 
-Modifiers
+```zig
+world.setResource(DeltaTime, DeltaTime{ .value = 0.016 });
 
-- Optional (`?T`): match regardless of presence; access via `getOptional()`/`getOptionalMut()`.
-- Exclude (`Exclude(T)`): filter out entities that have `T`.
-- Modifiers are supported by `Query` and `TagQuery` but not by `SingleQuery`, `SingleTag`, or `Group`.
+fn updateSystem(delta: Resource(DeltaTime)) !void {
+    const dt = delta.value;
+}
+```
 
-Resources
+## Events
 
-- Global, singleton values accessible via `Resource(T)` in systems.
-- API highlights: `world.setResource(T, value)`, `world.getResource(T)`, `world.getResourcePtrMut(T)`.
-- Best practice: initialize resources after creating the World; prefer single-purpose resources.
+Frame-delayed communication via double-buffered storage. Events written in frame N readable in frame N+1.
 
-Events
+```zig
+// Write
+fn detectionSystem(writer: EventWriter(CollisionEvent)) !void {
+    try writer.enqueue(CollisionEvent{ .a = e1, .b = e2 });
+}
 
-- Frame-delayed events: events written in frame N are readable in frame N+1.
-- Use `EventWriter(E)` to enqueue events and `EventReader(E)` to read the previous frame's events.
-- Lifecycle: call `world.beginFrame()` (swap buffers), run systems, then `world.endFrame()`.
+// Read (next frame)
+fn responseSystem(reader: EventReader(CollisionEvent), commands: anytype) !void {
+    for (reader.queue) |event| {
+        try commands.destroyEntity(event.a);
+    }
+}
+```
 
-Serialization (essential points)
+## Serialization
 
-- High-performance binary serialization/deserialization for complete world state (entities, components, resources, events read buffer).
-- POD types are serialized automatically; non-POD types require a custom `Serializer` (see `examples/serialization.zig`).
-- Type safety via metadata hash; CRC32 checksum for integrity.
-- **Exclusion feature**: Mark types with `pub const serialized = false` to exclude them from serialization (see `examples/serialization_exclusion.zig`).
-- Things not serialized: groups (must recreate after load), command buffers, and the event write buffer.
-- Best practice: serialize between frames (after `endFrame()`), and recreate groups with `createGroup()` after deserialization.
+**Location:** `src/serialization/`
 
-Performance notes & best practices
+**Serialized**: Entities, components, resources, events (read buffer only)
 
-- Use `reserve()` on sparse sets before bulk inserts to avoid reallocations.
-- Prefer `Group` for hot-path, multi-component iteration.
-- Use tag components for marker/state flags (1 bit per entity) to save memory.
-- Declare group type constants and validate groups at compile time to avoid overlap and duplicate definitions.
-- Define systems as plain functions that accept injected parameters and call `world.runSystem()`.
+**Not serialized**: Groups, command buffers, event write buffer, types with `pub const serialized = false`
 
-Where to find examples
+**POD types**: Auto-serialized
 
-- `examples/` contains comprehensive usage and performance benchmarks.
+**Non-POD**: Require custom `Serializer`:
 
-Notes for contributors
+```zig
+pub const CustomComponent = struct {
+    data: []u8,
 
-- Read source files in `src/` for implementation details referenced above.
-- Keep changes focused and consistent with Zig idioms used in the repo.
+    pub const Serializer = struct {
+        pub fn serialize(component: CustomComponent, writer: anytype) !void { }
+        pub fn deserialize(reader: anytype, allocator: Allocator) !CustomComponent { }
+    };
+};
+```
+
+**Exclude**: `pub const serialized = false;`
+
+**Usage**:
+```zig
+try commands.serializeToFile("save.dat");
+try commands.deserializeFromFile("save.dat");
+try world.createGroup(struct { Position, Velocity });  // Recreate groups
+```
+
+**Safety**: Type metadata hash, CRC32 checksum, format version.
+
+## Performance
+
+**Memory**: Tag components (1 bit/entity), pre-allocate with `reserve()`, pagination (4096/page).
+
+**Iteration**: Group for hot paths, Query iterates smallest set, direct array access with Group.
+
+**System organization**:
+```zig
+const PhysicsGroup = struct { Position, Velocity };
+World.validateGroups(.{ PhysicsGroup, RenderGroup });  // Compile-time validation
+```
+
+## Examples
+
+**Location:** `examples/`
+
+`basic.zig`, `movement_example.zig`, `events.zig`, `resources.zig`, `tag_components.zig`, `multiple_groups.zig`, `combination_iterator.zig`, `cross_product.zig`, `serialization.zig`, `serialization_exclusion.zig`, `benchmarks/`
+
+## Architecture
+
+### Core Structures
+
+| Structure | Location | Purpose |
+|-----------|----------|---------|
+| Entity/EntityRegistry | `src/entity/entity.zig` | 32-bit ID, lifecycle |
+| SparseSet | `src/storage/sparse_set.zig` | Component storage |
+| TagStorage | `src/storage/tag_storage.zig` | Tag storage (bitset) |
+| EventStorage | `src/storage/event_storage.zig` | Event queue |
+
+### Main API
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| World | `src/world.zig` | ECS coordinator |
+| System functions | `src/system/system.zig` | Execution & injection |
+| Commands | `src/system/system.zig` | Deferred ops |
+| Query Filters | `src/query/filter.zig` | Entity iteration |
+
+### Design Principles
+
+Compile-time type resolution, strong type safety, cache-friendly layouts, minimal API, explicit over implicit.
