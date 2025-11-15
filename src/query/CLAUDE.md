@@ -6,42 +6,25 @@ Query Filters enable entity iteration in system functions via parameter injectio
 
 ## Filter Overview
 
-| Filter | Components | Setup | Modifiers | Use Case |
-|--------|-----------|-------|-----------|----------|
-| `SingleQuery(T)` | 1 regular | No | No | Single component |
-| `SingleTag(T)` | 1 tag | No | No | Single tag |
-| `Query(struct {...})` | Multiple | No | Yes | Ad-hoc queries |
-| `TagQuery(struct {...})` | Multiple tags | No | Yes | Ad-hoc tag queries |
-| `Group(struct {...})` | Multiple | Yes | No | Fastest iteration |
+| Filter | Setup | Modifiers | Key Characteristic |
+|--------|-------|-----------|-------------------|
+| `SingleQuery(T)` | No | No | Direct array access |
+| `SingleTag(T)` | No | No | Direct array access |
+| `Query(struct {...})` | No | Yes | Runtime filtering |
+| `TagQuery(struct {...})` | No | Yes | Runtime filtering, tags only |
+| `Group(struct {...})` | Yes | No | Fastest, no filtering |
 
-## SingleQuery(T)
+## SingleQuery(T) / SingleTag(T)
 
-Direct array access for single component.
-
-```zig
-pub fn SingleQuery(comptime Component: type) type {
-    return struct {
-        entities: []const Entity,
-        components: []Component,
-    };
-}
-```
-
-**Usage**: `for (query.entities, query.components) |e, c| { ... }`
-
-**No modifiers supported.**
-
-## SingleTag(T)
-
-Direct array access for single tag.
+Direct packed array access. No modifiers.
 
 ```zig
-pub const SingleTag = struct {
-    entities: []const Entity,
-};
-```
+// SingleQuery
+for (query.entities, query.components) |e, c| { ... }
 
-**Usage**: `for (tag.entities) |e| { ... }`
+// SingleTag
+for (tag.entities) |e| { ... }
+```
 
 ## Query(struct { ... })
 
@@ -59,154 +42,64 @@ fn damageSystem(
 }
 ```
 
-### Key Methods
-
-#### iterator() → Iterator
-Standard filtered iteration.
-
-#### combinations() → CombinationIterator
-Unique pairs (i < j). O(n²). Use for collision detection.
-
-```zig
-var pairs = query.combinations();
-while (pairs.next()) |pair| { // [2]Entity
-    // Process pair[0], pair[1]
-}
-```
-
-#### crossProduct(&other) → CrossProductIterator
-Cartesian product (N×M). Use for asymmetric interactions.
-
-```zig
-var pairs = projectiles.crossProduct(&enemies);
-while (pairs.next()) |pair| { // [2]Entity
-    // pair[0] from projectiles, pair[1] from enemies
-}
-```
-
-#### getComponent/getComponentMut(entity, T)
-Access required components. **Panics if optional/excluded.**
-
-#### getOptional/getOptionalMut(entity, T)
-Access optional components. Returns `?T` or `?*T`.
-
-### Behavior
-
+**Key behaviors**:
 - Iterates smallest required component set (ignores optional/exclude)
-- Runtime filtering checks all requirements
-- **Modifiers supported**: `?T`, `Exclude(T)`
+- `getComponent/Mut()` **panics if optional/excluded**
+- `getOptional/Mut()` returns `?T` or `?*T`
+
+**Iterators**:
+- `combinations()`: Unique pairs (i < j), use for collision detection
+- `crossProduct(&other)`: N×M pairs, use for asymmetric interactions
 
 ## TagQuery(struct { ... })
 
-Tag-specific variant of Query.
+Tag-specific Query variant. **Compile-time validates** all fields are tags.
 
 ```zig
-fn stateSystem(
-    tags: TagQuery(struct { Active, ?Sleeping, Exclude(Dead) })
-) !void {
-    var it = tags.iterator();
-    while (it.next()) |entity| {
-        if (tags.hasTag(entity, Sleeping)) { ... }
-    }
-}
+tags: TagQuery(struct { Active, ?Sleeping, Exclude(Dead) })
+// Use hasTag(entity, Tag) for optional tags
 ```
-
-**Compile-time validates** all fields are tag components.
-
-### Methods
-
-- `iterator()`, `crossProduct(&other)`: Same as Query
-- `hasTag(entity, Tag)`: Check optional tag presence
 
 ## Group(struct { ... })
 
 Pre-organized multi-component iteration (fastest).
 
-**Requires setup**: `try world.createGroup(struct { Position, Velocity });`
+**Requires**: `try world.createGroup(struct { Position, Velocity });`
 
 ```zig
-fn physicsSystem(physics: Group(struct { Position, Velocity, Mass })) !void {
+fn physicsSystem(physics: Group(struct { Position, Velocity })) !void {
     const entities = physics.getEntities();
     const positions = physics.getMutArrayOf(Position);
     const velocities = physics.getArrayOf(Velocity);
-    const masses = physics.getArrayOf(Mass);
 
-    for (entities, positions, velocities, masses) |e, *pos, vel, mass| {
-        pos.x += vel.x;
-    }
+    for (entities, positions, velocities) |e, *pos, vel| { }
 }
 ```
 
-### Key Points
-
-- **Fastest**: No runtime filtering, direct array access
+**Critical points**:
 - **Cache-friendly**: Group entities at array start (indices 0..group_size)
 - **Full-owning**: Components cannot overlap between groups
-- **Validate with**: `World.validateGroups(.{ Group1, Group2 })` (compile-time)
-- **No modifiers supported**
-
-### Methods
-
-- `getEntities()`: []const Entity
-- `getArrayOf(T)` / `getMutArrayOf(T)`: Component slices
-- `crossProduct(&other)`: Cross-product iterator
+- **Validate**: `World.validateGroups(.{ Group1, Group2 })` at compile time
+- **Panics** if group not created
 
 ## Filter Modifiers
 
 **Only for Query and TagQuery.**
 
-### Optional (?T)
+**Optional (?T)**: Match entities regardless of component presence. Access via `getOptional()`.
 
-Match entities regardless of component presence.
-
-```zig
-Query(struct { Position, ?Color })
-
-const color = query.getOptional(entity, Color); // ?*Color
-if (color) |c| { /* use */ } else { /* default */ }
-```
-
-### Exclude(T)
-
-Filter out entities with component.
+**Exclude(T)**: Filter out entities with component.
 
 ```zig
-Query(struct { Enemy, Exclude(Player) })
-// Only entities with Enemy but NOT Player
+Query(struct { Position, ?Color })       // Color is optional
+Query(struct { Enemy, Exclude(Player) }) // Enemy but NOT Player
 ```
-
-## Performance Comparison
-
-| Filter | Setup | Iteration | Filtering | Best For |
-|--------|-------|-----------|-----------|----------|
-| SingleQuery | None | O(n) | None | Simple queries |
-| SingleTag | None | O(m) | None | Single tag |
-| Query | None | O(n) | Runtime | Prototyping, flexibility |
-| TagQuery | None | O(m) | Runtime | Tag-based logic |
-| Group | O(n) once | O(g) | None | Hot paths |
-
-Where: n = entities with component, m = tagged entities, g = group entities
 
 ## Best Practices
 
-1. **Use Group for hot paths**: Physics, rendering
-2. **Use Query for flexibility**: Rarely-run systems
-3. **Validate groups early**: `World.validateGroups()` at startup
-4. **Pre-allocate groups**: Before adding entities
-5. **Consider crossProduct**: For asymmetric pairs vs combinations
-
-## Integration
-
-Filters automatically injected by World:
-
-```zig
-fn mySystem(
-    pos: SingleQuery(Position),
-    enemies: Query(struct { Health, Exclude(Dead) }),
-    physics: Group(struct { Position, Velocity }),
-) !void { }
-
-try world.runSystem(mySystem);
-```
+- **Group** for hot paths (physics, rendering)
+- **Query** for flexibility (prototyping, rare systems)
+- **Validate groups** early with `World.validateGroups()`
+- **crossProduct** for asymmetric pairs, **combinations** for symmetric
 
 See [System Functions](../system/CLAUDE.md).
