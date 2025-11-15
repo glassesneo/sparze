@@ -12,7 +12,7 @@ Query Filters enable entity iteration in system functions via parameter injectio
 | `SingleTag(T)` | No | No | Direct array access |
 | `Query(struct {...})` | No | Yes | Runtime filtering |
 | `TagQuery(struct {...})` | No | Yes | Runtime filtering, tags only |
-| `Group(struct {...})` | Yes | No | Fastest, no filtering |
+| `Group(struct {...})` | Yes | Yes | Fastest, no filtering |
 
 ## SingleQuery(T) / SingleTag(T)
 
@@ -62,7 +62,17 @@ tags: TagQuery(struct { Active, ?Sleeping, Exclude(Dead) })
 
 ## Group(struct { ... })
 
-Pre-organized multi-component iteration (fastest).
+Pre-organized multi-component iteration. Supports three group types:
+
+### Group Types
+
+| Type | Syntax | Owned Components | Free Components | Use Case |
+|------|--------|------------------|-----------------|----------|
+| **Full-owning** | `struct { A, B }` | All | None | Exclusive hot-path access |
+| **Partial-owning** | `struct { A, Free(B) }` | Some | Some | Share components, optimize hot path |
+| **Non-owning** | `struct { Free(A), Free(B) }` | None | All | Maximum sharing (not yet implemented) |
+
+### Full-Owning Groups (Default)
 
 **Requires**: `try world.createGroup(struct { Position, Velocity });`
 
@@ -76,23 +86,92 @@ fn physicsSystem(physics: Group(struct { Position, Velocity })) !void {
 }
 ```
 
-**Critical points**:
-- **Cache-friendly**: Group entities at array start (indices 0..group_size)
-- **Full-owning**: Components cannot overlap between groups
-- **Validate**: `World.validateGroups(.{ Group1, Group2 })` at compile time
+**Characteristics**:
+- All components organized at array start (indices 0..group_size)
+- Perfect cache locality, direct array access
+- Components cannot be owned by multiple groups
+- Fastest iteration possible
+
+### Partial-Owning Groups (New)
+
+Combines owned (organized, direct access) and free (unorganized, indirect access) components.
+
+**Requires**: `try world.createGroup(struct { Position, Velocity, Free(Health) });`
+
+```zig
+fn physicsSystem(physics: Group(struct { Position, Velocity, Free(Health) })) !void {
+    const entities = physics.getEntities();
+    
+    // Owned components: direct array access (fast)
+    const positions = physics.getMutArrayOf(Position);
+    const velocities = physics.getArrayOf(Velocity);
+    
+    for (entities, positions, velocities) |entity, *pos, vel| {
+        pos.x += vel.dx;
+        
+        // Free component: sparse set lookup (one indirection)
+        if (pos.x < 0) {
+            const health = physics.getComponentMut(entity, Health);
+            health.hp -= 10;
+        }
+    }
+}
+```
+
+**Characteristics**:
+- **Owned components**: Organized in group region, O(1) direct array access
+- **Free components**: NOT organized, O(1) sparse set lookup (one indirection)
+- **Component sharing**: Free components CAN be owned by other groups
+- **All components required**: Entity must have ALL components (owned + free) to be in group
+
+**Example - Component Sharing**:
+```zig
+// Group 1: owns Position, Velocity; uses Health as free
+try world.createGroup(struct { Position, Velocity, Free(Health) });
+
+// Group 2: owns Health, Shield (Health is owned here, free in Group 1)
+try world.createGroup(struct { Health, Shield });
+
+// This works! Health is owned by Group 2, free in Group 1
+```
+
+**API**:
+- `getArrayOf(C)`: Only for owned components (compile error if free)
+- `getMutArrayOf(C)`: Only for owned components (compile error if free)
+- `getComponent(entity, C)`: Works for both owned and free components
+- `getComponentMut(entity, C)`: Works for both owned and free components
+
+### Performance Comparison
+
+| Group Type | Owned Access | Free Access | Use When |
+|------------|--------------|-------------|----------|
+| Full-owning | O(1) direct | N/A | All components hot path, no sharing needed |
+| Partial-owning | O(1) direct | O(1) indirect | Some components hot, others occasional, sharing needed |
+| Query | N/A | O(1) indirect + filtering | Flexibility > performance |
+
+### Critical Points
+
+- **Validation**: `World.validateGroups(.{ Group1, Group2 })` checks owned component conflicts at compile time
+- **Ownership rule**: Owned components cannot be in multiple groups
+- **Free components**: Still REQUIRED for membership, just not organized
 - **Panics** if group not created
 
 ## Filter Modifiers
 
-**Only for Query and TagQuery.**
+**For Query and TagQuery:**
 
 **Optional (?T)**: Match entities regardless of component presence. Access via `getOptional()`.
 
 **Exclude(T)**: Filter out entities with component.
 
+**For Group:**
+
+**Free(T)**: Mark component as free (not owned) in partial-owning groups. Access via `getComponent()`.
+
 ```zig
-Query(struct { Position, ?Color })       // Color is optional
-Query(struct { Enemy, Exclude(Player) }) // Enemy but NOT Player
+Query(struct { Position, ?Color })                    // Color is optional
+Query(struct { Enemy, Exclude(Player) })              // Enemy but NOT Player
+Group(struct { Position, Velocity, Free(Health) })    // Health is free (not owned)
 ```
 
 ## Best Practices

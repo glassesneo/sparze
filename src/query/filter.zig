@@ -461,11 +461,22 @@ pub fn Group(comptime GroupComponents: type) type {
     if (component_fields.len == 0) @compileError("Group must have at least one component");
     const length = component_fields.len;
 
+    // Separate owned and free components at compile time
+    const owned_count = comptime blk: {
+        var count: usize = 0;
+        for (component_fields) |field| {
+            const ComponentType = extractFree(field.type);
+            if (isTagComponent(ComponentType)) @compileError("Group cannot consist of tag components");
+            if (!isFree(field.type)) count += 1;
+        }
+        break :blk count;
+    };
+
     const GroupComponentPoolType = construct_component_pool: {
         var sparse_set_fields: [length]StructField = undefined;
         inline for (component_fields, 0..) |field, i| {
-            if (isTagComponent(field.type)) @compileError("Group cannot consist of tag components");
-            const SparseSetType = SparseSet(field.type);
+            const ComponentType = extractFree(field.type);
+            const SparseSetType = SparseSet(ComponentType);
             sparse_set_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
                 .type = *const SparseSetType,
@@ -493,10 +504,10 @@ pub fn Group(comptime GroupComponents: type) type {
         pub fn init(world: anytype) Self {
             var component_pool: GroupComponentPoolType = undefined;
 
-            // Extract sparse set pointers for all group components
+            // Extract sparse set pointers for all group components (owned + free)
             inline for (component_fields, 0..) |field, i| {
-                const Component = field.type;
-                const sparse_set: *const SparseSet(Component) = world.getSparseSetPtr(Component);
+                const ComponentType = extractFree(field.type);
+                const sparse_set: *const SparseSet(ComponentType) = world.getSparseSetPtr(ComponentType);
                 component_pool[i] = sparse_set;
             }
 
@@ -508,7 +519,8 @@ pub fn Group(comptime GroupComponents: type) type {
         pub fn getComponentId(comptime C: type) u16 {
             // The order of components become the id
             return inline for (component_fields, 0..) |field, i| {
-                if (C == field.type) break i;
+                const ComponentType = extractFree(field.type);
+                if (C == ComponentType) break i;
             } else @compileError("Unknown component type: " ++ @typeName(C));
         }
 
@@ -517,17 +529,54 @@ pub fn Group(comptime GroupComponents: type) type {
             return self.group_component_pool[id];
         }
 
-        pub fn getEntities(self: Self) []const Entity {
-            // Use the first component's sparse set to get group entities
-            return self.group_component_pool[0].getGroupEntities();
+        fn isOwned(comptime C: type) bool {
+            return inline for (component_fields) |field| {
+                const ComponentType = extractFree(field.type);
+                if (C == ComponentType and !isFree(field.type)) break true;
+            } else false;
         }
 
+        pub fn getEntities(self: Self) []const Entity {
+            // Use the first owned component's sparse set to get group entities
+            // If no owned components (non-owning group), panic for now
+            if (owned_count == 0) {
+                @panic("Non-owning groups not yet fully implemented");
+            }
+            return inline for (component_fields, 0..) |field, i| {
+                if (!isFree(field.type)) break self.group_component_pool[i].getGroupEntities();
+            } else unreachable;
+        }
+
+        /// Get array of owned components (compile error if component is free)
         pub fn getArrayOf(self: Self, comptime C: type) []const C {
+            if (!comptime isOwned(C)) {
+                @compileError("Cannot use getArrayOf() on free component '" ++ @typeName(C) ++ "'. " ++
+                    "Free components must be accessed via getComponent(entity, " ++ @typeName(C) ++ ") for each entity. " ++
+                    "This is because free components are not organized in the group region and require sparse set lookup.");
+            }
             return self.getSparseSetPtr(C).getGroupComponents();
         }
 
+        /// Get mutable array of owned components (compile error if component is free)
         pub fn getMutArrayOf(self: Self, comptime C: type) []C {
+            if (!comptime isOwned(C)) {
+                @compileError("Cannot use getMutArrayOf() on free component '" ++ @typeName(C) ++ "'. " ++
+                    "Free components must be accessed via getComponentMut(entity, " ++ @typeName(C) ++ ") for each entity. " ++
+                    "This is because free components are not organized in the group region and require sparse set lookup.");
+            }
             return self.getSparseSetPtr(C).getGroupComponentsMut();
+        }
+
+        /// Get component for an entity (works for both owned and free components)
+        pub fn getComponent(self: Self, entity: Entity, comptime C: type) C {
+            const sparse_set = self.getSparseSetPtr(C);
+            return sparse_set.get(entity).?;
+        }
+
+        /// Get mutable component for an entity (works for both owned and free components)
+        pub fn getComponentMut(self: Self, entity: Entity, comptime C: type) *C {
+            const sparse_set = @constCast(self.getSparseSetPtr(C));
+            return sparse_set.getPtrMut(entity).?;
         }
 
         /// Returns a cross-product iterator with another query
@@ -801,10 +850,41 @@ pub fn Exclude(comptime C: type) type {
     };
 }
 
+/// Free marks a component as "free" (not owned) in a partial-owning or non-owning group.
+/// Free components are accessed via indirection (sparse set lookup) rather than direct array access.
+/// This allows components to be owned by one group while being used as free in other groups.
+///
+/// Example:
+/// ```zig
+/// // Group 1 owns Position, Velocity; uses Health as free
+/// try world.createGroup(struct { Position, Velocity, Free(Health) });
+///
+/// // Group 2 can own Health (since it's free in Group 1)
+/// try world.createGroup(struct { Health, Shield });
+///
+/// // Non-owning group: all components are free
+/// try world.createGroup(struct { Free(Position), Free(Velocity) });
+/// ```
+pub fn Free(comptime C: type) type {
+    return struct {
+        pub const Component = C;
+        pub const is_free = true;
+    };
+}
+
 fn extractType(comptime T: type) struct { type, ?ModifierType } {
     if (isOptional(T))
         return .{ extractOptional(T), .optional };
     if (@hasDecl(T, "modifier_type"))
         return .{ T.Component, T.modifier_type };
     return .{ T, null };
+}
+
+fn isFree(comptime T: type) bool {
+    return @hasDecl(T, "is_free") and T.is_free;
+}
+
+fn extractFree(comptime T: type) type {
+    if (isFree(T)) return T.Component;
+    return T;
 }

@@ -27,6 +27,8 @@ pub const TagQuery = filter_module.TagQuery;
 pub const Resource = filter_module.Resource;
 pub const EventReader = filter_module.EventReader;
 pub const EventWriter = filter_module.EventWriter;
+pub const Free = filter_module.Free;
+pub const Exclude = filter_module.Exclude;
 
 const event_storage_module = @import("storage/event_storage.zig");
 pub const EventStorage = event_storage_module.EventStorage;
@@ -36,10 +38,22 @@ pub const Commands = system_module.Commands;
 pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;
 
-/// Information about a full-owning group
+/// Information about a group
 const GroupInfo = struct {
-    component_ids: []const u16, // Component IDs in this world
+    owned_component_ids: []const u16, // Components owned by this group
+    free_component_ids: []const u16, // Components used but not owned by this group
 };
+
+// Helper to check if a type is wrapped in Free()
+fn isFree(comptime T: type) bool {
+    return @hasDecl(T, "is_free") and T.is_free;
+}
+
+// Helper to extract component type from Free() wrapper
+fn extractComponent(comptime T: type) type {
+    if (isFree(T)) return T.Component;
+    return T;
+}
 
 pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
     const component_info = @typeInfo(Components);
@@ -177,7 +191,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         pub fn deinit(self: *Self) void {
             self.command_buffer.deinit();
             for (self.groups.items) |*group| {
-                self.allocator.free(group.component_ids);
+                self.allocator.free(group.owned_component_ids);
+                self.allocator.free(group.free_component_ids);
             }
             self.groups.deinit(self.allocator);
             inline for (component_fields) |field| {
@@ -240,11 +255,14 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                 const GroupType = @field(groups, group_field.name);
                 const group_fields = comptime std.meta.fields(GroupType);
                 inline for (group_fields) |field| {
-                    _ = getComponentId(field.type);
+                    // Extract actual component type (unwrap Free())
+                    const ComponentType = extractComponent(field.type);
+                    _ = getComponentId(ComponentType);
                 }
             }
 
-            // Check each pair of groups for overlap
+            // Check each pair of groups for OWNED component overlap
+            // Free components can be shared between groups
             inline for (group_list, 0..) |group1_field, i| {
                 const Group1Type = @field(groups, group1_field.name);
                 const group1_fields = comptime std.meta.fields(Group1Type);
@@ -256,10 +274,20 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                     const group2_fields = comptime std.meta.fields(Group2Type);
 
                     inline for (group1_fields) |field1| {
+                        // Only check owned components
+                        if (comptime isFree(field1.type)) continue;
+
                         inline for (group2_fields) |field2| {
-                            if (field1.type == field2.type) {
-                                @compileError("Groups have overlapping component: " ++ @typeName(field1.type) ++
-                                    " appears in both " ++ @typeName(Group1Type) ++ " and " ++ @typeName(Group2Type));
+                            // Only check owned components
+                            if (comptime isFree(field2.type)) continue;
+
+                            const comp1 = extractComponent(field1.type);
+                            const comp2 = extractComponent(field2.type);
+
+                            if (comp1 == comp2) {
+                                @compileError("Groups have overlapping OWNED component: " ++ @typeName(comp1) ++
+                                    " appears as owned in both " ++ @typeName(Group1Type) ++ " and " ++ @typeName(Group2Type) ++
+                                    ". Use Free(" ++ @typeName(comp1) ++ ") in one of the groups to mark it as free (not owned).");
                             }
                         }
                     }
@@ -456,74 +484,187 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return entity;
         }
 
-        /// Create a full-owning group for the given component types
+        /// Create a group for the given component types (supports full-owning, partial-owning, and non-owning groups)
         pub fn createGroup(self: *Self, comptime GroupComponents: type) !void {
             const group_fields = comptime std.meta.fields(GroupComponents);
             if (group_fields.len == 0) @compileError("Cannot create group with zero components");
 
+            // Separate owned and free components at compile time
+            const owned_count = comptime blk: {
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            };
+
+            const free_count = group_fields.len - owned_count;
+
             // Compile-time validation: ensure all component types are valid for this world
             comptime {
                 for (group_fields) |field| {
-                    _ = getComponentId(field.type); // Will compile error if type not in world
+                    const ComponentType = extractComponent(field.type);
+                    _ = getComponentId(ComponentType); // Will compile error if type not in world
                 }
             }
 
-            // Check if group already exists by comparing component IDs
-            const new_ids = comptime blk: {
-                var ids: [group_fields.len]u16 = undefined;
-                for (group_fields, 0..) |field, i| {
-                    ids[i] = getComponentId(field.type);
+            // Build owned and free component ID arrays
+            const owned_ids = comptime blk: {
+                var ids: [owned_count]u16 = undefined;
+                var idx: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
                 }
                 break :blk ids;
             };
 
+            const free_ids = comptime blk: {
+                var ids: [free_count]u16 = undefined;
+                var idx: usize = 0;
+                for (group_fields) |field| {
+                    if (isFree(field.type)) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
+                }
+                break :blk ids;
+            };
+
+            // Check if group already exists (same owned and free components)
+            // This must be done BEFORE ownership conflict check to allow creating the same group twice
             for (self.groups.items) |*group| {
-                if (group.component_ids.len == new_ids.len) {
-                    var matches = true;
-                    for (group.component_ids, 0..) |id, i| {
-                        if (id != new_ids[i]) {
-                            matches = false;
-                            break;
+                if (group.owned_component_ids.len == owned_ids.len and
+                    group.free_component_ids.len == free_ids.len)
+                {
+                    var owned_matches = true;
+                    if (owned_ids.len > 0) {
+                        for (group.owned_component_ids, 0..) |id, i| {
+                            if (id != owned_ids[i]) {
+                                owned_matches = false;
+                                break;
+                            }
                         }
                     }
-                    if (matches) return; // Group already exists
+
+                    var free_matches = true;
+                    if (free_ids.len > 0) {
+                        for (group.free_component_ids, 0..) |id, i| {
+                            if (id != free_ids[i]) {
+                                free_matches = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (owned_matches and free_matches) return; // Group already exists
                 }
             }
 
-            var component_ids = try self.allocator.alloc(u16, group_fields.len);
-            inline for (group_fields, 0..) |field, i| {
-                component_ids[i] = comptime getComponentId(field.type);
+            // Check for ownership conflicts: owned components cannot be owned by multiple groups
+            for (self.groups.items) |*existing_group| {
+                for (owned_ids) |new_owned_id| {
+                    for (existing_group.owned_component_ids) |existing_owned_id| {
+                        if (new_owned_id == existing_owned_id) {
+                            return error.ComponentAlreadyOwned;
+                        }
+                    }
+                }
+            }
+
+            // Allocate and copy component IDs
+            var owned_component_ids = try self.allocator.alloc(u16, owned_count);
+            errdefer self.allocator.free(owned_component_ids);
+
+            var free_component_ids = try self.allocator.alloc(u16, free_count);
+            errdefer self.allocator.free(free_component_ids);
+
+            inline for (owned_ids, 0..) |id, i| {
+                owned_component_ids[i] = id;
+            }
+            inline for (free_ids, 0..) |id, i| {
+                free_component_ids[i] = id;
             }
 
             try self.groups.append(self.allocator, GroupInfo{
-                .component_ids = component_ids,
+                .owned_component_ids = owned_component_ids,
+                .free_component_ids = free_component_ids,
             });
 
-            // Populate the group with existing entities that have all components
+            // Populate the group with existing entities that have all required components
             self.populateGroup(GroupComponents);
         }
 
         /// Get group information by component types
         pub fn getGroup(self: *const Self, comptime GroupComponents: type) ?*const GroupInfo {
             const group_fields: []const StructField = comptime std.meta.fields(GroupComponents);
-            const target_ids = comptime blk: {
-                var ids: [group_fields.len]u16 = undefined;
-                for (group_fields, 0..) |field, i| {
-                    ids[i] = getComponentId(field.type);
+
+            // Separate owned and free component IDs
+            const owned_count = comptime blk: {
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            };
+
+            const free_count = group_fields.len - owned_count;
+
+            const target_owned_ids = comptime blk: {
+                var ids: [owned_count]u16 = undefined;
+                var idx: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
+                }
+                break :blk ids;
+            };
+
+            const target_free_ids = comptime blk: {
+                var ids: [free_count]u16 = undefined;
+                var idx: usize = 0;
+                for (group_fields) |field| {
+                    if (isFree(field.type)) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
                 }
                 break :blk ids;
             };
 
             for (self.groups.items) |*group| {
-                if (group.component_ids.len == target_ids.len) {
-                    var matches = true;
-                    for (group.component_ids, 0..) |id, i| {
-                        if (id != target_ids[i]) {
-                            matches = false;
-                            break;
+                if (group.owned_component_ids.len == target_owned_ids.len and
+                    group.free_component_ids.len == target_free_ids.len)
+                {
+                    var owned_matches = true;
+                    if (target_owned_ids.len > 0) {
+                        for (group.owned_component_ids, 0..) |id, i| {
+                            if (id != target_owned_ids[i]) {
+                                owned_matches = false;
+                                break;
+                            }
                         }
                     }
-                    if (matches) return group;
+
+                    var free_matches = true;
+                    if (target_free_ids.len > 0) {
+                        for (group.free_component_ids, 0..) |id, i| {
+                            if (id != target_free_ids[i]) {
+                                free_matches = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (owned_matches and free_matches) return group;
                 }
             }
             return null;
@@ -532,7 +673,14 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         /// Get entities in a group (fast iteration)
         pub fn getGroupEntities(self: *const Self, comptime GroupComponents: type) ?[]const Entity {
             const group = self.getGroup(GroupComponents) orelse return null;
-            const first_id = group.component_ids[0];
+
+            // For non-owning groups, we need separate entity tracking (TODO: implement)
+            // For now, use the first owned component if available
+            if (group.owned_component_ids.len == 0) {
+                @panic("Non-owning groups not yet fully implemented");
+            }
+
+            const first_id = group.owned_component_ids[0];
 
             // Use inline for to access tuple element at runtime
             inline for (component_fields, 0..) |field, i| {
@@ -545,12 +693,13 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         }
 
         /// Get components of a specific type in a group (fast iteration)
+        /// Only works for owned components
         pub fn getGroupComponents(self: *const Self, comptime GroupComponents: type, comptime C: type) ?[]const C {
             const group = self.getGroup(GroupComponents) orelse return null;
             const component_id = comptime getComponentId(C);
 
-            // Check if this component type is part of the group
-            for (group.component_ids) |group_id| {
+            // Check if this component type is owned by the group
+            for (group.owned_component_ids) |group_id| {
                 if (group_id == component_id) {
                     // Use inline for to access tuple element at runtime
                     inline for (component_fields, 0..) |field, i| {
@@ -568,8 +717,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             const group = self.getGroup(GroupComponents) orelse return null;
             const component_id = comptime getComponentId(C);
 
-            // Check if this component type is part of the group
-            for (group.component_ids) |group_id| {
+            // Check if this component type is owned by the group
+            for (group.owned_component_ids) |group_id| {
                 if (group_id == component_id) {
                     // Use inline for to access tuple element at runtime
                     inline for (component_fields, 0..) |field, i| {
@@ -583,16 +732,23 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return null;
         }
 
-        /// Populate group with existing entities that have all required components
+        /// Populate group with existing entities that have all required components (owned + free)
         fn populateGroup(self: *Self, comptime GroupComponents: type) void {
             const group = self.getGroup(GroupComponents) orelse return;
-            if (group.component_ids.len == 0) return;
 
-            // Find the shortest sparse set to minimize iterations
+            // Need at least one component (owned or free)
+            const total_components = group.owned_component_ids.len + group.free_component_ids.len;
+            if (total_components == 0) return;
+
+            // Find the shortest sparse set to minimize iterations (check both owned and free)
             var min_size: usize = std.math.maxInt(usize);
-            var shortest_id: u16 = group.component_ids[0];
+            var shortest_id: u16 = if (group.owned_component_ids.len > 0)
+                group.owned_component_ids[0]
+            else
+                group.free_component_ids[0];
 
-            for (group.component_ids) |id| {
+            // Check owned components
+            for (group.owned_component_ids) |id| {
                 inline for (component_fields, 0..) |field, i| {
                     if (comptime isTagComponent(field.type)) continue;
                     if (id == i) {
@@ -605,13 +761,27 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                 }
             }
 
-            // Iterate through shortest set and check if entities have all components
+            // Check free components
+            for (group.free_component_ids) |id| {
+                inline for (component_fields, 0..) |field, i| {
+                    if (comptime isTagComponent(field.type)) continue;
+                    if (id == i) {
+                        const entities = self.component_pool[i].packed_array.items;
+                        if (entities.len < min_size) {
+                            min_size = entities.len;
+                            shortest_id = id;
+                        }
+                    }
+                }
+            }
+
+            // Iterate through shortest set and check if entities have all components (owned + free)
             inline for (component_fields, 0..) |field, i| {
                 if (comptime isTagComponent(field.type)) continue;
                 if (shortest_id == i) {
                     const entities = self.component_pool[i].packed_array.items;
                     for (entities) |entity| {
-                        if (self.entityHasAllGroupComponents(entity, group.component_ids)) {
+                        if (self.entityHasAllGroupComponents(entity, group)) {
                             self.addEntityToGroup(entity, group);
                         }
                     }
@@ -619,9 +789,10 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
-        /// Check if entity has all required components for a group
-        fn entityHasAllGroupComponents(self: *const Self, entity: Entity, component_ids: []const u16) bool {
-            for (component_ids) |id| {
+        /// Check if entity has all required components for a group (owned + free)
+        fn entityHasAllGroupComponents(self: *const Self, entity: Entity, group: *const GroupInfo) bool {
+            // Check owned components
+            for (group.owned_component_ids) |id| {
                 var has_component = false;
                 inline for (component_fields, 0..) |field, i| {
                     if (comptime isTagComponent(field.type)) continue;
@@ -633,22 +804,45 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                 }
                 if (!has_component) return false;
             }
+
+            // Check free components
+            for (group.free_component_ids) |id| {
+                var has_component = false;
+                inline for (component_fields, 0..) |field, i| {
+                    if (comptime isTagComponent(field.type)) continue;
+                    if (id == i) {
+                        if (self.component_pool[i].contains(entity)) {
+                            has_component = true;
+                        }
+                    }
+                }
+                if (!has_component) return false;
+            }
+
             return true;
         }
 
         /// Update groups when component is added to entity
         fn updateGroupsOnAdd(self: *Self, entity: Entity, component_id: u16) void {
             for (self.groups.items) |*group| {
-                // Check if this component type is part of the group
+                // Check if this component type is part of the group (owned or free)
                 var is_group_component = false;
-                for (group.component_ids) |id| {
+                for (group.owned_component_ids) |id| {
                     if (id == component_id) {
                         is_group_component = true;
                         break;
                     }
                 }
+                if (!is_group_component) {
+                    for (group.free_component_ids) |id| {
+                        if (id == component_id) {
+                            is_group_component = true;
+                            break;
+                        }
+                    }
+                }
 
-                if (is_group_component and self.entityHasAllGroupComponents(entity, group.component_ids)) {
+                if (is_group_component and self.entityHasAllGroupComponents(entity, group)) {
                     self.addEntityToGroup(entity, group);
                 }
             }
@@ -657,12 +851,20 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         /// Update groups when component is removed from entity
         fn updateGroupsOnRemove(self: *Self, entity: Entity, component_id: u16) void {
             for (self.groups.items) |*group| {
-                // Check if this component type is part of the group
+                // Check if this component type is part of the group (owned or free)
                 var is_group_component = false;
-                for (group.component_ids) |id| {
+                for (group.owned_component_ids) |id| {
                     if (id == component_id) {
                         is_group_component = true;
                         break;
+                    }
+                }
+                if (!is_group_component) {
+                    for (group.free_component_ids) |id| {
+                        if (id == component_id) {
+                            is_group_component = true;
+                            break;
+                        }
                     }
                 }
 
@@ -672,9 +874,11 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
-        /// Add entity to a group (move to group area in all component sparse sets)
+        /// Add entity to a group (move to group area ONLY for owned components)
         fn addEntityToGroup(self: *Self, entity: Entity, group: *const GroupInfo) void {
-            for (group.component_ids) |id| {
+            // Only move owned components to group area
+            // Free components remain in their standard positions
+            for (group.owned_component_ids) |id| {
                 inline for (component_fields, 0..) |field, i| {
                     if (comptime isTagComponent(field.type)) continue;
                     if (id == i) {
@@ -684,9 +888,11 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
-        /// Remove entity from a group (move from group area in all component sparse sets)
+        /// Remove entity from a group (move from group area ONLY for owned components)
         fn removeEntityFromGroup(self: *Self, entity: Entity, group: *const GroupInfo) void {
-            for (group.component_ids) |id| {
+            // Only move owned components from group area
+            // Free components are not organized, so no need to move them
+            for (group.owned_component_ids) |id| {
                 inline for (component_fields, 0..) |field, i| {
                     if (comptime isTagComponent(field.type)) continue;
                     if (id == i) {
@@ -1321,7 +1527,8 @@ test "World group creation and basic operations" {
     // Verify group was created
     const group = world.getGroup(struct { Position, Velocity });
     try std.testing.expect(group != null);
-    try std.testing.expectEqual(@as(usize, 2), group.?.component_ids.len);
+    try std.testing.expectEqual(@as(usize, 2), group.?.owned_component_ids.len);
+    try std.testing.expectEqual(@as(usize, 0), group.?.free_component_ids.len);
 
     // Create entities with different component combinations
     const e1 = world.createEntity();
