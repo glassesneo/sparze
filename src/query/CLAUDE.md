@@ -62,7 +62,7 @@ tags: TagQuery(struct { Active, ?Sleeping, Exclude(Dead) })
 
 ## Group(struct { ... })
 
-Pre-organized multi-component iteration. Supports three group types:
+Pre-organized multi-component iteration. Supports two group types:
 
 ### Group Types
 
@@ -70,7 +70,6 @@ Pre-organized multi-component iteration. Supports three group types:
 |------|--------|------------------|-----------------|----------|
 | **Full-owning** | `struct { A, B }` | All | None | Exclusive hot-path access |
 | **Partial-owning** | `struct { A, Free(B) }` | Some | Some | Share components, optimize hot path |
-| **Non-owning** | `struct { Free(A), Free(B) }` | None | All | Maximum sharing (not yet implemented) |
 
 ### Full-Owning Groups (Default)
 
