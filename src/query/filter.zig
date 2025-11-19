@@ -33,8 +33,10 @@ pub const FilterType = enum {
     single_tag,
     /// TagQuery filter: performs runtime intersection for multiple tag components
     tag_query,
-    /// Resource filter: provides access to a global resource
+    /// Resource filter: provides read-only access to a global resource
     resource,
+    /// ResourceMut filter: provides mutable access to a global resource
+    resource_mut,
     /// EventReader filter: reads events from the previous frame
     event_reader,
     /// EventWriter filter: writes events to the current frame
@@ -738,10 +740,55 @@ pub fn TagQuery(comptime QueryTags: type) type {
     };
 }
 
+/// Resource provides read-only access to a global resource.
+///
+/// Resources are singleton data that can be accessed from any system.
+/// Use Resource(T) for read-only access to enable potential parallel execution
+/// of systems that only read from the same resource.
+///
+/// For mutable access, use ResourceMut(T) instead.
+///
+/// Example:
+/// ```zig
+/// fn renderSystem(config: Resource(RenderConfig)) !void {
+///     // Read-only access to render configuration
+///     const width = config.value.width;
+///     const height = config.value.height;
+/// }
+/// ```
 pub fn Resource(comptime T: type) type {
     return struct {
         const Self = @This();
         pub const filter_type: FilterType = .resource;
+        pub const ResourceType = T;
+        value: *const T,
+
+        pub fn init(value: *const T) Self {
+            return .{
+                .value = value,
+            };
+        }
+    };
+}
+
+/// ResourceMut provides mutable access to a global resource.
+///
+/// Resources are singleton data that can be accessed from any system.
+/// Use ResourceMut(T) when you need to modify the resource state.
+///
+/// For read-only access, use Resource(T) instead to enable better parallelization.
+///
+/// Example:
+/// ```zig
+/// fn scoreSystem(score: ResourceMut(Score)) !void {
+///     // Mutable access to score resource
+///     score.value.points += 100;
+/// }
+/// ```
+pub fn ResourceMut(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const filter_type: FilterType = .resource_mut;
         pub const ResourceType = T;
         value: *T,
 

@@ -52,8 +52,8 @@ const MovementGroup = struct { Position, Health };
 fn gameplaySystem(
     positions: sparze.SingleQuery(Position),
     healths: sparze.SingleQuery(Health),
-    score: sparze.Resource(Score),
-    time: sparze.Resource(GameTime),
+    score: sparze.ResourceMut(Score),
+    time: sparze.ResourceMut(GameTime),
 ) !void {
     // Update positions
     for (positions.components) |*pos| {

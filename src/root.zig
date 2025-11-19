@@ -23,6 +23,7 @@ pub const TagQuery = filter_module.TagQuery;
 pub const Exclude = filter_module.Exclude;
 pub const Free = filter_module.Free;
 pub const Resource = filter_module.Resource;
+pub const ResourceMut = filter_module.ResourceMut;
 pub const EventReader = filter_module.EventReader;
 pub const EventWriter = filter_module.EventWriter;
 

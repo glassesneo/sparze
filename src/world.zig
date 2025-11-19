@@ -25,6 +25,7 @@ pub const Group = filter_module.Group;
 pub const SingleTag = filter_module.SingleTag;
 pub const TagQuery = filter_module.TagQuery;
 pub const Resource = filter_module.Resource;
+pub const ResourceMut = filter_module.ResourceMut;
 pub const EventReader = filter_module.EventReader;
 pub const EventWriter = filter_module.EventWriter;
 pub const Free = filter_module.Free;
@@ -53,6 +54,14 @@ fn isFree(comptime T: type) bool {
 fn extractComponent(comptime T: type) type {
     if (isFree(T)) return T.Component;
     return T;
+}
+
+/// Helper structure to hold parsed group signature information
+fn GroupKey(comptime owned_count: usize, comptime free_count: usize) type {
+    return struct {
+        owned_ids: [owned_count]u16,
+        free_ids: [free_count]u16,
+    };
 }
 
 pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
@@ -226,45 +235,6 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             } else @compileError("Unknown event type: " ++ @typeName(E));
         }
 
-        // Helper to count components matching a predicate (owned or free)
-        fn countMatchingFields(comptime fields: []const StructField, comptime want_owned: bool) usize {
-            var count: usize = 0;
-            for (fields) |field| {
-                const matches = if (want_owned)
-                    !isFree(field.type)
-                else
-                    isFree(field.type);
-                if (matches) count += 1;
-            }
-            return count;
-        }
-
-        // Helper to compute component IDs for owned or free components in a group
-        fn computeGroupIds(
-            comptime GroupComponents: type,
-            comptime want_owned: bool,
-        ) []const u16 {
-            const fields = comptime std.meta.fields(GroupComponents);
-            const count = comptime countMatchingFields(fields, want_owned);
-
-            return comptime blk: {
-                var ids: [count]u16 = undefined;
-                var idx: usize = 0;
-                for (fields) |field| {
-                    const matches = if (want_owned)
-                        !isFree(field.type)
-                    else
-                        isFree(field.type);
-                    if (matches) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk &ids;
-            };
-        }
-
         /// Compile-time validation for multiple groups to detect overlaps.
         ///
         /// This validates that:
@@ -334,6 +304,79 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                     }
                 }
             }
+        }
+
+        /// Parse a group signature to extract owned and free component IDs
+        /// This helper deduplicates the logic used by both createGroup and getGroup
+        fn parseGroupSignature(comptime GroupComponents: type) GroupKey(
+            blk: {
+                const group_fields = std.meta.fields(GroupComponents);
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            },
+            blk: {
+                const group_fields = std.meta.fields(GroupComponents);
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            },
+        ) {
+            const group_fields = comptime std.meta.fields(GroupComponents);
+
+            // Count owned and free components
+            const owned_count = comptime blk: {
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            };
+
+            const free_count = comptime blk: {
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            };
+
+            // Build owned component ID array
+            const owned_ids = comptime blk: {
+                var ids: [owned_count]u16 = undefined;
+                var idx: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
+                }
+                break :blk ids;
+            };
+
+            // Build free component ID array
+            const free_ids = comptime blk: {
+                var ids: [free_count]u16 = undefined;
+                var idx: usize = 0;
+                for (group_fields) |field| {
+                    if (isFree(field.type)) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
+                }
+                break :blk ids;
+            };
+
+            return .{
+                .owned_ids = owned_ids,
+                .free_ids = free_ids,
+            };
         }
 
         pub fn getComponentStorage(self: Self, comptime C: type) ComponentStorage(C) {
@@ -558,9 +601,12 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             const group_fields = comptime std.meta.fields(GroupComponents);
             if (group_fields.len == 0) @compileError("Cannot create group with zero components");
 
-            // Separate owned and free components at compile time
-            const owned_count = comptime countMatchingFields(group_fields, true);
-            const free_count = group_fields.len - owned_count;
+            // Parse group signature using helper function
+            const group_key = comptime parseGroupSignature(GroupComponents);
+            const owned_ids = group_key.owned_ids;
+            const free_ids = group_key.free_ids;
+            const owned_count = owned_ids.len;
+            const free_count = free_ids.len;
 
             // Compile-time validation: ensure at least one component is owned
             if (owned_count == 0) {
@@ -575,10 +621,6 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                     _ = getComponentId(ComponentType); // Will compile error if type not in world
                 }
             }
-
-            // Build owned and free component ID arrays
-            const owned_ids = comptime computeGroupIds(GroupComponents, true);
-            const free_ids = comptime computeGroupIds(GroupComponents, false);
 
             // Check if group already exists (same owned and free components)
             // This must be done BEFORE ownership conflict check to allow creating the same group twice
@@ -646,9 +688,10 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
 
         /// Get group information by component types
         pub fn getGroup(self: *const Self, comptime GroupComponents: type) ?*const GroupInfo {
-            // Separate owned and free component IDs
-            const target_owned_ids = comptime computeGroupIds(GroupComponents, true);
-            const target_free_ids = comptime computeGroupIds(GroupComponents, false);
+            // Parse group signature using helper function
+            const group_key = comptime parseGroupSignature(GroupComponents);
+            const target_owned_ids = group_key.owned_ids;
+            const target_free_ids = group_key.free_ids;
 
             for (self.groups.items) |*group| {
                 if (group.owned_component_ids.len == target_owned_ids.len and
@@ -1146,7 +1189,7 @@ test "Resource mutation in system function" {
     const TestWorld = World(struct { Enemy }, struct { Score }, struct {});
 
     const ScoreSystem = struct {
-        fn system(score: Resource(Score), query: SingleTag(Enemy)) !void {
+        fn system(score: ResourceMut(Score), query: SingleTag(Enemy)) !void {
             for (query.entities) |_| {
                 score.value.points += 100;
                 score.value.combo += 1;
@@ -1240,7 +1283,7 @@ test "System with resource, allocator, query, and commands" {
     const ComplexSystem = struct {
         fn system(
             allocator: std.mem.Allocator,
-            score: Resource(Score),
+            score: ResourceMut(Score),
             enemies: SingleTag(Enemy),
             commands: anytype,
         ) !void {
@@ -1973,4 +2016,71 @@ test "markResourceInitialized for direct resource_pool access" {
     defer buffer.deinit(allocator);
     try world.serialize(buffer.writer(allocator));
     try std.testing.expect(buffer.items.len > 0);
+}
+
+test "Resource is read-only and ResourceMut is mutable" {
+    const GameConfig = struct { speed: f32 };
+    const Score = struct { points: i32 };
+
+    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {});
+
+    // Test read-only Resource system
+    const ReadOnlySystem = struct {
+        fn system(config: Resource(GameConfig)) !void {
+            // Read access works
+            _ = config.value.speed;
+            // Mutation would fail at compile time:
+            // config.value.speed = 100.0; // ERROR: cannot assign to constant
+        }
+    };
+
+    // Test mutable ResourceMut system
+    const MutableSystem = struct {
+        fn system(score: ResourceMut(Score), config: ResourceMut(GameConfig)) !void {
+            // Read and write access work
+            score.value.points += 100;
+            config.value.speed *= 1.5;
+        }
+    };
+
+    // Test mixed read-only and mutable access
+    const MixedSystem = struct {
+        fn system(config: Resource(GameConfig), score: ResourceMut(Score)) !void {
+            // Read from config, write to score
+            score.value.points += @as(i32, @intFromFloat(config.value.speed * 10.0));
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Initialize resources
+    world.resource_pool[0] = .{ .speed = 10.0 };
+    world.resource_pool[1] = .{ .points = 0 };
+    world.markResourceInitialized(GameConfig);
+    world.markResourceInitialized(Score);
+
+    // Run read-only system
+    try world.runSystem(ReadOnlySystem.system);
+
+    // Verify config unchanged
+    try std.testing.expectEqual(@as(f32, 10.0), world.getResource(GameConfig).speed);
+
+    // Run mutable system
+    try world.runSystem(MutableSystem.system);
+
+    // Verify both resources were modified
+    try std.testing.expectEqual(@as(f32, 15.0), world.getResource(GameConfig).speed);
+    try std.testing.expectEqual(@as(i32, 100), world.getResource(Score).points);
+
+    // Run mixed system
+    try world.runSystem(MixedSystem.system);
+
+    // Verify score was updated based on config value, but config unchanged
+    try std.testing.expectEqual(@as(i32, 250), world.getResource(Score).points); // 100 + (15.0 * 10) = 250
+    try std.testing.expectEqual(@as(f32, 15.0), world.getResource(GameConfig).speed);
 }
