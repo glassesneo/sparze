@@ -55,6 +55,14 @@ fn extractComponent(comptime T: type) type {
     return T;
 }
 
+/// Helper structure to hold parsed group signature information
+fn GroupKey(comptime owned_count: usize, comptime free_count: usize) type {
+    return struct {
+        owned_ids: [owned_count]u16,
+        free_ids: [free_count]u16,
+    };
+}
+
 pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
     const component_info = @typeInfo(Components);
     if (component_info != .@"struct") @compileError("Invalid form of components");
@@ -297,6 +305,79 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
+        /// Parse a group signature to extract owned and free component IDs
+        /// This helper deduplicates the logic used by both createGroup and getGroup
+        fn parseGroupSignature(comptime GroupComponents: type) GroupKey(
+            blk: {
+                const group_fields = std.meta.fields(GroupComponents);
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            },
+            blk: {
+                const group_fields = std.meta.fields(GroupComponents);
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            },
+        ) {
+            const group_fields = comptime std.meta.fields(GroupComponents);
+
+            // Count owned and free components
+            const owned_count = comptime blk: {
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            };
+
+            const free_count = comptime blk: {
+                var count: usize = 0;
+                for (group_fields) |field| {
+                    if (isFree(field.type)) count += 1;
+                }
+                break :blk count;
+            };
+
+            // Build owned component ID array
+            const owned_ids = comptime blk: {
+                var ids: [owned_count]u16 = undefined;
+                var idx: usize = 0;
+                for (group_fields) |field| {
+                    if (!isFree(field.type)) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
+                }
+                break :blk ids;
+            };
+
+            // Build free component ID array
+            const free_ids = comptime blk: {
+                var ids: [free_count]u16 = undefined;
+                var idx: usize = 0;
+                for (group_fields) |field| {
+                    if (isFree(field.type)) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
+                }
+                break :blk ids;
+            };
+
+            return .{
+                .owned_ids = owned_ids,
+                .free_ids = free_ids,
+            };
+        }
+
         pub fn getComponentStorage(self: Self, comptime C: type) ComponentStorage(C) {
             const id = comptime getComponentId(C);
             return self.component_pool[id];
@@ -519,16 +600,12 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             const group_fields = comptime std.meta.fields(GroupComponents);
             if (group_fields.len == 0) @compileError("Cannot create group with zero components");
 
-            // Separate owned and free components at compile time
-            const owned_count = comptime blk: {
-                var count: usize = 0;
-                for (group_fields) |field| {
-                    if (!isFree(field.type)) count += 1;
-                }
-                break :blk count;
-            };
-
-            const free_count = group_fields.len - owned_count;
+            // Parse group signature using helper function
+            const group_key = comptime parseGroupSignature(GroupComponents);
+            const owned_ids = group_key.owned_ids;
+            const free_ids = group_key.free_ids;
+            const owned_count = owned_ids.len;
+            const free_count = free_ids.len;
 
             // Compile-time validation: ensure at least one component is owned
             if (owned_count == 0) {
@@ -543,33 +620,6 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                     _ = getComponentId(ComponentType); // Will compile error if type not in world
                 }
             }
-
-            // Build owned and free component ID arrays
-            const owned_ids = comptime blk: {
-                var ids: [owned_count]u16 = undefined;
-                var idx: usize = 0;
-                for (group_fields) |field| {
-                    if (!isFree(field.type)) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk ids;
-            };
-
-            const free_ids = comptime blk: {
-                var ids: [free_count]u16 = undefined;
-                var idx: usize = 0;
-                for (group_fields) |field| {
-                    if (isFree(field.type)) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk ids;
-            };
 
             // Check if group already exists (same owned and free components)
             // This must be done BEFORE ownership conflict check to allow creating the same group twice
@@ -637,44 +687,10 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
 
         /// Get group information by component types
         pub fn getGroup(self: *const Self, comptime GroupComponents: type) ?*const GroupInfo {
-            const group_fields: []const StructField = comptime std.meta.fields(GroupComponents);
-
-            // Separate owned and free component IDs
-            const owned_count = comptime blk: {
-                var count: usize = 0;
-                for (group_fields) |field| {
-                    if (!isFree(field.type)) count += 1;
-                }
-                break :blk count;
-            };
-
-            const free_count = group_fields.len - owned_count;
-
-            const target_owned_ids = comptime blk: {
-                var ids: [owned_count]u16 = undefined;
-                var idx: usize = 0;
-                for (group_fields) |field| {
-                    if (!isFree(field.type)) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk ids;
-            };
-
-            const target_free_ids = comptime blk: {
-                var ids: [free_count]u16 = undefined;
-                var idx: usize = 0;
-                for (group_fields) |field| {
-                    if (isFree(field.type)) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk ids;
-            };
+            // Parse group signature using helper function
+            const group_key = comptime parseGroupSignature(GroupComponents);
+            const target_owned_ids = group_key.owned_ids;
+            const target_free_ids = group_key.free_ids;
 
             for (self.groups.items) |*group| {
                 if (group.owned_component_ids.len == target_owned_ids.len and
