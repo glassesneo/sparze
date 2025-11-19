@@ -461,17 +461,6 @@ pub fn Group(comptime GroupComponents: type) type {
     if (component_fields.len == 0) @compileError("Group must have at least one component");
     const length = component_fields.len;
 
-    // Separate owned and free components at compile time
-    const owned_count = comptime blk: {
-        var count: usize = 0;
-        for (component_fields) |field| {
-            const ComponentType = extractFree(field.type);
-            if (isTagComponent(ComponentType)) @compileError("Group cannot consist of tag components");
-            if (!isFree(field.type)) count += 1;
-        }
-        break :blk count;
-    };
-
     const GroupComponentPoolType = construct_component_pool: {
         var sparse_set_fields: [length]StructField = undefined;
         inline for (component_fields, 0..) |field, i| {
