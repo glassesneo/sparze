@@ -352,6 +352,11 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
 
         pub fn getResourcePtrMut(self: *Self, comptime R: type) *R {
             const id = comptime getResourceId(R);
+            // Mark resource as initialized when getting mutable pointer
+            // This handles the case where users mutate resources in-place
+            if (resource_pool_length > 0) {
+                self.resource_initialized.set(id);
+            }
             return &self.resource_pool[id];
         }
 
@@ -359,6 +364,17 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             const id = comptime getResourceId(R);
             self.resource_pool[id] = resource;
             if (resource_pool_length > 0) {
+                self.resource_initialized.set(id);
+            }
+        }
+
+        /// Mark a resource as initialized.
+        /// This should be called after directly mutating resource_pool[i] to ensure
+        /// the resource can be serialized. Prefer using setResource() or getResourcePtrMut()
+        /// which automatically mark resources as initialized.
+        pub fn markResourceInitialized(self: *Self, comptime R: type) void {
+            if (resource_pool_length > 0) {
+                const id = comptime getResourceId(R);
                 self.resource_initialized.set(id);
             }
         }
@@ -1011,6 +1027,7 @@ test "Resource basic access" {
 
     // Initialize resource
     world.resource_pool[0] = .{ .gravity = 9.8, .max_speed = 100.0 };
+    world.markResourceInitialized(GameConfig);
 
     // Get resource via ID
     try std.testing.expectEqual(@as(u16, 0), TestWorld.getResourceId(GameConfig));
@@ -1038,6 +1055,7 @@ test "Resource mutation via pointer" {
 
     // Initialize resource
     world.resource_pool[0] = .{ .score = 0, .level = 1 };
+    world.markResourceInitialized(GameState);
 
     // Get mutable pointer and modify
     const state = world.getResourcePtrMut(GameState);
@@ -1078,6 +1096,9 @@ test "Multiple resources" {
     world.resource_pool[0] = .{ .gravity = 9.8 };
     world.resource_pool[1] = .{ .score = 0 };
     world.resource_pool[2] = .{ .volume = 0.8, .muted = false };
+    world.markResourceInitialized(GameConfig);
+    world.markResourceInitialized(GameState);
+    world.markResourceInitialized(AudioSettings);
 
     // Verify resource IDs
     try std.testing.expectEqual(@as(u16, 0), TestWorld.getResourceId(GameConfig));
@@ -1118,6 +1139,7 @@ test "Resource in system function" {
 
     // Initialize resource
     world.resource_pool[0] = .{ .dt = 0.016 }; // 60 FPS
+    world.markResourceInitialized(DeltaTime);
 
     // Create entities
     const e1 = world.createEntity();
@@ -1163,6 +1185,7 @@ test "Resource mutation in system function" {
 
     // Initialize resource
     world.resource_pool[0] = .{ .points = 0, .combo = 0 };
+    world.markResourceInitialized(Score);
 
     // Create enemies
     const e1 = world.createEntity();
@@ -1214,6 +1237,8 @@ test "System with multiple resources" {
     // Initialize resources
     world.resource_pool[0] = .{ .dt = 0.016 };
     world.resource_pool[1] = .{ .speed_multiplier = 2.0 };
+    world.markResourceInitialized(DeltaTime);
+    world.markResourceInitialized(GameConfig);
 
     // Create entity
     const e1 = world.createEntity();
@@ -1268,6 +1293,7 @@ test "System with resource, allocator, query, and commands" {
 
     // Initialize resource
     world.resource_pool[0] = .{ .value = 0 };
+    world.markResourceInitialized(Score);
 
     // Create enemies
     const e1 = world.createEntity();
@@ -1307,6 +1333,7 @@ test "World with components and resources together" {
 
     // Initialize resource
     world.resource_pool[0] = .{ .dt = 0.016 };
+    world.markResourceInitialized(DeltaTime);
 
     // Create entity with components
     const entity = world.createEntity();
@@ -1905,4 +1932,67 @@ test "Resource initialization tracking" {
     try world.setResource(Score, .{ .points = 100 });
     try std.testing.expect(world.isResourceInitialized(GameConfig));
     try std.testing.expect(world.isResourceInitialized(Score));
+}
+
+test "getResourcePtrMut marks resource as initialized" {
+    const GameConfig = struct { gravity: f32 };
+    const Score = struct { points: i32 };
+
+    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Initially, resources are not initialized
+    try std.testing.expect(!world.isResourceInitialized(GameConfig));
+    try std.testing.expect(!world.isResourceInitialized(Score));
+
+    // Get mutable pointer and modify - this should mark as initialized
+    const config = world.getResourcePtrMut(GameConfig);
+    config.gravity = 9.8;
+    try std.testing.expect(world.isResourceInitialized(GameConfig));
+
+    // Verify serialization succeeds after using getResourcePtrMut
+    const score = world.getResourcePtrMut(Score);
+    score.points = 100;
+    try std.testing.expect(world.isResourceInitialized(Score));
+
+    // Both resources should now be serializable
+    var buffer: std.ArrayList(u8) = .{};
+    defer buffer.deinit(allocator);
+    try world.serialize(buffer.writer(allocator));
+    try std.testing.expect(buffer.items.len > 0);
+}
+
+test "markResourceInitialized for direct resource_pool access" {
+    const GameConfig = struct { gravity: f32 };
+
+    const TestWorld = World(struct {}, struct { GameConfig }, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Directly assign to resource_pool (not recommended but supported)
+    world.resource_pool[0] = .{ .gravity = 9.8 };
+
+    // Resource is not yet marked as initialized
+    try std.testing.expect(!world.isResourceInitialized(GameConfig));
+
+    // Mark it initialized
+    world.markResourceInitialized(GameConfig);
+    try std.testing.expect(world.isResourceInitialized(GameConfig));
+
+    // Verify serialization succeeds
+    var buffer: std.ArrayList(u8) = .{};
+    defer buffer.deinit(allocator);
+    try world.serialize(buffer.writer(allocator));
+    try std.testing.expect(buffer.items.len > 0);
 }
