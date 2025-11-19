@@ -89,7 +89,13 @@ pub fn serialize(
         try w.writeInt(u64, type_name_hash, .little);
 
         // Check if resource is initialized
-        const is_initialized = if (resource_fields.len > 0) world.resource_initialized.isSet(i) else false;
+        const is_initialized = blk: {
+            if (comptime resource_fields.len == 0) {
+                break :blk false;
+            } else {
+                break :blk world.resource_initialized.isSet(i);
+            }
+        };
         if (!is_initialized) {
             return error.UninitializedResource;
         }
@@ -250,7 +256,7 @@ pub fn deserialize(
         world.resource_pool[i] = try Serializer.deserialize(r);
 
         // Mark resource as initialized
-        if (resource_fields.len > 0) {
+        if (comptime resource_fields.len > 0) {
             world.resource_initialized.set(i);
         }
     }

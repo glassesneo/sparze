@@ -354,7 +354,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             const id = comptime getResourceId(R);
             // Mark resource as initialized when getting mutable pointer
             // This handles the case where users mutate resources in-place
-            if (resource_pool_length > 0) {
+            if (comptime resource_pool_length > 0) {
                 self.resource_initialized.set(id);
             }
             return &self.resource_pool[id];
@@ -363,7 +363,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         pub fn setResource(self: *Self, comptime R: type, resource: R) !void {
             const id = comptime getResourceId(R);
             self.resource_pool[id] = resource;
-            if (resource_pool_length > 0) {
+            if (comptime resource_pool_length > 0) {
                 self.resource_initialized.set(id);
             }
         }
@@ -373,16 +373,19 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         /// the resource can be serialized. Prefer using setResource() or getResourcePtrMut()
         /// which automatically mark resources as initialized.
         pub fn markResourceInitialized(self: *Self, comptime R: type) void {
-            if (resource_pool_length > 0) {
+            if (comptime resource_pool_length > 0) {
                 const id = comptime getResourceId(R);
                 self.resource_initialized.set(id);
             }
         }
 
         pub fn isResourceInitialized(self: *const Self, comptime R: type) bool {
-            if (resource_pool_length == 0) return false;
-            const id = comptime getResourceId(R);
-            return self.resource_initialized.isSet(id);
+            if (comptime resource_pool_length == 0) {
+                return false;
+            } else {
+                const id = comptime getResourceId(R);
+                return self.resource_initialized.isSet(id);
+            }
         }
 
         pub fn getEventStoragePtrMut(self: *Self, comptime E: type) *EventStorage(E) {
