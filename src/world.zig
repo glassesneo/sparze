@@ -308,7 +308,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         /// Parse a group signature to extract owned and free component IDs
         /// This helper deduplicates the logic used by both createGroup and getGroup
         fn parseGroupSignature(comptime GroupComponents: type) GroupKey(
-            comptime blk: {
+            blk: {
                 const group_fields = std.meta.fields(GroupComponents);
                 var count: usize = 0;
                 for (group_fields) |field| {
@@ -316,7 +316,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                 }
                 break :blk count;
             },
-            comptime blk: {
+            blk: {
                 const group_fields = std.meta.fields(GroupComponents);
                 var count: usize = 0;
                 for (group_fields) |field| {
