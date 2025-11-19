@@ -88,7 +88,19 @@ pub fn serialize(
         try w.writeInt(u16, resource_id, .little);
         try w.writeInt(u64, type_name_hash, .little);
 
-        // Always serialize as initialized (we assume all resources are set)
+        // Check if resource is initialized
+        const is_initialized = blk: {
+            if (comptime resource_fields.len == 0) {
+                break :blk false;
+            } else {
+                break :blk world.resource_initialized.isSet(i);
+            }
+        };
+        if (!is_initialized) {
+            return error.UninitializedResource;
+        }
+
+        // Serialize as initialized
         try w.writeInt(u8, 1, .little);
 
         // Serialize resource data
@@ -242,6 +254,11 @@ pub fn deserialize(
         // Deserialize resource data
         const Serializer = traits.getSerializer(Resource);
         world.resource_pool[i] = try Serializer.deserialize(r);
+
+        // Mark resource as initialized
+        if (comptime resource_fields.len > 0) {
+            world.resource_initialized.set(i);
+        }
     }
 
     // Deserialize events (read buffer only)
