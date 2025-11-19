@@ -484,7 +484,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return entity;
         }
 
-        /// Create a group for the given component types (supports full-owning, partial-owning, and non-owning groups)
+        /// Create a group for the given component types (supports full-owning and partial-owning groups)
         pub fn createGroup(self: *Self, comptime GroupComponents: type) !void {
             const group_fields = comptime std.meta.fields(GroupComponents);
             if (group_fields.len == 0) @compileError("Cannot create group with zero components");
@@ -499,6 +499,12 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             };
 
             const free_count = group_fields.len - owned_count;
+
+            // Compile-time validation: ensure at least one component is owned
+            if (owned_count == 0) {
+                @compileError("Groups must have at least one owned component. All components are marked as Free(T). " ++
+                    "Remove Free() from at least one component to create a valid group.");
+            }
 
             // Compile-time validation: ensure all component types are valid for this world
             comptime {
@@ -674,12 +680,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         pub fn getGroupEntities(self: *const Self, comptime GroupComponents: type) ?[]const Entity {
             const group = self.getGroup(GroupComponents) orelse return null;
 
-            // For non-owning groups, we need separate entity tracking (TODO: implement)
-            // For now, use the first owned component if available
-            if (group.owned_component_ids.len == 0) {
-                @panic("Non-owning groups not yet fully implemented");
-            }
-
+            // Use the first owned component (guaranteed to exist by createGroup validation)
             const first_id = group.owned_component_ids[0];
 
             // Use inline for to access tuple element at runtime

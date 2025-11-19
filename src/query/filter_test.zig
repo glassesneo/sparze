@@ -1653,13 +1653,6 @@ test "Partial-owning group - shared free component" {
     try std.testing.expectEqual(@as(usize, 1), group2.getEntities().len);
 }
 
-// TODO: Implement non-owning groups (requires separate entity list storage)
-// Non-owning groups need their own sparse set to store entity IDs
-// since no components are owned and thus organized
-test "Non-owning group - basic functionality (TODO)" {
-    return error.SkipZigTest;
-}
-
 test "Ownership conflict detection" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };

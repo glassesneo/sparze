@@ -461,17 +461,6 @@ pub fn Group(comptime GroupComponents: type) type {
     if (component_fields.len == 0) @compileError("Group must have at least one component");
     const length = component_fields.len;
 
-    // Separate owned and free components at compile time
-    const owned_count = comptime blk: {
-        var count: usize = 0;
-        for (component_fields) |field| {
-            const ComponentType = extractFree(field.type);
-            if (isTagComponent(ComponentType)) @compileError("Group cannot consist of tag components");
-            if (!isFree(field.type)) count += 1;
-        }
-        break :blk count;
-    };
-
     const GroupComponentPoolType = construct_component_pool: {
         var sparse_set_fields: [length]StructField = undefined;
         inline for (component_fields, 0..) |field, i| {
@@ -538,10 +527,7 @@ pub fn Group(comptime GroupComponents: type) type {
 
         pub fn getEntities(self: Self) []const Entity {
             // Use the first owned component's sparse set to get group entities
-            // If no owned components (non-owning group), panic for now
-            if (owned_count == 0) {
-                @panic("Non-owning groups not yet fully implemented");
-            }
+            // (At least one owned component is guaranteed by createGroup validation)
             return inline for (component_fields, 0..) |field, i| {
                 if (!isFree(field.type)) break self.group_component_pool[i].getGroupEntities();
             } else unreachable;
@@ -850,7 +836,7 @@ pub fn Exclude(comptime C: type) type {
     };
 }
 
-/// Free marks a component as "free" (not owned) in a partial-owning or non-owning group.
+/// Free marks a component as "free" (not owned) in a partial-owning group.
 /// Free components are accessed via indirection (sparse set lookup) rather than direct array access.
 /// This allows components to be owned by one group while being used as free in other groups.
 ///
