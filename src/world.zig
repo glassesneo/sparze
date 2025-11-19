@@ -160,6 +160,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         entity_registry: EntityRegistry,
         component_pool: ComponentPoolType,
         resource_pool: ResourcePoolType,
+        resource_initialized: if (resource_pool_length == 0) void else std.StaticBitSet(resource_pool_length),
         event_pool: EventPoolType,
         groups: ArrayList(GroupInfo),
         command_buffer: CommandBuffer(Self),
@@ -175,7 +176,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                     }
                     break :init pool;
                 },
-                .resource_pool = undefined,
+                .resource_pool = if (resource_pool_length == 0) .{} else std.mem.zeroes(ResourcePoolType),
+                .resource_initialized = if (resource_pool_length == 0) {} else std.StaticBitSet(resource_pool_length).initEmpty(),
                 .event_pool = init: {
                     var pool: EventPoolType = undefined;
                     inline for (event_fields, 0..) |field, i| {
@@ -356,6 +358,15 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         pub fn setResource(self: *Self, comptime R: type, resource: R) !void {
             const id = comptime getResourceId(R);
             self.resource_pool[id] = resource;
+            if (resource_pool_length > 0) {
+                self.resource_initialized.set(id);
+            }
+        }
+
+        pub fn isResourceInitialized(self: *const Self, comptime R: type) bool {
+            if (resource_pool_length == 0) return false;
+            const id = comptime getResourceId(R);
+            return self.resource_initialized.isSet(id);
         }
 
         pub fn getEventStoragePtrMut(self: *Self, comptime E: type) *EventStorage(E) {
@@ -1805,4 +1816,93 @@ test "World recommended usage pattern - validate groups upfront" {
     // Fast iteration over group components
     const positions = world.getGroupComponents(struct { Position, Velocity }, Position).?;
     try std.testing.expectEqual(@as(f32, 10.0), positions[0].x);
+}
+
+test "Serialization fails for uninitialized resources" {
+    const Position = struct { x: f32, y: f32 };
+    const GameConfig = struct { gravity: f32 };
+    const Score = struct { points: i32 };
+
+    const TestWorld = World(struct { Position }, struct { GameConfig, Score }, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create an entity
+    const entity = world.createEntity();
+    try world.addComponent(entity, Position, .{ .x = 10.0, .y = 20.0 });
+
+    // Initialize only one resource, leaving the other uninitialized
+    try world.setResource(GameConfig, .{ .gravity = 9.8 });
+
+    // Try to serialize - should fail because Score is not initialized
+    var buffer: std.ArrayList(u8) = .{};
+    defer buffer.deinit(allocator);
+
+    const result = world.serialize(buffer.writer(allocator));
+    try std.testing.expectError(error.UninitializedResource, result);
+}
+
+test "Serialization succeeds when all resources are initialized" {
+    const Position = struct { x: f32, y: f32 };
+    const GameConfig = struct { gravity: f32 };
+    const Score = struct { points: i32 };
+
+    const TestWorld = World(struct { Position }, struct { GameConfig, Score }, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create an entity
+    const entity = world.createEntity();
+    try world.addComponent(entity, Position, .{ .x = 10.0, .y = 20.0 });
+
+    // Initialize all resources
+    try world.setResource(GameConfig, .{ .gravity = 9.8 });
+    try world.setResource(Score, .{ .points = 100 });
+
+    // Serialize - should succeed
+    var buffer: std.ArrayList(u8) = .{};
+    defer buffer.deinit(allocator);
+
+    try world.serialize(buffer.writer(allocator));
+
+    // Verify serialization produced data
+    try std.testing.expect(buffer.items.len > 0);
+}
+
+test "Resource initialization tracking" {
+    const GameConfig = struct { gravity: f32 };
+    const Score = struct { points: i32 };
+
+    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Initially, no resources should be initialized
+    try std.testing.expect(!world.isResourceInitialized(GameConfig));
+    try std.testing.expect(!world.isResourceInitialized(Score));
+
+    // Set GameConfig
+    try world.setResource(GameConfig, .{ .gravity = 9.8 });
+    try std.testing.expect(world.isResourceInitialized(GameConfig));
+    try std.testing.expect(!world.isResourceInitialized(Score));
+
+    // Set Score
+    try world.setResource(Score, .{ .points = 100 });
+    try std.testing.expect(world.isResourceInitialized(GameConfig));
+    try std.testing.expect(world.isResourceInitialized(Score));
 }
