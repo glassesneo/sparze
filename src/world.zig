@@ -25,6 +25,7 @@ pub const Group = filter_module.Group;
 pub const SingleTag = filter_module.SingleTag;
 pub const TagQuery = filter_module.TagQuery;
 pub const Resource = filter_module.Resource;
+pub const ResourceMut = filter_module.ResourceMut;
 pub const EventReader = filter_module.EventReader;
 pub const EventWriter = filter_module.EventWriter;
 pub const Free = filter_module.Free;
@@ -1172,7 +1173,7 @@ test "Resource mutation in system function" {
     const TestWorld = World(struct { Enemy }, struct { Score }, struct {});
 
     const ScoreSystem = struct {
-        fn system(score: Resource(Score), query: SingleTag(Enemy)) !void {
+        fn system(score: ResourceMut(Score), query: SingleTag(Enemy)) !void {
             for (query.entities) |_| {
                 score.value.points += 100;
                 score.value.combo += 1;
@@ -1266,7 +1267,7 @@ test "System with resource, allocator, query, and commands" {
     const ComplexSystem = struct {
         fn system(
             allocator: std.mem.Allocator,
-            score: Resource(Score),
+            score: ResourceMut(Score),
             enemies: SingleTag(Enemy),
             commands: anytype,
         ) !void {
@@ -1999,4 +2000,71 @@ test "markResourceInitialized for direct resource_pool access" {
     defer buffer.deinit(allocator);
     try world.serialize(buffer.writer(allocator));
     try std.testing.expect(buffer.items.len > 0);
+}
+
+test "Resource is read-only and ResourceMut is mutable" {
+    const GameConfig = struct { speed: f32 };
+    const Score = struct { points: i32 };
+
+    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {});
+
+    // Test read-only Resource system
+    const ReadOnlySystem = struct {
+        fn system(config: Resource(GameConfig)) !void {
+            // Read access works
+            _ = config.value.speed;
+            // Mutation would fail at compile time:
+            // config.value.speed = 100.0; // ERROR: cannot assign to constant
+        }
+    };
+
+    // Test mutable ResourceMut system
+    const MutableSystem = struct {
+        fn system(score: ResourceMut(Score), config: ResourceMut(GameConfig)) !void {
+            // Read and write access work
+            score.value.points += 100;
+            config.value.speed *= 1.5;
+        }
+    };
+
+    // Test mixed read-only and mutable access
+    const MixedSystem = struct {
+        fn system(config: Resource(GameConfig), score: ResourceMut(Score)) !void {
+            // Read from config, write to score
+            score.value.points += @as(i32, @intFromFloat(config.value.speed * 10.0));
+        }
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Initialize resources
+    world.resource_pool[0] = .{ .speed = 10.0 };
+    world.resource_pool[1] = .{ .points = 0 };
+    world.markResourceInitialized(GameConfig);
+    world.markResourceInitialized(Score);
+
+    // Run read-only system
+    try world.runSystem(ReadOnlySystem.system);
+
+    // Verify config unchanged
+    try std.testing.expectEqual(@as(f32, 10.0), world.getResource(GameConfig).speed);
+
+    // Run mutable system
+    try world.runSystem(MutableSystem.system);
+
+    // Verify both resources were modified
+    try std.testing.expectEqual(@as(f32, 15.0), world.getResource(GameConfig).speed);
+    try std.testing.expectEqual(@as(i32, 100), world.getResource(Score).points);
+
+    // Run mixed system
+    try world.runSystem(MixedSystem.system);
+
+    // Verify score was updated based on config value, but config unchanged
+    try std.testing.expectEqual(@as(i32, 250), world.getResource(Score).points); // 100 + (15.0 * 10) = 250
+    try std.testing.expectEqual(@as(f32, 15.0), world.getResource(GameConfig).speed);
 }

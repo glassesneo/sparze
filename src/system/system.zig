@@ -803,6 +803,9 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                                 args[i] = ArgType.init(world);
                             },
                             .resource => {
+                                args[i] = ArgType.init(world.getResourcePtr(ArgType.ResourceType));
+                            },
+                            .resource_mut => {
                                 args[i] = ArgType.init(world.getResourcePtrMut(ArgType.ResourceType));
                             },
                             .event_reader => {

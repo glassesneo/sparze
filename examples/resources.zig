@@ -78,7 +78,7 @@ fn physicsSystem(
 
 // Combat system that updates score resource
 fn combatSystem(
-    score: sparze.Resource(Score),
+    score: sparze.ResourceMut(Score),
     enemies: sparze.Query(struct { Enemy, Health, sparze.Exclude(Dead) }),
     commands: anytype,
 ) !void {
@@ -105,7 +105,7 @@ fn combatSystem(
 
 // Collectible system that updates score
 fn collectibleSystem(
-    score: sparze.Resource(Score),
+    score: sparze.ResourceMut(Score),
     player: sparze.Query(struct { Player, Position }),
     collectibles: sparze.Query(struct { Collectible, Position }),
     commands: anytype,
@@ -137,8 +137,8 @@ fn collectibleSystem(
 // Level progression system using multiple resources
 fn levelSystem(
     score: sparze.Resource(Score),
-    state: sparze.Resource(GameState),
-    config: sparze.Resource(GameConfig),
+    state: sparze.ResourceMut(GameState),
+    config: sparze.ResourceMut(GameConfig),
 ) !void {
     // Level up every 1000 points
     const new_level = @as(i32, @intFromFloat(@floor(@as(f32, @floatFromInt(score.value.points)) / 1000.0))) + 1;
