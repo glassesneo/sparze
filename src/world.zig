@@ -226,6 +226,45 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             } else @compileError("Unknown event type: " ++ @typeName(E));
         }
 
+        // Helper to count components matching a predicate (owned or free)
+        fn countMatchingFields(comptime fields: []const StructField, comptime want_owned: bool) usize {
+            var count: usize = 0;
+            for (fields) |field| {
+                const matches = if (want_owned)
+                    !isFree(field.type)
+                else
+                    isFree(field.type);
+                if (matches) count += 1;
+            }
+            return count;
+        }
+
+        // Helper to compute component IDs for owned or free components in a group
+        fn computeGroupIds(
+            comptime GroupComponents: type,
+            comptime want_owned: bool,
+        ) []const u16 {
+            const fields = comptime std.meta.fields(GroupComponents);
+            const count = comptime countMatchingFields(fields, want_owned);
+
+            return comptime blk: {
+                var ids: [count]u16 = undefined;
+                var idx: usize = 0;
+                for (fields) |field| {
+                    const matches = if (want_owned)
+                        !isFree(field.type)
+                    else
+                        isFree(field.type);
+                    if (matches) {
+                        const ComponentType = extractComponent(field.type);
+                        ids[idx] = getComponentId(ComponentType);
+                        idx += 1;
+                    }
+                }
+                break :blk &ids;
+            };
+        }
+
         /// Compile-time validation for multiple groups to detect overlaps.
         ///
         /// This validates that:
@@ -520,14 +559,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             if (group_fields.len == 0) @compileError("Cannot create group with zero components");
 
             // Separate owned and free components at compile time
-            const owned_count = comptime blk: {
-                var count: usize = 0;
-                for (group_fields) |field| {
-                    if (!isFree(field.type)) count += 1;
-                }
-                break :blk count;
-            };
-
+            const owned_count = comptime countMatchingFields(group_fields, true);
             const free_count = group_fields.len - owned_count;
 
             // Compile-time validation: ensure at least one component is owned
@@ -545,31 +577,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
 
             // Build owned and free component ID arrays
-            const owned_ids = comptime blk: {
-                var ids: [owned_count]u16 = undefined;
-                var idx: usize = 0;
-                for (group_fields) |field| {
-                    if (!isFree(field.type)) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk ids;
-            };
-
-            const free_ids = comptime blk: {
-                var ids: [free_count]u16 = undefined;
-                var idx: usize = 0;
-                for (group_fields) |field| {
-                    if (isFree(field.type)) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk ids;
-            };
+            const owned_ids = comptime computeGroupIds(GroupComponents, true);
+            const free_ids = comptime computeGroupIds(GroupComponents, false);
 
             // Check if group already exists (same owned and free components)
             // This must be done BEFORE ownership conflict check to allow creating the same group twice
@@ -637,44 +646,9 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
 
         /// Get group information by component types
         pub fn getGroup(self: *const Self, comptime GroupComponents: type) ?*const GroupInfo {
-            const group_fields: []const StructField = comptime std.meta.fields(GroupComponents);
-
             // Separate owned and free component IDs
-            const owned_count = comptime blk: {
-                var count: usize = 0;
-                for (group_fields) |field| {
-                    if (!isFree(field.type)) count += 1;
-                }
-                break :blk count;
-            };
-
-            const free_count = group_fields.len - owned_count;
-
-            const target_owned_ids = comptime blk: {
-                var ids: [owned_count]u16 = undefined;
-                var idx: usize = 0;
-                for (group_fields) |field| {
-                    if (!isFree(field.type)) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk ids;
-            };
-
-            const target_free_ids = comptime blk: {
-                var ids: [free_count]u16 = undefined;
-                var idx: usize = 0;
-                for (group_fields) |field| {
-                    if (isFree(field.type)) {
-                        const ComponentType = extractComponent(field.type);
-                        ids[idx] = getComponentId(ComponentType);
-                        idx += 1;
-                    }
-                }
-                break :blk ids;
-            };
+            const target_owned_ids = comptime computeGroupIds(GroupComponents, true);
+            const target_free_ids = comptime computeGroupIds(GroupComponents, false);
 
             for (self.groups.items) |*group| {
                 if (group.owned_component_ids.len == target_owned_ids.len and
