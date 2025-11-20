@@ -4,7 +4,9 @@ const std = @import("std");
 pub const MAGIC: [4]u8 = .{ 'S', 'P', 'Z', 'E' };
 
 /// Current serialization format version
-pub const FORMAT_VERSION: u32 = 1;
+/// v1: Original format with all page slots serialized
+/// v2: Optimized sparse set format (only filled slots serialized)
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Header structure for serialized world data
 pub const Header = struct {
@@ -36,7 +38,8 @@ pub const Header = struct {
         }
 
         header.format_version = try reader.readInt(u32, .little);
-        if (header.format_version != FORMAT_VERSION) {
+        // Support backward compatibility: allow v1 and v2
+        if (header.format_version < 1 or header.format_version > FORMAT_VERSION) {
             return error.UnsupportedFormatVersion;
         }
 
