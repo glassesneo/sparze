@@ -920,7 +920,7 @@ inline fn filterWithModifiers(
     comptime fields: []const StructField,
     entity: Entity,
     self: anytype,
-    comptime getStorageFn: fn (@TypeOf(self), comptime type) anytype,
+    comptime getStorageFn: anytype,
 ) bool {
     return inline for (fields) |field| {
         const T, const modifier_type = extractType(field.type);
