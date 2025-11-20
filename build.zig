@@ -15,6 +15,7 @@ const examples = [_]Example{
     .{ .name = "performance_benchmark" },
     .{ .name = "performance_bottleneck_benchmark" },
     .{ .name = "tag_components" },
+    .{ .name = "tag_storage_benchmark" },
     .{ .name = "query_vs_group_benchmark" },
     .{ .name = "reserve_benchmark" },
     .{ .name = "resources" },

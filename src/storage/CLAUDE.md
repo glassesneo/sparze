@@ -28,13 +28,17 @@ Paginated sparse set for component storage with group support.
 
 ## TagStorage
 
-Bitset-backed storage for zero-sized tags.
+Paged sparse storage for zero-sized tags (marker components).
 
-**Structure**: DynamicBitSet (1 bit/entity) + packed entity array + reverse index.
+**Structure**: Paged sparse array (allocated on-demand) + packed entity array.
 
-**Memory**: 8 KB bitset + packed arrays.
+**Constants**: 4096 entities/page, 16 pages max (65536 entities), ~16.5KB per page.
 
-**Best for**: Markers (Enemy, Dead, Selected).
+**Page structure**: Bitset (512 bytes, 4096 bits) + reverse indices (16KB, 4096 × u32).
+
+**Memory**: O(pages_used) instead of O(max_entity_index). For sparse entity allocations, achieves ~98% memory reduction vs. non-paged approach.
+
+**Best for**: Markers (Enemy, Dead, Selected), state flags (Active, Disabled).
 
 ## EventStorage
 
@@ -53,6 +57,6 @@ endFrame() → flush commands
 
 - **Pre-allocate** with `reserve()` before bulk operations
 - **Group support** only in SparseSet
-- **Pages allocated on-demand** in SparseSet
+- **Pages allocated on-demand** in both SparseSet and TagStorage
 
 See [World API](../../CLAUDE.md#world-api).

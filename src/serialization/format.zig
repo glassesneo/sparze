@@ -3,15 +3,27 @@ const std = @import("std");
 /// Magic number for Sparze serialization format: "SPZE"
 pub const MAGIC: [4]u8 = .{ 'S', 'P', 'Z', 'E' };
 
-/// Current serialization format version
-/// v1: Original format with all page slots serialized
-/// v2: Optimized sparse set format (only filled slots serialized)
-pub const FORMAT_VERSION: u32 = 2;
+/// Current serialization format version (Semantic Versioning)
+/// 
+/// Format: "MAJOR.MINOR.PATCH" (5 bytes)
+/// 
+/// WIP Policy:
+/// - This library is work-in-progress (0.x.x versions)
+/// - Version remains "0.1.0" during active development
+/// - Breaking changes may occur between releases without version bumps
+/// - Format compatibility is NOT guaranteed while in 0.x.x
+/// - Version will bump to "1.0.0" when the library reaches stability
+/// 
+/// Once stable (1.0.0+):
+/// - MAJOR: Breaking changes to format (incompatible)
+/// - MINOR: Backward-compatible additions
+/// - PATCH: Backward-compatible fixes
+pub const FORMAT_VERSION: [5]u8 = .{ '0', '.', '1', '.', '0' };
 
 /// Header structure for serialized world data
 pub const Header = struct {
     magic: [4]u8,
-    format_version: u32,
+    format_version: [5]u8,
     type_metadata_hash: u64,
     entity_count: u32,
     component_type_count: u32,
@@ -20,7 +32,7 @@ pub const Header = struct {
 
     pub fn write(self: Header, writer: anytype) !void {
         try writer.writeAll(&self.magic);
-        try writer.writeInt(u32, self.format_version, .little);
+        try writer.writeAll(&self.format_version);
         try writer.writeInt(u64, self.type_metadata_hash, .little);
         try writer.writeInt(u32, self.entity_count, .little);
         try writer.writeInt(u32, self.component_type_count, .little);
@@ -37,9 +49,9 @@ pub const Header = struct {
             return error.InvalidMagicNumber;
         }
 
-        header.format_version = try reader.readInt(u32, .little);
-        // Support backward compatibility: allow v1 and v2
-        if (header.format_version < 1 or header.format_version > FORMAT_VERSION) {
+        try reader.readNoEof(&header.format_version);
+        // Validate format version matches current version
+        if (!std.mem.eql(u8, &header.format_version, &FORMAT_VERSION)) {
             return error.UnsupportedFormatVersion;
         }
 
@@ -192,7 +204,7 @@ test "Header write/read" {
     const read_header = try Header.read(fbs.reader());
 
     try std.testing.expectEqualSlices(u8, &header.magic, &read_header.magic);
-    try std.testing.expectEqual(header.format_version, read_header.format_version);
+    try std.testing.expectEqualSlices(u8, &header.format_version, &read_header.format_version);
     try std.testing.expectEqual(header.type_metadata_hash, read_header.type_metadata_hash);
     try std.testing.expectEqual(header.entity_count, read_header.entity_count);
     try std.testing.expectEqual(header.component_type_count, read_header.component_type_count);

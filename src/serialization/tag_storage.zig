@@ -1,6 +1,7 @@
 const std = @import("std");
 const entity_mod = @import("../entity/entity.zig");
 const Entity = entity_mod.Entity;
+const tag_storage_mod = @import("../storage/tag_storage.zig");
 
 /// Serialize TagStorage to writer
 pub fn serialize(
@@ -10,38 +11,29 @@ pub fn serialize(
 ) !void {
     _ = Tag; // Tag type is zero-sized, no data to serialize
 
-    // Write bitset capacity
-    const capacity: u32 = @intCast(tag_storage.tag_bit_set.capacity());
-    try writer.writeInt(u32, capacity, .little);
+    // Write number of allocated pages
+    var allocated_page_count: u32 = 0;
+    for (tag_storage.tag_pages) |maybe_page| {
+        if (maybe_page != null) allocated_page_count += 1;
+    }
+    try writer.writeInt(u32, allocated_page_count, .little);
 
-    // Write bitset data (u64 words)
-    if (capacity > 0) {
-        const mask_count = (capacity + 63) / 64; // Number of u64 masks in wire format
-        try writer.writeInt(u32, @intCast(mask_count), .little);
-
-        // Access bitset masks directly
-        const masks = tag_storage.tag_bit_set.masks;
+    // Write each allocated page with its index
+    for (tag_storage.tag_pages, 0..) |maybe_page, page_idx| {
+        const page = maybe_page orelse continue;
         
-        if (@bitSizeOf(usize) == 64) {
-            // 64-bit platform: masks are already u64
-            for (masks[0..mask_count]) |mask| {
-                try writer.writeInt(u64, mask, .little);
-            }
-        } else {
-            // 32-bit platform: combine pairs of u32 masks into u64
-            // Calculate actual number of usize masks present
-            const usize_mask_count = (capacity + 31) / 32;
-            for (0..mask_count) |i| {
-                const low_idx = i * 2;
-                const high_idx = low_idx + 1;
-                const low: u64 = if (low_idx < usize_mask_count) masks[low_idx] else 0;
-                const high: u64 = if (high_idx < usize_mask_count) masks[high_idx] else 0;
-                const combined: u64 = low | (high << 32);
-                try writer.writeInt(u64, combined, .little);
-            }
+        // Write page index
+        try writer.writeInt(u16, @intCast(page_idx), .little);
+        
+        // Write tag bits (64 u64 words)
+        for (page.tag_bits) |word| {
+            try writer.writeInt(u64, word, .little);
         }
-    } else {
-        try writer.writeInt(u32, 0, .little);
+        
+        // Write sparse_to_dense indices (4096 u32 values)
+        for (page.sparse_to_dense) |index| {
+            try writer.writeInt(u32, index, .little);
+        }
     }
 
     // Write packed entity array count
@@ -59,47 +51,36 @@ pub fn deserialize(
     comptime Tag: type,
     allocator: std.mem.Allocator,
     reader: anytype,
-) !@import("../storage/tag_storage.zig").TagStorage(Tag) {
-    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
+) !tag_storage_mod.TagStorage(Tag) {
+    const TagStorageType = tag_storage_mod.TagStorage(Tag);
+    const TagPage = tag_storage_mod.TagPage;
 
     var tag_storage = TagStorageType.init(allocator);
     errdefer tag_storage.deinit();
 
-    // Read bitset capacity
-    const capacity = try reader.readInt(u32, .little);
+    // Read number of allocated pages
+    const allocated_page_count = try reader.readInt(u32, .little);
 
-    // Read bitset data
-    const mask_count = try reader.readInt(u32, .little);
-
-    if (mask_count > 0) {
-        // Resize bitset to capacity
-        try tag_storage.tag_bit_set.resize(allocator, capacity, false);
-
-        // Read masks
-        const masks = tag_storage.tag_bit_set.masks;
+    // Read each page
+    for (0..allocated_page_count) |_| {
+        // Read page index
+        const page_idx = try reader.readInt(u16, .little);
         
-        if (@bitSizeOf(usize) == 64) {
-            // 64-bit platform: read u64 directly into usize masks
-            for (masks[0..mask_count]) |*mask| {
-                mask.* = try reader.readInt(u64, .little);
-            }
-        } else {
-            // 32-bit platform: split u64 into pairs of u32 masks
-            // Calculate actual number of usize masks present
-            const usize_mask_count = (capacity + 31) / 32;
-            for (0..mask_count) |i| {
-                const combined = try reader.readInt(u64, .little);
-                const low_idx = i * 2;
-                const high_idx = low_idx + 1;
-                
-                if (low_idx < usize_mask_count) {
-                    masks[low_idx] = @intCast(combined & 0xFFFFFFFF);
-                }
-                if (high_idx < usize_mask_count) {
-                    masks[high_idx] = @intCast((combined >> 32) & 0xFFFFFFFF);
-                }
-            }
+        // Allocate page
+        const page = try allocator.create(TagPage);
+        errdefer allocator.destroy(page);
+        
+        // Read tag bits
+        for (&page.tag_bits) |*word| {
+            word.* = try reader.readInt(u64, .little);
         }
+        
+        // Read sparse_to_dense indices
+        for (&page.sparse_to_dense) |*index| {
+            index.* = try reader.readInt(u32, .little);
+        }
+        
+        tag_storage.tag_pages[page_idx] = page;
     }
 
     // Read packed entity array count
@@ -122,7 +103,7 @@ const testing = std.testing;
 
 test "TagStorage serialization empty" {
     const Tag = struct {};
-    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
+    const TagStorageType = tag_storage_mod.TagStorage(Tag);
 
     var buffer: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -138,13 +119,18 @@ test "TagStorage serialization empty" {
     var loaded = try deserialize(Tag, testing.allocator, fbs.reader());
     defer loaded.deinit();
 
-    try testing.expectEqual(@as(usize, 0), loaded.tag_bit_set.capacity());
+    // Verify no pages allocated
+    var page_count: usize = 0;
+    for (loaded.tag_pages) |maybe_page| {
+        if (maybe_page != null) page_count += 1;
+    }
+    try testing.expectEqual(@as(usize, 0), page_count);
     try testing.expectEqual(@as(usize, 0), loaded.packed_array.items.len);
 }
 
 test "TagStorage serialization with entities" {
     const Tag = struct {};
-    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
+    const TagStorageType = tag_storage_mod.TagStorage(Tag);
 
     var buffer: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -184,7 +170,7 @@ test "TagStorage serialization with entities" {
 
 test "TagStorage serialization many entities" {
     const Tag = struct {};
-    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
+    const TagStorageType = tag_storage_mod.TagStorage(Tag);
 
     var buffer: [1024 * 64]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
@@ -220,7 +206,7 @@ test "TagStorage serialization many entities" {
 
 test "TagStorage serialization sparse indices" {
     const Tag = struct {};
-    const TagStorageType = @import("../storage/tag_storage.zig").TagStorage(Tag);
+    const TagStorageType = tag_storage_mod.TagStorage(Tag);
 
     var buffer: [1024 * 64]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);

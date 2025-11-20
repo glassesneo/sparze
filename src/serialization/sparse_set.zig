@@ -72,13 +72,15 @@ pub fn serialize(
 
 /// Deserialize a SparseSet from reader
 /// Uses component-specific deserializer (POD or custom)
-/// Supports both v1 (all slots) and v2 (only filled slots) formats
+/// WIP format: only filled slots are serialized
 pub fn deserialize(
     comptime Component: type,
     allocator: std.mem.Allocator,
     reader: anytype,
-    format_version: u32,
+    format_version: [5]u8,
 ) !@import("../storage/sparse_set.zig").SparseSet(Component) {
+    _ = format_version; // Format is 0.1.0 (WIP), no versioning needed yet
+    
     const SparseSetType = @import("../storage/sparse_set.zig").SparseSet(Component);
     const Serializer = traits.getSerializer(Component);
 
@@ -94,7 +96,7 @@ pub fn deserialize(
     // Read allocated page count
     const allocated_page_count = try reader.readInt(u16, .little);
 
-    // Read sparse pages (format-specific)
+    // Read sparse pages (WIP format: only filled slots)
     for (0..allocated_page_count) |_| {
         // Read page index
         const page_idx = try reader.readInt(u16, .little);
@@ -108,53 +110,38 @@ pub fn deserialize(
         const page = try allocator.create(SparsePage);
         errdefer allocator.destroy(page);
 
-        if (format_version == 1) {
-            // v1 format: Read all 4096 slots with presence flags
-            for (&page.slots) |*maybe_slot| {
-                const has_value = try reader.readInt(u8, .little);
-                if (has_value == 1) {
-                    const slot = try reader.readInt(u16, .little);
-                    maybe_slot.* = slot;
-                } else {
-                    maybe_slot.* = null;
-                }
-            }
-        } else {
-            // v2 format: Read only filled slots
-            // Initialize all slots to null
-            for (&page.slots) |*maybe_slot| {
-                maybe_slot.* = null;
-            }
+        // Initialize all slots to null
+        for (&page.slots) |*maybe_slot| {
+            maybe_slot.* = null;
+        }
 
-            // Read filled count
-            const filled_count = try reader.readInt(u16, .little);
+        // Read filled count
+        const filled_count = try reader.readInt(u16, .little);
 
-            // Validate filled_count is within bounds
-            // It cannot exceed page_size (4096) or the total dense_count
-            if (filled_count > page_size) {
-                return error.InvalidFilledCount;
-            }
-            if (filled_count > dense_count) {
-                return error.InvalidFilledCount;
+        // Validate filled_count is within bounds
+        if (filled_count > page_size) {
+            return error.InvalidFilledCount;
+        }
+        if (filled_count > dense_count) {
+            return error.InvalidFilledCount;
+        }
+
+        // Read filled slots (slot_index, dense_index pairs)
+        for (0..filled_count) |_| {
+            const slot_idx = try reader.readInt(u16, .little);
+            const dense_index = try reader.readInt(u16, .little);
+
+            // Validate slot_idx is within page bounds
+            if (slot_idx >= page_size) {
+                return error.InvalidSlotIndex;
             }
 
-            // Read filled slots (slot_index, dense_index pairs)
-            for (0..filled_count) |_| {
-                const slot_idx = try reader.readInt(u16, .little);
-                const dense_index = try reader.readInt(u16, .little);
-
-                // Validate slot_idx is within page bounds
-                if (slot_idx >= page_size) {
-                    return error.InvalidSlotIndex;
-                }
-
-                // Validate dense_index is within dense array bounds
-                if (dense_index >= dense_count) {
-                    return error.InvalidDenseIndex;
-                }
-
-                page.slots[slot_idx] = dense_index;
+            // Validate dense_index is within dense array bounds
+            if (dense_index >= dense_count) {
+                return error.InvalidDenseIndex;
             }
+
+            page.slots[slot_idx] = dense_index;
         }
 
         sparse_set.sparse_pages[page_idx] = page;
@@ -197,7 +184,7 @@ test "SparseSet serialization empty" {
 
     // Deserialize (v2 format)
     fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 2);
+    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), "0.1.0".*);
     defer loaded.deinit();
 
     try testing.expectEqual(@as(u32, 0), loaded.group_info.size);
@@ -229,7 +216,7 @@ test "SparseSet serialization with components" {
 
     // Deserialize (v2 format)
     fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 2);
+    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), "0.1.0".*);
     defer loaded.deinit();
 
     // Verify dense arrays
@@ -277,7 +264,7 @@ test "SparseSet serialization with group" {
 
     // Deserialize (v2 format)
     fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 2);
+    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), "0.1.0".*);
     defer loaded.deinit();
 
     // Verify group boundary preserved
@@ -310,7 +297,7 @@ test "SparseSet serialization multiple pages" {
 
     // Deserialize (v2 format)
     fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 2);
+    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), "0.1.0".*);
     defer loaded.deinit();
 
     // Verify all components are accessible
@@ -346,7 +333,7 @@ test "SparseSet serialization v2 very sparse pages" {
 
     // Verify components are retrievable after round-trip
     fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 2);
+    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), "0.1.0".*);
     defer loaded.deinit();
 
     try testing.expectEqual(@as(u32, 100), loaded.get(entity1).?.value);
@@ -385,7 +372,7 @@ test "SparseSet serialization v2 sparse pages (10 entities per page)" {
 
     // Deserialize and verify
     fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 2);
+    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), "0.1.0".*);
     defer loaded.deinit();
 
     try testing.expectEqual(@as(usize, 10), loaded.components.items.len);
@@ -425,7 +412,7 @@ test "SparseSet serialization v2 medium density pages" {
 
     // Deserialize and verify
     fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 2);
+    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), "0.1.0".*);
     defer loaded.deinit();
 
     try testing.expectEqual(@as(usize, 500), loaded.components.items.len);
@@ -464,7 +451,7 @@ test "SparseSet serialization v2 dense pages" {
 
     // Deserialize and verify
     fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 2);
+    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), "0.1.0".*);
     defer loaded.deinit();
 
     try testing.expectEqual(@as(usize, 4000), loaded.components.items.len);
@@ -520,60 +507,3 @@ test "SparseSet serialization v2 file size verification sparse" {
     try testing.expect(bytes_written < 100); // v2: ~50 bytes vs v1: ~12,300 bytes
 }
 
-test "SparseSet backward compatibility with v1 format" {
-    // Test that v2 deserializer can load v1 format files
-    const Component = struct { id: u8 };
-
-    var buffer: [1024 * 128]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buffer);
-
-    // Manually write v1 format
-    const writer = fbs.writer();
-
-    // Write group boundary
-    try writer.writeInt(u32, 0, .little);
-
-    // Write dense count (2 entities)
-    try writer.writeInt(u32, 2, .little);
-
-    // Write allocated page count (1 page)
-    try writer.writeInt(u16, 1, .little);
-
-    // Write page 0 in v1 format (all 4096 slots)
-    try writer.writeInt(u16, 0, .little); // page index
-
-    // Write all 4096 slots with presence flags (v1 format)
-    var slot: u16 = 0;
-    while (slot < page_size) : (slot += 1) {
-        if (slot == 0) {
-            // Entity at slot 0, dense index 0
-            try writer.writeInt(u8, 1, .little);
-            try writer.writeInt(u16, 0, .little);
-        } else if (slot == 100) {
-            // Entity at slot 100, dense index 1
-            try writer.writeInt(u8, 1, .little);
-            try writer.writeInt(u16, 1, .little);
-        } else {
-            // Empty slot
-            try writer.writeInt(u8, 0, .little);
-        }
-    }
-
-    // Write packed entity array
-    try writer.writeInt(u32, 0 | (0 << 16), .little); // Entity 0
-    try writer.writeInt(u32, 100 | (0 << 16), .little); // Entity 100
-
-    // Write component data
-    try writer.writeInt(u8, 42, .little); // Component for entity 0
-    try writer.writeInt(u8, 99, .little); // Component for entity 100
-
-    // Now try to deserialize with v1 format
-    fbs.pos = 0;
-    var loaded = try deserialize(Component, testing.allocator, fbs.reader(), 1);
-    defer loaded.deinit();
-
-    // Verify entities are correctly loaded
-    try testing.expectEqual(@as(usize, 2), loaded.components.items.len);
-    try testing.expectEqual(@as(u8, 42), loaded.get(0 | (0 << 16)).?.id);
-    try testing.expectEqual(@as(u8, 99), loaded.get(100 | (0 << 16)).?.id);
-}

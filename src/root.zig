@@ -50,6 +50,7 @@ pub const serialization = struct {
 };
 
 test {
+    _ = @import("storage/tag_storage_test.zig");
     _ = @import("query/filter_test.zig");
     _ = @import("system/system_test.zig");
     std.testing.refAllDecls(@This());
