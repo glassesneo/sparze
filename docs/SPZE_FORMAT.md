@@ -1,6 +1,5 @@
 # SPZE Format Specification
 
-**Version**: 1
 **File Extension**: `.spze`
 **Magic Number**: `SPZE` (0x53 0x50 0x5A 0x45)
 
@@ -46,7 +45,7 @@ All multi-byte integers are stored in **little-endian** format.
 Offset | Size | Field                  | Type   | Description
 -------|------|------------------------|--------|------------------------------------------
 0      | 4    | magic                  | u8[4]  | Magic number: "SPZE" (0x53504A45)
-4      | 4    | format_version         | u32    | Format version (currently 1)
+4      | 4    | format_version         | u32    | Format version
 8      | 8    | type_metadata_hash     | u64    | FNV-1a hash of component/resource/event types
 16     | 4    | entity_count           | u32    | Number of alive entities
 20     | 4    | component_type_count   | u32    | Number of component types
@@ -120,14 +119,33 @@ Offset | Size | Field                    | Type   | Description
 -------|------|--------------------------|--------|---------------------------
 0      | 4    | group_size               | u32    | Number of entities in group
 4      | 4    | dense_count              | u32    | Total entities with component
-8      | 4    | allocated_page_count     | u32    | Number of allocated sparse pages
-12     | N*2  | allocated_page_indices   | u16[]  | Indices of allocated pages
-       | M*4  | sparse_pages             | ...    | Sparse page data (4096 slots each)
-       | D*4  | packed_array             | u32[]  | Packed entity array
-       | D*C  | components               | T[]    | Component data array
+8      | 2    | allocated_page_count     | u16    | Number of allocated sparse pages
 ```
 
-**Sparse Pages**: Only allocated pages are serialized. Each page contains 4096 optional u16 values (dense indices). Unallocated slots are represented as null.
+#### Sparse Pages
+
+Optimized format writing only filled slots:
+
+```
+For each allocated page:
+  Offset | Size  | Field           | Type   | Description
+  -------|-------|-----------------|--------|---------------------------
+  0      | 2     | page_index      | u16    | Index of this page (0-65535)
+  2      | 2     | filled_count    | u16    | Number of filled slots
+  4      | N*4   | filled_slots    | ...    | (slot_index: u16, dense_index: u16) pairs
+
+Then:
+  Offset | Size | Field           | Type   | Description
+  -------|------|-----------------|--------|---------------------------
+  0      | D*4  | packed_array    | u32[]  | Packed entity array
+  D*4    | D*C  | components      | T[]    | Component data array
+```
+
+**Space efficiency**:
+- Sparse page with 1 entity: ~6 bytes
+- Sparse page with 100 entities: ~410 bytes
+- Sparse page with 500 entities: ~2,010 bytes
+- Full page with 4096 entities: ~16,386 bytes
 
 **Component Data**: Serialized using either:
 - **POD types**: Direct bytewise copy via `std.mem.asBytes()`
@@ -312,18 +330,16 @@ const Name = struct {
 - **Type validation**: O(1) hash comparison at load time
 - **Sparse page optimization**: Only allocated pages serialized (not full 65535 array)
 
-## Version History
+## Key Features
 
-### Version 1 (Current)
-- Initial format specification
-- FNV-1a type hashing
-- CRC32 checksums
-- Hybrid POD/custom serialization
-- Entity versioning preservation
-- Sparse page optimization
-- Tag component support
-- Resource serialization
-- Event read buffer serialization
+- **FNV-1a type hashing**: Type safety validation
+- **CRC32 checksums**: Data integrity verification
+- **Hybrid POD/custom serialization**: Automatic for simple types, customizable for complex ones
+- **Entity versioning preservation**: Complete entity state including free list
+- **Sparse page optimization**: Only filled slots serialized for minimal file size
+- **Tag component support**: Efficient bitset-based serialization
+- **Resource serialization**: Global state persistence
+- **Event read buffer serialization**: Frame-delayed events preserved
 
 ## Implementation
 

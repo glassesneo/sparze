@@ -220,6 +220,7 @@ pub fn deserialize(
                 Component,
                 world.allocator,
                 r,
+                header.format_version,
             );
         }
     }
