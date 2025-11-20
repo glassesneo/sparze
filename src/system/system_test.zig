@@ -3,6 +3,8 @@ const std = @import("std");
 const root = @import("../root.zig");
 const Query = root.Query;
 const SingleQuery = root.SingleQuery;
+const Group = root.Group;
+const SingleTag = root.SingleTag;
 
 // Note: Query/filter tests are consolidated in src/query/filter_test.zig
 // This file contains only system-specific tests (Commands, Allocator parameter injection, etc.)
