@@ -190,7 +190,6 @@ pub fn TagStorage(comptime C: type) type {
         /// ```
         pub fn set(self: *Self, entity: Entity) !void {
             const sparse_index = getIndex(entity);
-            const page_idx = sparse_index >> page_shift;
             const slot_idx: u16 = @intCast(sparse_index & page_mask);
 
             // Get or create the page for this entity
@@ -401,12 +400,9 @@ test "TagStorage memory efficiency with high entity IDs" {
     var tagStorage = TagStorage(TestTag).init(allocator);
     defer tagStorage.deinit();
 
-    var registry = EntityRegistry.init();
-
-    // Create a high-index entity without creating all intermediate entities
-    // This simulates the scenario described in the issue
-    for (0..200000) |_| _ = registry.create();
-    const high_entity = registry.create(); // Entity ~200,000
+    // Create a high-index entity without allocating all intermediate entities
+    const high_index: EntityIndex = 60000; // Well beyond a single page (4096)
+    const high_entity: Entity = high_index; // version = 0
 
     // Tag the high-index entity
     try tagStorage.set(high_entity);
@@ -415,9 +411,15 @@ test "TagStorage memory efficiency with high entity IDs" {
     try std.testing.expect(tagStorage.contains(high_entity));
     try std.testing.expectEqual(@as(usize, 1), tagStorage.packed_array.items.len);
 
-    // With paged implementation, we should only have allocated a few pages
-    // (page 0 might be allocated by reserve, and page 48-49 for entity 200,000)
-    // Instead of allocating arrays of 200,000 elements
+    // With the paged implementation, only the page for this high index should be allocated
+    var allocated_pages: usize = 0;
+    for (tagStorage.tag_pages) |maybe_page| {
+        if (maybe_page != null) allocated_pages += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), allocated_pages);
+
+    const expected_page = high_index >> page_shift;
+    try std.testing.expect(tagStorage.tag_pages[expected_page] != null);
 
     // Untag and verify
     tagStorage.unset(high_entity);
