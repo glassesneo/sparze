@@ -916,7 +916,7 @@ fn extractFree(comptime T: type) type {
 ///   - entity: The entity to check
 ///   - self: The query instance (Query or TagQuery)
 ///   - getStorageFn: A comptime function that returns storage pointer for a given type
-fn filterWithModifiers(
+inline fn filterWithModifiers(
     comptime fields: []const StructField,
     entity: Entity,
     self: anytype,
