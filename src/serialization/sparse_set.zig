@@ -129,6 +129,15 @@ pub fn deserialize(
             // Read filled count
             const filled_count = try reader.readInt(u16, .little);
 
+            // Validate filled_count is within bounds
+            // It cannot exceed page_size (4096) or the total dense_count
+            if (filled_count > page_size) {
+                return error.InvalidFilledCount;
+            }
+            if (filled_count > dense_count) {
+                return error.InvalidFilledCount;
+            }
+
             // Read filled slots (slot_index, dense_index pairs)
             for (0..filled_count) |_| {
                 const slot_idx = try reader.readInt(u16, .little);
