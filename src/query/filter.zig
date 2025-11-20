@@ -209,19 +209,12 @@ pub fn Query(comptime QueryComponents: type) type {
 
         /// Filter entities based on required components
         pub fn filter(self: Self, entity: Entity) bool {
-            return inline for (component_fields) |field| {
-                const T, const modifier_type = extractType(field.type);
-                if (modifier_type) |modifier| switch (modifier) {
-                    .optional => continue,
-                    .exclude => {
-                        if (self.getComponentStoragePtr(T).*.contains(entity))
-                            break false;
-                        continue;
-                    },
-                };
-                if (!self.getComponentStoragePtr(T).*.contains(entity))
-                    break false;
-            } else true;
+            const GetStorage = struct {
+                fn call(s: Self, comptime T: type) *const ComponentStorage(T) {
+                    return s.getComponentStoragePtr(T);
+                }
+            };
+            return filterWithModifiers(component_fields, entity, self, GetStorage.call);
         }
 
         pub fn iterator(self: *Self) Iterator {
@@ -713,19 +706,12 @@ pub fn TagQuery(comptime QueryTags: type) type {
 
         /// Filter entities based on required tags
         pub fn filter(self: Self, entity: Entity) bool {
-            return inline for (tag_fields) |field| {
-                const T, const modifier_type = extractType(field.type);
-                if (modifier_type) |modifier| switch (modifier) {
-                    .optional => continue,
-                    .exclude => {
-                        if (self.getTagStoragePtr(T).*.contains(entity))
-                            break false;
-                        continue;
-                    },
-                };
-                if (!self.getTagStoragePtr(T).*.contains(entity))
-                    break false;
-            } else true;
+            const GetStorage = struct {
+                fn call(s: Self, comptime T: type) *const TagStorage(T) {
+                    return s.getTagStoragePtr(T);
+                }
+            };
+            return filterWithModifiers(tag_fields, entity, self, GetStorage.call);
         }
 
         /// Check if entity has a specific tag (for optional tags)
@@ -920,4 +906,33 @@ fn isFree(comptime T: type) bool {
 fn extractFree(comptime T: type) type {
     if (isFree(T)) return T.Component;
     return T;
+}
+
+/// Generic filter implementation for handling optional and exclude modifiers.
+/// This helper reduces code duplication between Query.filter and TagQuery.filter.
+///
+/// Parameters:
+///   - fields: The comptime field array to iterate over
+///   - entity: The entity to check
+///   - self: The query instance (Query or TagQuery)
+///   - getStorageFn: A comptime function that returns storage pointer for a given type
+fn filterWithModifiers(
+    comptime fields: []const StructField,
+    entity: Entity,
+    self: anytype,
+    comptime getStorageFn: fn (@TypeOf(self), comptime type) anytype,
+) bool {
+    return inline for (fields) |field| {
+        const T, const modifier_type = extractType(field.type);
+        if (modifier_type) |modifier| switch (modifier) {
+            .optional => continue,
+            .exclude => {
+                if (getStorageFn(self, T).*.contains(entity))
+                    break false;
+                continue;
+            },
+        };
+        if (!getStorageFn(self, T).*.contains(entity))
+            break false;
+    } else true;
 }
