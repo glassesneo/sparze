@@ -148,6 +148,11 @@ pub fn deserialize(
                     return error.InvalidSlotIndex;
                 }
 
+                // Validate dense_index is within dense array bounds
+                if (dense_index >= dense_count) {
+                    return error.InvalidDenseIndex;
+                }
+
                 page.slots[slot_idx] = dense_index;
             }
         }
