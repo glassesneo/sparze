@@ -99,6 +99,11 @@ pub fn deserialize(
         // Read page index
         const page_idx = try reader.readInt(u16, .little);
 
+        // Validate page_idx is within bounds
+        if (page_idx >= max_pages) {
+            return error.InvalidPageIndex;
+        }
+
         // Allocate page
         const page = try allocator.create(SparsePage);
         errdefer allocator.destroy(page);
@@ -128,6 +133,12 @@ pub fn deserialize(
             for (0..filled_count) |_| {
                 const slot_idx = try reader.readInt(u16, .little);
                 const dense_index = try reader.readInt(u16, .little);
+
+                // Validate slot_idx is within page bounds
+                if (slot_idx >= page_size) {
+                    return error.InvalidSlotIndex;
+                }
+
                 page.slots[slot_idx] = dense_index;
             }
         }
