@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const DynamicBitSet = std.DynamicBitSetUnmanaged;
 const entity_module = @import("../entity/entity.zig");
 pub const max_entities = entity_module.max_entities;
 const EntityRegistry = entity_module.EntityRegistry;
@@ -11,17 +10,62 @@ const EntityVersion = entity_module.EntityVersion;
 const getIndex = entity_module.getIndex;
 const getVersion = entity_module.getVersion;
 
+// Pagination configuration (same as SparseSet)
+pub const page_size: u16 = 4096; // Entities per page (2^12)
+pub const page_shift: u5 = 12; // log2(page_size)
+pub const page_mask: u16 = page_size - 1; // 0xFFF
+pub const max_pages: u16 = @intCast((@as(u32, max_entities) + @as(u32, page_size) - 1) / @as(u32, page_size));
+
+// Number of u64 words needed to store page_size bits
+const bits_per_word = 64;
+const words_per_page = page_size / bits_per_word; // 4096 / 64 = 64 words
+
+/// A single page in the tag storage
+pub const TagPage = struct {
+    // Bitset for tag presence (4096 bits = 64 u64 words = 512 bytes)
+    tag_bits: [words_per_page]u64,
+    // Reverse indices mapping entity index within page -> packed array index
+    // u32 max value used as sentinel for "not set"
+    sparse_to_dense: [page_size]u32,
+
+    fn init() TagPage {
+        return .{
+            .tag_bits = [_]u64{0} ** words_per_page,
+            .sparse_to_dense = [_]u32{std.math.maxInt(u32)} ** page_size,
+        };
+    }
+
+    fn isSet(self: *const TagPage, slot_idx: u16) bool {
+        const word_idx = slot_idx / bits_per_word;
+        const bit_idx: u6 = @intCast(slot_idx % bits_per_word);
+        return (self.tag_bits[word_idx] & (@as(u64, 1) << bit_idx)) != 0;
+    }
+
+    fn setBit(self: *TagPage, slot_idx: u16) void {
+        const word_idx = slot_idx / bits_per_word;
+        const bit_idx: u6 = @intCast(slot_idx % bits_per_word);
+        self.tag_bits[word_idx] |= (@as(u64, 1) << bit_idx);
+    }
+
+    fn unsetBit(self: *TagPage, slot_idx: u16) void {
+        const word_idx = slot_idx / bits_per_word;
+        const bit_idx: u6 = @intCast(slot_idx % bits_per_word);
+        self.tag_bits[word_idx] &= ~(@as(u64, 1) << bit_idx);
+    }
+};
+
 /// Storage for tag components (zero-sized marker components).
 ///
 /// TagStorage is optimized for components with no data (empty structs).
-/// It uses a bit set for O(1) presence checking and a packed entity array
+/// It uses a paged sparse layout for memory efficiency and a packed entity array
 /// for efficient iteration. Unlike SparseSet, it stores no component data,
 /// only tracking which entities have the tag.
 ///
 /// Memory layout:
-/// - DynamicBitSet: One bit per entity index for fast contains() checks
+/// - Paged sparse array: Only allocates pages (4096 entities each) as needed
+///   - Each page contains a bitset (512 bytes) and reverse indices (16KB)
+///   - Memory usage: O(max_entity_index / page_size) instead of O(max_entity_index)
 /// - ArrayList(Entity): Packed array of entities with this tag for iteration
-/// - ArrayList(u32): Reverse index mapping entity index -> packed array index for O(1) removal
 ///
 /// Use cases:
 /// - Marker components (e.g., `const Player = struct {};`)
@@ -40,8 +84,7 @@ pub fn TagStorage(comptime C: type) type {
         pub const Component = C;
         allocator: Allocator,
         packed_array: ArrayList(Entity),
-        tag_bit_set: DynamicBitSet,
-        sparse_to_dense: ArrayList(u32), // Reverse index: entity index -> packed array index
+        tag_pages: [max_pages]?*TagPage, // Paginated sparse array
 
         /// Initialize a new TagStorage with the given allocator.
         /// The storage starts empty with no allocated capacity.
@@ -56,24 +99,26 @@ pub fn TagStorage(comptime C: type) type {
             return .{
                 .allocator = allocator,
                 .packed_array = .{},
-                .tag_bit_set = .{},
-                .sparse_to_dense = .{},
+                .tag_pages = [_]?*TagPage{null} ** max_pages,
             };
         }
 
         /// Deinitialize TagStorage, freeing internal buffers.
-        /// All entities and bit set data will be deallocated.
+        /// All entities and page data will be deallocated.
         pub fn deinit(self: *Self) void {
+            // Free all allocated pages
+            for (self.tag_pages) |maybe_page| {
+                const page = maybe_page orelse continue;
+                self.allocator.destroy(page);
+            }
             self.packed_array.deinit(self.allocator);
-            self.tag_bit_set.deinit(self.allocator);
-            self.sparse_to_dense.deinit(self.allocator);
         }
 
         /// Reserve capacity for the specified number of tags to reduce reallocations.
         /// Useful before bulk inserts (e.g., when loading a scene).
-        /// Reserves both packed entity array and reverse index.
+        /// Reserves packed entity array and pre-allocates sparse pages.
         ///
-        /// Complexity: O(1) if capacity is already sufficient, otherwise O(n) where n = new capacity.
+        /// Complexity: O(page_count) where page_count = capacity / page_size.
         ///
         /// Example:
         /// ```zig
@@ -84,17 +129,59 @@ pub fn TagStorage(comptime C: type) type {
         /// ```
         pub fn reserve(self: *Self, capacity: usize) !void {
             try self.packed_array.ensureTotalCapacity(self.allocator, capacity);
-            try self.sparse_to_dense.ensureTotalCapacity(self.allocator, capacity);
+
+            // Pre-allocate sparse pages to avoid allocation spikes during bulk inserts
+            // Calculate required pages: ceiling(capacity / page_size)
+            const required_pages = (capacity + page_size - 1) / page_size;
+            try self.reservePages(required_pages);
+        }
+
+        /// Reserve sparse pages to reduce on-demand page allocation overhead.
+        /// Pre-allocates the specified number of pages (starting from page 0).
+        /// Useful for bulk entity creation scenarios to avoid allocation spikes.
+        /// Complexity: O(page_count) where page_count = number of pages to allocate.
+        pub fn reservePages(self: *Self, page_count: usize) !void {
+            const max_page = @min(page_count, max_pages);
+            for (0..max_page) |page_idx| {
+                if (self.tag_pages[page_idx] == null) {
+                    const new_page = try self.allocator.create(TagPage);
+                    new_page.* = TagPage.init();
+                    self.tag_pages[page_idx] = new_page;
+                }
+            }
         }
 
         fn castEntityIndex(entity: Entity) usize {
             return @intCast(getIndex(entity));
         }
 
+        /// Get or create a tag page for the given entity
+        fn getOrCreatePage(self: *Self, entity: Entity) !*TagPage {
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index >> page_shift;
+
+            if (self.tag_pages[page_idx]) |page| {
+                return page;
+            }
+
+            // Allocate new page
+            const new_page = try self.allocator.create(TagPage);
+            new_page.* = TagPage.init();
+            self.tag_pages[page_idx] = new_page;
+            return new_page;
+        }
+
+        /// Get tag page if it exists
+        fn getPage(self: *const Self, entity: Entity) ?*TagPage {
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index >> page_shift;
+            return self.tag_pages[page_idx];
+        }
+
         /// Mark an entity as having this tag component.
         /// If the entity already has the tag, this is a no-op.
         ///
-        /// Complexity: O(1) amortized (may resize bit set or packed array)
+        /// Complexity: O(1) amortized (may allocate page or resize packed array)
         ///
         /// Example:
         /// ```zig
@@ -102,34 +189,21 @@ pub fn TagStorage(comptime C: type) type {
         /// try storage.set(entity); // Entity now has tag
         /// ```
         pub fn set(self: *Self, entity: Entity) !void {
-            const index = castEntityIndex(entity);
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index >> page_shift;
+            const slot_idx: u16 = @intCast(sparse_index & page_mask);
 
-            // Ensure bit set capacity first
-            if (index >= self.tag_bit_set.capacity()) {
-                try self.tag_bit_set.resize(self.allocator, index + 1, false);
-            }
-
-            // Ensure reverse index capacity matches bit set capacity
-            if (index >= self.sparse_to_dense.capacity) {
-                try self.sparse_to_dense.ensureTotalCapacity(self.allocator, index + 1);
-                // Initialize new slots to max u32 (sentinel for unset)
-                const old_len = self.sparse_to_dense.items.len;
-                try self.sparse_to_dense.resize(self.allocator, index + 1);
-                @memset(self.sparse_to_dense.items[old_len..], std.math.maxInt(u32));
-            } else if (index >= self.sparse_to_dense.items.len) {
-                // Capacity sufficient but length too short; extend length to index+1
-                const old_len = self.sparse_to_dense.items.len;
-                try self.sparse_to_dense.resize(self.allocator, index + 1);
-                @memset(self.sparse_to_dense.items[old_len..], std.math.maxInt(u32));
-            }
+            // Get or create the page for this entity
+            const page = try self.getOrCreatePage(entity);
 
             // Check if already set
-            if (self.tag_bit_set.isSet(index)) return;
+            if (page.isSet(slot_idx)) return;
 
+            // Add to packed array and set the tag bit
             const packed_index = @as(u32, @intCast(self.packed_array.items.len));
             try self.packed_array.append(self.allocator, entity);
-            self.tag_bit_set.set(index);
-            self.sparse_to_dense.items[index] = packed_index;
+            page.setBit(slot_idx);
+            page.sparse_to_dense[slot_idx] = packed_index;
         }
 
         /// Remove the tag from an entity.
@@ -144,13 +218,15 @@ pub fn TagStorage(comptime C: type) type {
         /// storage.unset(entity); // Entity no longer has tag
         /// ```
         pub fn unset(self: *Self, entity: Entity) void {
-            const index = castEntityIndex(entity);
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index >> page_shift;
+            const slot_idx: u16 = @intCast(sparse_index & page_mask);
 
-            // Check bounds and if already unset
-            if (index >= self.tag_bit_set.capacity()) return;
-            if (!self.tag_bit_set.isSet(index)) return;
+            // Check if page exists and tag is set
+            const page = self.tag_pages[page_idx] orelse return;
+            if (!page.isSet(slot_idx)) return;
 
-            const packed_index = self.sparse_to_dense.items[index];
+            const packed_index = page.sparse_to_dense[slot_idx];
 
             // Read the last element BEFORE swapRemove (which will move it)
             const last_element_index = self.packed_array.items.len - 1;
@@ -158,13 +234,16 @@ pub fn TagStorage(comptime C: type) type {
             const last_entity = if (will_swap) self.packed_array.items[last_element_index] else undefined;
 
             _ = self.packed_array.swapRemove(packed_index);
-            self.tag_bit_set.unset(index);
-            self.sparse_to_dense.items[index] = std.math.maxInt(u32); // Invalidate reverse index
+            page.unsetBit(slot_idx);
+            page.sparse_to_dense[slot_idx] = std.math.maxInt(u32); // Invalidate reverse index
 
             // Update the reverse index for the swapped entity
             if (will_swap) {
-                const last_entity_index = castEntityIndex(last_entity);
-                self.sparse_to_dense.items[last_entity_index] = packed_index;
+                const last_sparse_index = getIndex(last_entity);
+                const last_page_idx = last_sparse_index >> page_shift;
+                const last_slot_idx: u16 = @intCast(last_sparse_index & page_mask);
+                const last_page = self.tag_pages[last_page_idx].?;
+                last_page.sparse_to_dense[last_slot_idx] = packed_index;
             }
         }
 
@@ -179,10 +258,170 @@ pub fn TagStorage(comptime C: type) type {
         /// }
         /// ```
         pub fn contains(self: Self, entity: Entity) bool {
-            const index = castEntityIndex(entity);
-            if (index >= self.tag_bit_set.capacity()) return false;
-            return self.tag_bit_set.isSet(index);
+            const sparse_index = getIndex(entity);
+            const page_idx = sparse_index >> page_shift;
+            const slot_idx: u16 = @intCast(sparse_index & page_mask);
+
+            const page = self.tag_pages[page_idx] orelse return false;
+            return page.isSet(slot_idx);
         }
     };
+}
+
+test "TagStorage basic operations" {
+    const TestTag = struct {};
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var registry = EntityRegistry.init();
+
+    var tagStorage = TagStorage(TestTag).init(allocator);
+    defer tagStorage.deinit();
+
+    const e1 = registry.create();
+    const e2 = registry.create();
+    const e3 = registry.create();
+
+    // Test initial state
+    try std.testing.expect(!tagStorage.contains(e1));
+
+    // Test set
+    try tagStorage.set(e1);
+    try tagStorage.set(e2);
+    try std.testing.expect(tagStorage.contains(e1));
+    try std.testing.expect(tagStorage.contains(e2));
+    try std.testing.expect(!tagStorage.contains(e3));
+
+    // Test set on already tagged entity (no-op)
+    try tagStorage.set(e1);
+    try std.testing.expect(tagStorage.contains(e1));
+
+    // Test unset
+    tagStorage.unset(e1);
+    try std.testing.expect(!tagStorage.contains(e1));
+    try std.testing.expect(tagStorage.contains(e2));
+
+    // Test unsetting non-tagged entity (should not crash)
+    tagStorage.unset(e3);
+}
+
+test "TagStorage pagination with sparse entities" {
+    const TestTag = struct {};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var tagStorage = TagStorage(TestTag).init(allocator);
+    defer tagStorage.deinit();
+
+    var registry = EntityRegistry.init();
+
+    // Create entities in different pages to verify pagination works correctly
+    // This test verifies that we DON'T allocate O(max_entity_index) memory
+    var entities: [3]Entity = undefined;
+
+    // Entity 0 (page 0)
+    entities[0] = registry.create();
+
+    // Skip to get entity in different page (around entity 4096)
+    for (0..4096) |_| _ = registry.create();
+    entities[1] = registry.create(); // This should be in page 1
+
+    // Skip to get entity in another page (around entity 8192)
+    for (0..4095) |_| _ = registry.create();
+    entities[2] = registry.create(); // This should be in page 2
+
+    // Tag the entities
+    try tagStorage.set(entities[0]);
+    try tagStorage.set(entities[1]);
+    try tagStorage.set(entities[2]);
+
+    // Verify all entities are tagged
+    try std.testing.expect(tagStorage.contains(entities[0]));
+    try std.testing.expect(tagStorage.contains(entities[1]));
+    try std.testing.expect(tagStorage.contains(entities[2]));
+
+    // Verify packed array has exactly 3 entities
+    try std.testing.expectEqual(@as(usize, 3), tagStorage.packed_array.items.len);
+
+    // Untag middle entity and verify others remain
+    tagStorage.unset(entities[1]);
+    try std.testing.expect(tagStorage.contains(entities[0]));
+    try std.testing.expect(!tagStorage.contains(entities[1]));
+    try std.testing.expect(tagStorage.contains(entities[2]));
+
+    // Verify packed array has 2 entities after removal
+    try std.testing.expectEqual(@as(usize, 2), tagStorage.packed_array.items.len);
+}
+
+test "TagStorage removal consistency" {
+    const TestTag = struct {};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var tagStorage = TagStorage(TestTag).init(allocator);
+    defer tagStorage.deinit();
+
+    var registry = EntityRegistry.init();
+    const total = 10;
+    var ids = [_]Entity{undefined} ** total;
+    for (0..total) |i| {
+        ids[i] = registry.create();
+        try tagStorage.set(ids[i]);
+    }
+
+    // Verify all entities are tagged
+    for (0..total) |i| {
+        try std.testing.expect(tagStorage.contains(ids[i]));
+    }
+
+    // Remove middle entity
+    const mid = ids[5];
+    tagStorage.unset(mid);
+    try std.testing.expect(!tagStorage.contains(mid));
+
+    // Verify all other entities are still tagged
+    for (0..total) |i| {
+        if (i == 5) continue;
+        try std.testing.expect(tagStorage.contains(ids[i]));
+    }
+
+    try std.testing.expectEqual(@as(usize, total - 1), tagStorage.packed_array.items.len);
+}
+
+test "TagStorage memory efficiency with high entity IDs" {
+    const TestTag = struct {};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var tagStorage = TagStorage(TestTag).init(allocator);
+    defer tagStorage.deinit();
+
+    var registry = EntityRegistry.init();
+
+    // Create a high-index entity without creating all intermediate entities
+    // This simulates the scenario described in the issue
+    for (0..200000) |_| _ = registry.create();
+    const high_entity = registry.create(); // Entity ~200,000
+
+    // Tag the high-index entity
+    try tagStorage.set(high_entity);
+
+    // Verify it's tagged
+    try std.testing.expect(tagStorage.contains(high_entity));
+    try std.testing.expectEqual(@as(usize, 1), tagStorage.packed_array.items.len);
+
+    // With paged implementation, we should only have allocated a few pages
+    // (page 0 might be allocated by reserve, and page 48-49 for entity 200,000)
+    // Instead of allocating arrays of 200,000 elements
+
+    // Untag and verify
+    tagStorage.unset(high_entity);
+    try std.testing.expect(!tagStorage.contains(high_entity));
+    try std.testing.expectEqual(@as(usize, 0), tagStorage.packed_array.items.len);
 }
 
