@@ -35,13 +35,18 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
       - name: Commit and push formatting changes
-        if: steps.verify-changed-files.outputs.changed == 'true'
+        if: github.event_name == 'push' && steps.verify-changed-files.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore: auto-format code with zig fmt [skip ci]"
           git push
+      - name: Fail on formatting changes
+        if: github.event_name == 'pull_request' && steps.verify-changed-files.outputs.changed == 'true'
+        run: |
+          echo "Formatting changes detected. Please run 'zig fmt src' locally and push the updates."
+          exit 1
       - name: Setup wasmtime
         uses: bytecodealliance/actions/wasmtime/setup@v1
       - name: Wasmtime version
