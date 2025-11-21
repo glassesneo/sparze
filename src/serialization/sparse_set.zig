@@ -80,7 +80,7 @@ pub fn deserialize(
     format_version: [5]u8,
 ) !@import("../storage/sparse_set.zig").SparseSet(Component) {
     _ = format_version; // Format is 0.1.0 (WIP), no versioning needed yet
-    
+
     const SparseSetType = @import("../storage/sparse_set.zig").SparseSet(Component);
     const Serializer = traits.getSerializer(Component);
 
@@ -506,4 +506,3 @@ test "SparseSet serialization v2 file size verification sparse" {
     try testing.expect(bytes_written > 0);
     try testing.expect(bytes_written < 100); // v2: ~50 bytes vs v1: ~12,300 bytes
 }
-

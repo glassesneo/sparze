@@ -21,15 +21,15 @@ pub fn serialize(
     // Write each allocated page with its index
     for (tag_storage.tag_pages, 0..) |maybe_page, page_idx| {
         const page = maybe_page orelse continue;
-        
+
         // Write page index
         try writer.writeInt(u16, @intCast(page_idx), .little);
-        
+
         // Write tag bits (64 u64 words)
         for (page.tag_bits) |word| {
             try writer.writeInt(u64, word, .little);
         }
-        
+
         // Write sparse_to_dense indices (4096 u32 values)
         for (page.sparse_to_dense) |index| {
             try writer.writeInt(u32, index, .little);
@@ -65,21 +65,21 @@ pub fn deserialize(
     for (0..allocated_page_count) |_| {
         // Read page index
         const page_idx = try reader.readInt(u16, .little);
-        
+
         // Allocate page
         const page = try allocator.create(TagPage);
         errdefer allocator.destroy(page);
-        
+
         // Read tag bits
         for (&page.tag_bits) |*word| {
             word.* = try reader.readInt(u64, .little);
         }
-        
+
         // Read sparse_to_dense indices
         for (&page.sparse_to_dense) |*index| {
             index.* = try reader.readInt(u32, .little);
         }
-        
+
         tag_storage.tag_pages[page_idx] = page;
     }
 

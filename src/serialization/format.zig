@@ -4,16 +4,16 @@ const std = @import("std");
 pub const MAGIC: [4]u8 = .{ 'S', 'P', 'Z', 'E' };
 
 /// Current serialization format version (Semantic Versioning)
-/// 
+///
 /// Format: "MAJOR.MINOR.PATCH" (5 bytes)
-/// 
+///
 /// WIP Policy:
 /// - This library is work-in-progress (0.x.x versions)
 /// - Version remains "0.1.0" during active development
 /// - Breaking changes may occur between releases without version bumps
 /// - Format compatibility is NOT guaranteed while in 0.x.x
 /// - Version will bump to "1.0.0" when the library reaches stability
-/// 
+///
 /// Once stable (1.0.0+):
 /// - MAJOR: Breaking changes to format (incompatible)
 /// - MINOR: Backward-compatible additions

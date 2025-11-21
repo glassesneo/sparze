@@ -556,4 +556,3 @@ test "SparseSet pointer consistency across operations" {
     try std.testing.expect(set.getPtr(entity2) == null);
     try std.testing.expect(set.getPtrMut(entity2) == null);
 }
-

@@ -80,7 +80,7 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
                 );
 
                 // NOTE: Do NOT update CRC here
-                
+
                 self.start += to_copy;
                 bytes_read += to_copy;
             }
