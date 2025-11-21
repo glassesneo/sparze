@@ -1,19 +1,20 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 
 /// Magic number for Sparze serialization format: "SPZE"
 pub const MAGIC: [4]u8 = .{ 'S', 'P', 'Z', 'E' };
 
 /// Current serialization format version (Semantic Versioning)
-/// 
+///
 /// Format: "MAJOR.MINOR.PATCH" (5 bytes)
-/// 
+///
 /// WIP Policy:
 /// - This library is work-in-progress (0.x.x versions)
 /// - Version remains "0.1.0" during active development
 /// - Breaking changes may occur between releases without version bumps
 /// - Format compatibility is NOT guaranteed while in 0.x.x
 /// - Version will bump to "1.0.0" when the library reaches stability
-/// 
+///
 /// Once stable (1.0.0+):
 /// - MAJOR: Breaking changes to format (incompatible)
 /// - MINOR: Backward-compatible additions
@@ -42,24 +43,40 @@ pub const Header = struct {
 
     pub fn read(reader: anytype) !Header {
         var header: Header = undefined;
-        try reader.readNoEof(&header.magic);
+
+        // Try new API first, fall back to old API for compatibility
+        const ReaderType = if (@typeInfo(@TypeOf(reader)) == .pointer)
+            std.meta.Child(@TypeOf(reader))
+        else
+            @TypeOf(reader);
+
+        if (@hasDecl(ReaderType, "readSliceAll")) {
+            try reader.readSliceAll(&header.magic);
+        } else {
+            try reader.readNoEof(&header.magic);
+        }
 
         // Validate magic number
         if (!std.mem.eql(u8, &header.magic, &MAGIC)) {
             return error.InvalidMagicNumber;
         }
 
-        try reader.readNoEof(&header.format_version);
+        if (@hasDecl(ReaderType, "readSliceAll")) {
+            try reader.readSliceAll(&header.format_version);
+        } else {
+            try reader.readNoEof(&header.format_version);
+        }
+
         // Validate format version matches current version
         if (!std.mem.eql(u8, &header.format_version, &FORMAT_VERSION)) {
             return error.UnsupportedFormatVersion;
         }
 
-        header.type_metadata_hash = try reader.readInt(u64, .little);
-        header.entity_count = try reader.readInt(u32, .little);
-        header.component_type_count = try reader.readInt(u32, .little);
-        header.resource_type_count = try reader.readInt(u32, .little);
-        header.event_type_count = try reader.readInt(u32, .little);
+        header.type_metadata_hash = try compat.readInt(reader, u64, .little);
+        header.entity_count = try compat.readInt(reader, u32, .little);
+        header.component_type_count = try compat.readInt(reader, u32, .little);
+        header.resource_type_count = try compat.readInt(reader, u32, .little);
+        header.event_type_count = try compat.readInt(reader, u32, .little);
 
         return header;
     }

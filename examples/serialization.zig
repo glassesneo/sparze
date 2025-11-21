@@ -1,5 +1,6 @@
 const std = @import("std");
 const sparze = @import("sparze");
+const compat = @import("sparze").serialization.compat;
 
 // POD components (automatically serializable)
 const Position = struct { x: f32, y: f32 };
@@ -35,10 +36,22 @@ const Name = struct {
         }
 
         pub fn deserialize(reader: anytype) !Name {
-            const len = try reader.readInt(u16, .little);
+            // Use compat helper for reading integers
+            const len = try compat.readInt(reader, u16, .little);
             var name = Name{};
             name.len = len;
-            try reader.readNoEof(name.buffer[0..len]);
+            
+            // Support both old and new I/O APIs for reading bytes
+            const ReaderType = if (@typeInfo(@TypeOf(reader)) == .pointer)
+                std.meta.Child(@TypeOf(reader))
+            else
+                @TypeOf(reader);
+            
+            if (@hasDecl(ReaderType, "readSliceAll")) {
+                try reader.readSliceAll(name.buffer[0..len]);
+            } else {
+                try reader.readNoEof(name.buffer[0..len]);
+            }
             return name;
         }
     };

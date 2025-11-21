@@ -134,7 +134,7 @@ pub fn TagStorage(comptime C: type) type {
         /// ```
         pub fn reserve(self: *Self, capacity: usize) !void {
             try self.packed_array.ensureTotalCapacity(self.allocator, capacity);
-            
+
             // Pre-allocate sparse pages
             const required_pages = (capacity + page_size - 1) / page_size;
             const max_page = @min(required_pages, max_pages);
