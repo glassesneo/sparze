@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 const Io = std.Io;
 
 /// Buffered reader with CRC32 checksum validation
@@ -229,6 +230,15 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
             var bytes: [4]u8 = undefined;
             var bytes_read: usize = 0;
 
+            // Hash any pending data that was consumed via takeInt/readInt before
+            // jumping to the checksum footer. Otherwise, the final field prior to
+            // the footer may be omitted from the CRC.
+            if (io_r.seek > self.last_crc_seek) {
+                const consumed = io_r.buffer[self.last_crc_seek..io_r.seek];
+                self.crc.update(consumed);
+                self.last_crc_seek = io_r.seek;
+            }
+
             // First, try to get bytes from the internal buffer (if rebase already loaded them)
             const buffered = io_r.buffer[io_r.seek..io_r.end];
             if (buffered.len >= 4) {
@@ -312,4 +322,24 @@ test "BufferedChecksumReader checksum validation" {
     // Validate with incorrect checksum should fail
     const result = checksumReader.validateChecksum(correct_crc + 1);
     try std.testing.expectError(error.ChecksumMismatch, result);
+}
+
+test "BufferedChecksumReader hashes final takeInt before footer" {
+    var data: [8]u8 = undefined;
+    const final_value: u32 = 0;
+    std.mem.writeIntLittle(u32, data[0..4], final_value);
+
+    var crc = std.hash.Crc32.init();
+    crc.update(data[0..4]);
+    const expected_crc = crc.final();
+    std.mem.writeIntLittle(u32, data[4..8], expected_crc);
+
+    var fbs = std.io.fixedBufferStream(&data);
+    var checksumReader = bufferedChecksumReader(fbs.reader());
+
+    const value = try compat.readInt(checksumReader.reader(), u32, .little);
+    try std.testing.expectEqual(final_value, value);
+
+    const footer = try checksumReader.readChecksumFooter();
+    try checksumReader.validateChecksum(footer);
 }
