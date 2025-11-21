@@ -15,14 +15,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Zig
         run: |
           curl -L https://ziglang.org/download/0.15.1/zig-x86_64-linux-0.15.1.tar.xz | tar -xJ
           sudo mv zig-x86_64-linux-0.15.1 /usr/local/zig
           sudo ln -s /usr/local/zig/zig /usr/local/bin/zig
-      - name: Check Formatting
+      - name: Format Code
+        run: zig fmt src
+      - name: Check for formatting changes
+        id: verify-changed-files
         run: |
-          zig fmt --check src
+          if git diff --quiet; then
+            echo "No formatting changes needed"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Formatting changes detected"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+      - name: Commit and push formatting changes
+        if: steps.verify-changed-files.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: auto-format code with zig fmt [skip ci]"
+          git push
       - name: Setup wasmtime
         uses: bytecodealliance/actions/wasmtime/setup@v1
       - name: Wasmtime version
