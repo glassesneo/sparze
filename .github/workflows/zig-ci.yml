@@ -20,6 +20,9 @@ jobs:
           curl -L https://ziglang.org/download/0.15.1/zig-x86_64-linux-0.15.1.tar.xz | tar -xJ
           sudo mv zig-x86_64-linux-0.15.1 /usr/local/zig
           sudo ln -s /usr/local/zig/zig /usr/local/bin/zig
+      - name: Check Formatting
+        run: |
+          zig fmt --check src
       - name: Setup wasmtime
         uses: bytecodealliance/actions/wasmtime/setup@v1
       - name: Wasmtime version
