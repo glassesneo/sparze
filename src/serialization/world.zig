@@ -21,14 +21,7 @@ pub fn serialize(
     writer: anytype,
 ) !void {
     const WriterType = @TypeOf(writer);
-
-    // Adapt incoming writer to the new Io.Writer interface if needed
-    var adapt_buffer: [0]u8 = .{};
-    const Adapter = if (comptime @hasDecl(WriterType, "adaptToNewApi"))
-        @TypeOf(writer.adaptToNewApi(&adapt_buffer))
-    else
-        void;
-    var adapter: ?Adapter = null;
+    var old_adapter: ?writer_mod.OldWriterAdapter(WriterType) = null;
 
     const io_writer: *std.Io.Writer = blk: {
         switch (@typeInfo(WriterType)) {
@@ -42,12 +35,12 @@ pub fn serialize(
             break :blk &writer.interface;
         }
 
-        if (comptime @hasDecl(WriterType, "adaptToNewApi")) {
-            adapter = writer.adaptToNewApi(&adapt_buffer);
-            break :blk &adapter.?.new_interface;
+        if (comptime writer_mod.hasOldWriterApi(WriterType)) {
+            old_adapter = writer_mod.initOldWriterAdapter(writer);
+            break :blk old_adapter.?.writer();
         }
 
-        @compileError("serialize expects a writer that can be adapted to std.Io.Writer");
+        @compileError("serialize expects a std.Io.Writer or a type exposing an .interface field");
     };
 
     // Create buffered checksum writer
