@@ -283,10 +283,10 @@ pub fn serializeToFile(
     // Write to temporary file first for atomic operation
     const tmp_path = try std.fmt.allocPrint(world.allocator, "{s}.tmp", .{path});
     defer world.allocator.free(tmp_path);
-    
+
     // Ensure temp file is cleaned up on error
     errdefer std.fs.cwd().deleteFile(tmp_path) catch {};
-    
+
     // Open file for writing
     const file = try std.fs.cwd().createFile(tmp_path, .{});
     var file_open = true;
@@ -302,14 +302,14 @@ pub fn serializeToFile(
     // Flush buffered data and sync to disk for crash safety
     try file_writer.interface.flush();
     try file.sync();
-    
+
     // Close file before renaming (required on some platforms)
     file.close();
     file_open = false; // Prevent errdefer from double-closing
-    
+
     // Atomically replace the target file
     try std.fs.cwd().rename(tmp_path, path);
-    
+
     // Note: Full crash safety would require syncing the directory after rename
     // to ensure the directory entry is durable, but Dir.sync() is not available
     // in Zig 0.15.1. The file data is synced above, so only the rename metadata
@@ -324,52 +324,42 @@ pub fn deserializeFromFile(
     comptime EventTypes: type,
     path: []const u8,
 ) !void {
-    // Read entire file into memory to validate checksum before mutating world state
-    // This prevents leaving the world in a corrupted state if checksum validation fails
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    // Get file size to allocate appropriate buffer
+    // Get file size to know how much to checksum (everything except 4-byte footer)
     const file_size = try file.getEndPos();
     if (file_size < 4) {
-        return error.EndOfStream;
+        return error.ChecksumMismatch; // File too short
+    }
+    try file.seekTo(0); // Rewind after getEndPos
+
+    // Phase 1: Stream through file to validate checksum without buffering
+    // Create zero-length buffer to disable file-level buffering
+    var no_buffer: [0]u8 = .{};
+    var file_reader = file.reader(&no_buffer);
+    var checksum_reader = reader_mod.bufferedChecksumReader(&file_reader.interface);
+
+    // Stream through payload (all but last 4 bytes) to compute CRC
+    const payload_size = file_size - 4;
+    const discarded = try checksum_reader.reader().discard(@enumFromInt(payload_size));
+    if (discarded != payload_size) {
+        return error.EndOfStream; // Unexpected EOF
     }
 
-    // Rewind to start of file (getEndPos moves cursor to EOF)
+    // Read and validate checksum footer
+    const expected_crc = try checksum_reader.readChecksumFooter();
+    try checksum_reader.validateChecksum(expected_crc);
+
+    // Phase 2: Checksum valid - rewind and deserialize
     try file.seekTo(0);
 
-    // Allocate buffer for entire file
-    const data = try world.allocator.alloc(u8, @intCast(file_size));
-    defer world.allocator.free(data);
-
-    // Read entire file
-    const bytes_read = try file.readAll(data);
-    if (bytes_read != file_size) {
-        return error.EndOfStream;
-    }
-
-    // Split data and checksum footer
-    const payload = data[0 .. data.len - 4];
-    const footer_bytes = data[data.len - 4 ..];
-    const expected_crc = std.mem.readInt(u32, footer_bytes[0..4], .little);
-
-    // Validate checksum before deserializing
-    var crc = std.hash.Crc32.init();
-    crc.update(payload);
-    const actual_crc = crc.final();
-    if (actual_crc != expected_crc) {
-        return error.ChecksumMismatch;
-    }
-
-    // Checksum valid - now safe to deserialize into world
-    var payload_stream = std.io.fixedBufferStream(payload);
-    const payload_reader = payload_stream.reader();
-    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, payload_reader);
-
-    // Ensure entire payload was consumed (detect trailing data before checksum)
-    if (payload_stream.pos != payload.len) {
-        return error.TrailingDataAfterChecksum;
-    }
+    // Create new buffered reader for deserialization
+    var deserialize_file_reader = file.reader(&no_buffer);
+    var deserialize_checksum_reader = reader_mod.bufferedChecksumReader(&deserialize_file_reader.interface);
+    
+    // Deserialize using the buffered checksum reader (provides proper buffering)
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, deserialize_checksum_reader.reader());
 }
 
 /// Core deserialization logic shared by deserialize and file I/O

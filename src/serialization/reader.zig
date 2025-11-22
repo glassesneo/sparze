@@ -58,7 +58,10 @@ pub fn BufferedChecksumReader(comptime _: type) type {
         /// Refill internal buffer from underlying reader
         inline fn refillBuffer(self: *Self, io_r: *Io.Reader) !bool {
             io_r.seek = 0;
-            io_r.end = try readOnce(self.underlying_reader, &self.storage);
+            io_r.end = readOnce(self.underlying_reader, &self.storage) catch |err| switch (err) {
+                error.EndOfStream => 0,
+                else => return err,
+            };
             io_r.buffer = self.storage[0..io_r.end];
             self.last_crc_seek = 0;
             return io_r.end > 0;
