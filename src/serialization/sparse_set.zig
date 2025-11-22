@@ -2,6 +2,7 @@ const std = @import("std");
 const entity_mod = @import("../entity/entity.zig");
 const sparse_set_mod = @import("../storage/sparse_set.zig");
 const traits = @import("traits.zig");
+const compat = @import("compat.zig");
 
 const Entity = entity_mod.Entity;
 const EntityIndex = entity_mod.EntityIndex;
@@ -88,18 +89,18 @@ pub fn deserialize(
     errdefer sparse_set.deinit();
 
     // Read group boundary
-    sparse_set.group_info.size = try reader.readInt(u32, .little);
+    sparse_set.group_info.size = try compat.readInt(reader, u32, .little);
 
     // Read dense array count
-    const dense_count = try reader.readInt(u32, .little);
+    const dense_count = try compat.readInt(reader, u32, .little);
 
     // Read allocated page count
-    const allocated_page_count = try reader.readInt(u16, .little);
+    const allocated_page_count = try compat.readInt(reader, u16, .little);
 
     // Read sparse pages (WIP format: only filled slots)
     for (0..allocated_page_count) |_| {
         // Read page index
-        const page_idx = try reader.readInt(u16, .little);
+        const page_idx = try compat.readInt(reader, u16, .little);
 
         // Validate page_idx is within bounds
         if (page_idx >= max_pages) {
@@ -116,7 +117,7 @@ pub fn deserialize(
         }
 
         // Read filled count
-        const filled_count = try reader.readInt(u16, .little);
+        const filled_count = try compat.readInt(reader, u16, .little);
 
         // Validate filled_count is within bounds
         if (filled_count > page_size) {
@@ -128,8 +129,8 @@ pub fn deserialize(
 
         // Read filled slots (slot_index, dense_index pairs)
         for (0..filled_count) |_| {
-            const slot_idx = try reader.readInt(u16, .little);
-            const dense_index = try reader.readInt(u16, .little);
+            const slot_idx = try compat.readInt(reader, u16, .little);
+            const dense_index = try compat.readInt(reader, u16, .little);
 
             // Validate slot_idx is within page bounds
             if (slot_idx >= page_size) {
@@ -153,7 +154,7 @@ pub fn deserialize(
 
     // Read packed entity array
     for (0..dense_count) |_| {
-        const entity = try reader.readInt(u32, .little);
+        const entity = try compat.readInt(reader, u32, .little);
         sparse_set.packed_array.appendAssumeCapacity(entity);
     }
 

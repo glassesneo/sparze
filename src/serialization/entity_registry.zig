@@ -1,5 +1,6 @@
 const std = @import("std");
 const entity_mod = @import("../entity/entity.zig");
+const compat = @import("compat.zig");
 const Entity = entity_mod.Entity;
 const EntityIndex = entity_mod.EntityIndex;
 const EntityRegistry = entity_mod.EntityRegistry;
@@ -25,13 +26,13 @@ pub fn deserialize(reader: anytype) !EntityRegistry {
     var registry = EntityRegistry.init();
 
     // Read metadata
-    registry.next_index = try reader.readInt(u16, .little);
-    registry.available = try reader.readInt(u16, .little);
-    registry.next_index_to_recycle = try reader.readInt(u32, .little);
+    registry.next_index = try compat.readInt(reader, u16, .little);
+    registry.available = try compat.readInt(reader, u16, .little);
+    registry.next_index_to_recycle = try compat.readInt(reader, u32, .little);
 
     // Read entire entities array
     for (&registry.entities) |*entity_value| {
-        entity_value.* = try reader.readInt(u32, .little);
+        entity_value.* = try compat.readInt(reader, u32, .little);
     }
 
     return registry;

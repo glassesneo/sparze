@@ -40,6 +40,7 @@ pub const serialization = struct {
     pub const traits = @import("serialization/traits.zig");
     pub const format = @import("serialization/format.zig");
     pub const world = @import("serialization/world.zig");
+    pub const compat = @import("serialization/compat.zig");
 
     // Re-export common serialization functions
     pub const isPOD = traits.isPOD;

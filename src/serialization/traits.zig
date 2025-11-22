@@ -66,7 +66,17 @@ pub fn getSerializer(comptime T: type) type {
             pub fn deserialize(reader: anytype) !T {
                 var component: T = undefined;
                 const bytes = std.mem.asBytes(&component);
-                try reader.readNoEof(bytes);
+                // Try new API first, fall back to old API for compatibility
+                const ReaderType = if (@typeInfo(@TypeOf(reader)) == .pointer)
+                    std.meta.Child(@TypeOf(reader))
+                else
+                    @TypeOf(reader);
+
+                if (@hasDecl(ReaderType, "readSliceAll")) {
+                    try reader.readSliceAll(bytes);
+                } else {
+                    try reader.readNoEof(bytes);
+                }
                 return component;
             }
         };
