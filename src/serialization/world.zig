@@ -357,9 +357,21 @@ pub fn deserializeFromFile(
     // Create new buffered reader for deserialization
     var deserialize_file_reader = file.reader(&no_buffer);
     var deserialize_checksum_reader = reader_mod.bufferedChecksumReader(&deserialize_file_reader.interface);
-    
+
     // Deserialize using the buffered checksum reader (provides proper buffering)
     try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, deserialize_checksum_reader.reader());
+
+    // Ensure the payload was fully consumed and validate checksum like the in-memory path
+    const expected_crc2 = try deserialize_checksum_reader.readChecksumFooter();
+    try deserialize_checksum_reader.validateChecksum(expected_crc2);
+
+    // Detect any trailing data after the checksum footer
+    const trailing_byte = deserialize_checksum_reader.reader().readByte() catch |err| switch (err) {
+        error.EndOfStream => return,
+        else => return err,
+    };
+    _ = trailing_byte;
+    return error.TrailingDataAfterChecksum;
 }
 
 /// Core deserialization logic shared by deserialize and file I/O
