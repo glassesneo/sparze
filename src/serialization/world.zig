@@ -37,7 +37,7 @@ pub fn serialize(
 
     // Write CRC32 checksum footer
     const crc = try checksum_writer.finish();
-    try writer.writeInt(u32, crc, .little);
+    try checksum_writer.underlying_writer.writeInt(u32, crc, .little);
 }
 
 /// Write serialization header with type metadata
@@ -204,6 +204,23 @@ pub fn deserialize(
     // Read and validate CRC32 checksum
     const expected_crc = try checksum_reader.readChecksumFooter();
     try checksum_reader.validateChecksum(expected_crc);
+    
+    // Verify EOF - check buffered data first (readChecksumFooter may have prefetched extra bytes)
+    if (r.bufferedLen() > 0) {
+        return error.TrailingDataAfterChecksum;
+    }
+    
+    // Also check underlying reader for any remaining data
+    var peek_byte: [1]u8 = undefined;
+    const peek_slice: []u8 = &peek_byte;
+    var vec = [_][]u8{peek_slice};
+    const n = checksum_reader.underlying_reader.readVec(&vec) catch |err| switch (err) {
+        error.EndOfStream => return, // Expected - file ends after checksum
+        else => return err,
+    };
+    if (n > 0) {
+        return error.TrailingDataAfterChecksum;
+    }
 }
 
 /// Convenience method to serialize World to file
@@ -214,16 +231,40 @@ pub fn serializeToFile(
     comptime EventTypes: type,
     path: []const u8,
 ) !void {
-    // Write to a buffer first, then write to file atomically
-    var buffer: std.ArrayList(u8) = .{};
-    defer buffer.deinit(world.allocator);
+    // Write to temporary file first for atomic operation
+    const tmp_path = try std.fmt.allocPrint(world.allocator, "{s}.tmp", .{path});
+    defer world.allocator.free(tmp_path);
+    
+    // Ensure temp file is cleaned up on error
+    errdefer std.fs.cwd().deleteFile(tmp_path) catch {};
+    
+    // Open file for writing
+    const file = try std.fs.cwd().createFile(tmp_path, .{});
+    var file_open = true;
+    errdefer if (file_open) file.close(); // Close file on error (guarded to prevent double-close)
 
-    try serialize(world, ComponentTypes, ResourceTypes, EventTypes, buffer.writer(world.allocator));
+    // Use zero-length buffer to fully disable file-level buffering
+    var no_buffer: [0]u8 = .{};
+    var file_writer = file.writer(&no_buffer);
 
-    // Write buffer to file
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try file.writeAll(buffer.items);
+    // Serialize directly to file (serialize() uses BufferedChecksumWriter internally)
+    try serialize(world, ComponentTypes, ResourceTypes, EventTypes, &file_writer.interface);
+
+    // Flush buffered data and sync to disk for crash safety
+    try file_writer.interface.flush();
+    try file.sync();
+    
+    // Close file before renaming (required on some platforms)
+    file.close();
+    file_open = false; // Prevent errdefer from double-closing
+    
+    // Atomically replace the target file
+    try std.fs.cwd().rename(tmp_path, path);
+    
+    // Note: Full crash safety would require syncing the directory after rename
+    // to ensure the directory entry is durable, but Dir.sync() is not available
+    // in Zig 0.15.1. The file data is synced above, so only the rename metadata
+    // may be lost on crash.
 }
 
 /// Convenience method to deserialize World from file
@@ -234,48 +275,19 @@ pub fn deserializeFromFile(
     comptime EventTypes: type,
     path: []const u8,
 ) !void {
-    // Read entire file into buffer
+    // Stream directly from file
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    const file_size = try file.getEndPos();
-    const file_size_usize = std.math.cast(usize, file_size) orelse
-        return error.FileTooLarge;
+    // Use zero-length buffer to fully disable file-level buffering
+    var no_buffer: [0]u8 = .{};
+    var file_reader = file.reader(&no_buffer);
 
-    if (file_size_usize < 4) return error.FileTooSmall;
-
-    const buffer = try world.allocator.alloc(u8, file_size_usize);
-    defer world.allocator.free(buffer);
-
-    _ = try file.readAll(buffer);
-
-    // Validate CRC before deserializing (more reliable than tracking through VTable)
-    const data_size = file_size_usize - 4;
-    const expected_crc = std.mem.readInt(u32, buffer[data_size..][0..4], .little);
-
-    var crc = std.hash.Crc32.init();
-    crc.update(buffer[0..data_size]);
-    if (crc.final() != expected_crc) {
-        return error.ChecksumMismatch;
-    }
-
-    // Deserialize from data buffer (CRC already validated, so skip CRC reader wrapper)
-    var fbs = std.io.fixedBufferStream(buffer[0..data_size]);
-    try deserializeWithoutCRC(world, ComponentTypes, ResourceTypes, EventTypes, fbs.reader());
+    // Deserialize directly from file (deserialize() uses BufferedChecksumReader for CRC validation)
+    try deserialize(world, ComponentTypes, ResourceTypes, EventTypes, &file_reader.interface);
 }
 
-/// Internal helper: deserialize without CRC validation (for pre-validated streams)
-fn deserializeWithoutCRC(
-    world: anytype,
-    comptime ComponentTypes: type,
-    comptime ResourceTypes: type,
-    comptime EventTypes: type,
-    reader: anytype,
-) !void {
-    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, reader);
-}
-
-/// Core deserialization logic shared by deserialize and deserializeWithoutCRC
+/// Core deserialization logic shared by deserialize and file I/O
 fn deserializeCore(
     world: anytype,
     comptime ComponentTypes: type,

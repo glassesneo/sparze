@@ -2,18 +2,18 @@ const std = @import("std");
 const Io = std.Io;
 
 /// Buffered writer with CRC32 checksum computation
-pub fn BufferedChecksumWriter(comptime WriterType: type) type {
+pub fn BufferedChecksumWriter(comptime _: type) type {
     return struct {
         const Self = @This();
         const buffer_size = 64 * 1024; // 64 KB buffer
 
-        underlying_writer: WriterType,
+        underlying_writer: *Io.Writer,
         scratch: [buffer_size]u8 = undefined,
         fill: usize = 0,
         crc: std.hash.Crc32 = std.hash.Crc32.init(),
         interface: Io.Writer,
 
-        pub const Error = WriterType.Error || Io.Writer.Error;
+        pub const Error = Io.Writer.Error;
 
         const vtable = Io.Writer.VTable{
             .drain = drain,
@@ -21,26 +21,34 @@ pub fn BufferedChecksumWriter(comptime WriterType: type) type {
             .rebase = Io.Writer.failingRebase,
         };
 
-        pub fn init(underlying_writer: WriterType) Self {
-            var self: Self = .{
+        pub fn init(underlying_writer: *Io.Writer) Self {
+            return .{
                 .underlying_writer = underlying_writer,
-                .interface = undefined,
+                .interface = .{
+                    .vtable = &vtable,
+                    .buffer = &.{}, // force all writes through drain()
+                },
             };
-            self.interface = .{
-                .vtable = &vtable,
-                .buffer = &.{}, // force all writes through drain()
-            };
-            return self;
         }
 
         pub fn writer(self: *Self) *Io.Writer {
             return &self.interface;
         }
 
+        /// Helper to write all bytes using Io.Writer.write() primitive
+        fn writeAll(io_w: *Io.Writer, data: []const u8) Io.Writer.Error!void {
+            var off: usize = 0;
+            while (off < data.len) {
+                const n = try io_w.write(data[off..]);
+                if (n == 0) return error.WriteFailed;
+                off += n;
+            }
+        }
+
         /// Flush the buffer to the underlying writer
         fn flushBuffer(self: *Self) !void {
             if (self.fill == 0) return;
-            try self.underlying_writer.writeAll(self.scratch[0..self.fill]);
+            try writeAll(self.underlying_writer, self.scratch[0..self.fill]);
             self.fill = 0;
         }
 
@@ -104,8 +112,8 @@ pub fn BufferedChecksumWriter(comptime WriterType: type) type {
 }
 
 /// Create a buffered checksum writer
-pub fn bufferedChecksumWriter(writer: anytype) BufferedChecksumWriter(@TypeOf(writer)) {
-    return BufferedChecksumWriter(@TypeOf(writer)).init(writer);
+pub fn bufferedChecksumWriter(writer: *Io.Writer) BufferedChecksumWriter(void) {
+    return BufferedChecksumWriter(void).init(writer);
 }
 
 test "BufferedChecksumWriter basic" {

@@ -3,18 +3,18 @@ const compat = @import("compat.zig");
 const Io = std.Io;
 
 /// Buffered reader with CRC32 checksum validation
-pub fn BufferedChecksumReader(comptime ReaderType: type) type {
+pub fn BufferedChecksumReader(comptime _: type) type {
     return struct {
         const Self = @This();
         const buffer_size = 64 * 1024; // 64 KB buffer
 
-        underlying_reader: ReaderType,
+        underlying_reader: *Io.Reader,
         storage: [buffer_size]u8 = undefined,
         crc: std.hash.Crc32 = std.hash.Crc32.init(),
         interface: Io.Reader,
         last_crc_seek: usize = 0, // Track what we've checksummed so far
 
-        pub const Error = ReaderType.Error || Io.Reader.Error;
+        pub const Error = Io.Reader.Error;
 
         const vtable = Io.Reader.VTable{
             .stream = stream,
@@ -23,7 +23,7 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
             .rebase = rebase,
         };
 
-        pub fn init(underlying_reader: ReaderType) Self {
+        pub fn init(underlying_reader: *Io.Reader) Self {
             return .{
                 .underlying_reader = underlying_reader,
                 .interface = .{
@@ -48,10 +48,17 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
             }
         }
 
+        /// Helper to read at least one byte using Io.Reader.readVec() primitive
+        fn readOnce(io_r: *Io.Reader, dest: []u8) Io.Reader.Error!usize {
+            if (dest.len == 0) return 0;
+            var vec = [_][]u8{dest};
+            return try io_r.readVec(vec[0..1]);
+        }
+
         /// Refill internal buffer from underlying reader
         inline fn refillBuffer(self: *Self, io_r: *Io.Reader) !bool {
             io_r.seek = 0;
-            io_r.end = try self.underlying_reader.read(&self.storage);
+            io_r.end = try readOnce(self.underlying_reader, &self.storage);
             io_r.buffer = self.storage[0..io_r.end];
             self.last_crc_seek = 0;
             return io_r.end > 0;
@@ -167,7 +174,10 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
 
             // Fill buffer to satisfy capacity requirement
             while (io_r.end < capacity) {
-                const n = try self.underlying_reader.read(self.storage[io_r.end..]);
+                const n = readOnce(self.underlying_reader, self.storage[io_r.end..]) catch {
+                    // Convert ReadFailed to EndOfStream
+                    return error.EndOfStream;
+                };
                 if (n == 0) {
                     // EOF reached before satisfying capacity
                     return error.EndOfStream;
@@ -244,7 +254,7 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
 
             // Read the rest from underlying reader
             while (bytes_read < 4) {
-                const n = self.underlying_reader.read(bytes[bytes_read..]) catch |err| return err;
+                const n = readOnce(self.underlying_reader, bytes[bytes_read..]) catch |err| return err;
                 if (n == 0) {
                     return error.EndOfStream;
                 }
@@ -257,8 +267,8 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
 }
 
 /// Create a buffered checksum reader
-pub fn bufferedChecksumReader(reader: anytype) BufferedChecksumReader(@TypeOf(reader)) {
-    return BufferedChecksumReader(@TypeOf(reader)).init(reader);
+pub fn bufferedChecksumReader(reader: *Io.Reader) BufferedChecksumReader(void) {
+    return BufferedChecksumReader(void).init(reader);
 }
 
 test "BufferedChecksumReader basic" {
