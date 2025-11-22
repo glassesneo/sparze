@@ -194,33 +194,54 @@ pub fn deserialize(
     comptime EventTypes: type,
     reader: anytype,
 ) !void {
-    // Create buffered checksum reader (excluding footer)
-    var checksum_reader = reader_mod.bufferedChecksumReader(reader);
-    const r = checksum_reader.reader();
+    // Read all data into memory to validate checksum before mutating world state
+    // This prevents leaving the world in a corrupted state if checksum validation fails
+    var data_list = std.ArrayList(u8).init(world.allocator);
+    defer data_list.deinit();
 
-    // Deserialize using core logic
-    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, r);
+    // Read data in chunks until EOF
+    const chunk_size = 64 * 1024; // 64 KB chunks
+    while (true) {
+        const start_len = data_list.items.len;
+        try data_list.resize(start_len + chunk_size);
 
-    // Read and validate CRC32 checksum
-    const expected_crc = try checksum_reader.readChecksumFooter();
-    try checksum_reader.validateChecksum(expected_crc);
-    
-    // Verify EOF - check buffered data first (readChecksumFooter may have prefetched extra bytes)
-    if (r.bufferedLen() > 0) {
-        return error.TrailingDataAfterChecksum;
+        var vec = [_][]u8{data_list.items[start_len..]};
+        const bytes_read = reader.readVec(&vec) catch |err| switch (err) {
+            error.EndOfStream => 0,
+            else => return err,
+        };
+
+        if (bytes_read == 0) {
+            try data_list.resize(start_len);
+            break;
+        }
+        try data_list.resize(start_len + bytes_read);
     }
-    
-    // Also check underlying reader for any remaining data
-    var peek_byte: [1]u8 = undefined;
-    const peek_slice: []u8 = &peek_byte;
-    var vec = [_][]u8{peek_slice};
-    const n = checksum_reader.underlying_reader.readVec(&vec) catch |err| switch (err) {
-        error.EndOfStream => return, // Expected - file ends after checksum
-        else => return err,
-    };
-    if (n > 0) {
-        return error.TrailingDataAfterChecksum;
+
+    const data = data_list.items;
+
+    // Verify we have at least enough data for a checksum footer
+    if (data.len < 4) {
+        return error.EndOfStream;
     }
+
+    // Split data and checksum footer
+    const payload = data[0 .. data.len - 4];
+    const footer_bytes = data[data.len - 4 ..];
+    const expected_crc = std.mem.readInt(u32, footer_bytes[0..4], .little);
+
+    // Validate checksum before deserializing
+    var crc = std.hash.Crc32.init();
+    crc.update(payload);
+    const actual_crc = crc.final();
+    if (actual_crc != expected_crc) {
+        return error.ChecksumMismatch;
+    }
+
+    // Checksum valid - now safe to deserialize into world
+    var payload_stream = std.io.fixedBufferStream(payload);
+    var payload_reader = payload_stream.reader();
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, &payload_reader.interface);
 }
 
 /// Convenience method to serialize World to file
@@ -275,16 +296,44 @@ pub fn deserializeFromFile(
     comptime EventTypes: type,
     path: []const u8,
 ) !void {
-    // Stream directly from file
+    // Read entire file into memory to validate checksum before mutating world state
+    // This prevents leaving the world in a corrupted state if checksum validation fails
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    // Use zero-length buffer to fully disable file-level buffering
-    var no_buffer: [0]u8 = .{};
-    var file_reader = file.reader(&no_buffer);
+    // Get file size to allocate appropriate buffer
+    const file_size = try file.getEndPos();
+    if (file_size < 4) {
+        return error.EndOfStream;
+    }
 
-    // Deserialize directly from file (deserialize() uses BufferedChecksumReader for CRC validation)
-    try deserialize(world, ComponentTypes, ResourceTypes, EventTypes, &file_reader.interface);
+    // Allocate buffer for entire file
+    const data = try world.allocator.alloc(u8, @intCast(file_size));
+    defer world.allocator.free(data);
+
+    // Read entire file
+    const bytes_read = try file.readAll(data);
+    if (bytes_read != file_size) {
+        return error.EndOfStream;
+    }
+
+    // Split data and checksum footer
+    const payload = data[0 .. data.len - 4];
+    const footer_bytes = data[data.len - 4 ..];
+    const expected_crc = std.mem.readInt(u32, footer_bytes[0..4], .little);
+
+    // Validate checksum before deserializing
+    var crc = std.hash.Crc32.init();
+    crc.update(payload);
+    const actual_crc = crc.final();
+    if (actual_crc != expected_crc) {
+        return error.ChecksumMismatch;
+    }
+
+    // Checksum valid - now safe to deserialize into world
+    var payload_stream = std.io.fixedBufferStream(payload);
+    var payload_reader = payload_stream.reader();
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, &payload_reader.interface);
 }
 
 /// Core deserialization logic shared by deserialize and file I/O
