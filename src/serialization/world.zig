@@ -240,8 +240,8 @@ pub fn deserialize(
 
     // Checksum valid - now safe to deserialize into world
     var payload_stream = std.io.fixedBufferStream(payload);
-    var payload_reader = payload_stream.reader();
-    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, &payload_reader.interface);
+    const payload_reader = payload_stream.reader();
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, payload_reader);
 }
 
 /// Convenience method to serialize World to file
@@ -335,8 +335,8 @@ pub fn deserializeFromFile(
 
     // Checksum valid - now safe to deserialize into world
     var payload_stream = std.io.fixedBufferStream(payload);
-    var payload_reader = payload_stream.reader();
-    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, &payload_reader.interface);
+    const payload_reader = payload_stream.reader();
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, payload_reader);
 }
 
 /// Core deserialization logic shared by deserialize and file I/O
