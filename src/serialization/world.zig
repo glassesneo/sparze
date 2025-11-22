@@ -20,8 +20,38 @@ pub fn serialize(
     comptime EventTypes: type,
     writer: anytype,
 ) !void {
+    const WriterType = @TypeOf(writer);
+
+    // Adapt incoming writer to the new Io.Writer interface if needed
+    var adapt_buffer: [0]u8 = .{};
+    const Adapter = if (comptime @hasDecl(WriterType, "adaptToNewApi"))
+        @TypeOf(writer.adaptToNewApi(&adapt_buffer))
+    else
+        void;
+    var adapter: ?Adapter = null;
+
+    const io_writer: *std.Io.Writer = blk: {
+        switch (@typeInfo(WriterType)) {
+            .pointer => |ptr| {
+                if (ptr.child == std.Io.Writer) break :blk writer;
+            },
+            else => {},
+        }
+
+        if (comptime @hasField(WriterType, "interface")) {
+            break :blk &writer.interface;
+        }
+
+        if (comptime @hasDecl(WriterType, "adaptToNewApi")) {
+            adapter = writer.adaptToNewApi(&adapt_buffer);
+            break :blk &adapter.?.new_interface;
+        }
+
+        @compileError("serialize expects a writer that can be adapted to std.Io.Writer");
+    };
+
     // Create buffered checksum writer
-    var checksum_writer = writer_mod.bufferedChecksumWriter(writer);
+    var checksum_writer = writer_mod.bufferedChecksumWriter(io_writer);
     const w = checksum_writer.writer();
 
     // Write header
@@ -242,6 +272,11 @@ pub fn deserialize(
     var payload_stream = std.io.fixedBufferStream(payload);
     const payload_reader = payload_stream.reader();
     try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, payload_reader);
+
+    // Ensure entire payload was consumed (detect trailing data before checksum)
+    if (payload_stream.pos != payload.len) {
+        return error.TrailingDataAfterChecksum;
+    }
 }
 
 /// Convenience method to serialize World to file
@@ -337,6 +372,11 @@ pub fn deserializeFromFile(
     var payload_stream = std.io.fixedBufferStream(payload);
     const payload_reader = payload_stream.reader();
     try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, payload_reader);
+
+    // Ensure entire payload was consumed (detect trailing data before checksum)
+    if (payload_stream.pos != payload.len) {
+        return error.TrailingDataAfterChecksum;
+    }
 }
 
 /// Core deserialization logic shared by deserialize and file I/O

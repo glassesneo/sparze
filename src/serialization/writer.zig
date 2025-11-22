@@ -119,7 +119,9 @@ pub fn bufferedChecksumWriter(writer: *Io.Writer) BufferedChecksumWriter(void) {
 test "BufferedChecksumWriter basic" {
     var buffer: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
-    var checksumWriter = bufferedChecksumWriter(fbs.writer());
+    var writer = fbs.writer();
+    var adapter = writer.adaptToNewApi(&[_]u8{});
+    var checksumWriter = bufferedChecksumWriter(&adapter.new_interface);
 
     const data = "Hello, World!";
     try checksumWriter.writer().writeAll(data);
@@ -132,7 +134,9 @@ test "BufferedChecksumWriter basic" {
 test "BufferedChecksumWriter large data" {
     var buffer: [128 * 1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
-    var checksumWriter = bufferedChecksumWriter(fbs.writer());
+    var writer = fbs.writer();
+    var adapter = writer.adaptToNewApi(&[_]u8{});
+    var checksumWriter = bufferedChecksumWriter(&adapter.new_interface);
 
     // Write more than buffer size to test flushing
     const data = [_]u8{42} ** (70 * 1024);
