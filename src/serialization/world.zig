@@ -355,7 +355,8 @@ pub fn deserializeFromFile(
     try file.seekTo(0);
 
     // Create new buffered reader for deserialization
-    var deserialize_file_reader = file.reader(&no_buffer);
+    var deserialize_buffer: [std.io.default_buffer_size]u8 = undefined;
+    var deserialize_file_reader = file.reader(&deserialize_buffer);
     var deserialize_checksum_reader = reader_mod.bufferedChecksumReader(&deserialize_file_reader.interface);
 
     // Deserialize using the buffered checksum reader (provides proper buffering)
