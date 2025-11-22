@@ -20,16 +20,40 @@ pub fn serialize(
     comptime EventTypes: type,
     writer: anytype,
 ) !void {
+    // Create buffered checksum writer
+    var checksum_writer = writer_mod.bufferedChecksumWriter(writer);
+    const w = checksum_writer.writer();
+
+    // Write header
+    try writeHeader(world, ComponentTypes, ResourceTypes, EventTypes, w);
+
+    // Serialize EntityRegistry
+    try entity_registry_ser.serialize(&world.entity_registry, w);
+
+    // Serialize components, resources, and events
+    try serializeComponents(world, ComponentTypes, w);
+    try serializeResources(world, ResourceTypes, w);
+    try serializeEvents(world, EventTypes, w);
+
+    // Write CRC32 checksum footer
+    const crc = try checksum_writer.finish();
+    try writer.writeInt(u32, crc, .little);
+}
+
+/// Write serialization header with type metadata
+fn writeHeader(
+    world: anytype,
+    comptime ComponentTypes: type,
+    comptime ResourceTypes: type,
+    comptime EventTypes: type,
+    writer: anytype,
+) !void {
     const component_info = @typeInfo(ComponentTypes);
     const component_fields = component_info.@"struct".fields;
     const resource_info = @typeInfo(ResourceTypes);
     const resource_fields = resource_info.@"struct".fields;
     const event_info = @typeInfo(EventTypes);
     const event_fields = event_info.@"struct".fields;
-
-    // Create buffered checksum writer
-    var checksum_writer = writer_mod.bufferedChecksumWriter(writer);
-    const w = checksum_writer.writer();
 
     // Compute type metadata hash
     const type_hash = format.computeWorldHash(ComponentTypes, ResourceTypes, EventTypes);
@@ -44,12 +68,18 @@ pub fn serialize(
         .resource_type_count = @intCast(resource_fields.len),
         .event_type_count = @intCast(event_fields.len),
     };
-    try header.write(w);
+    try header.write(writer);
+}
 
-    // Serialize EntityRegistry
-    try entity_registry_ser.serialize(&world.entity_registry, w);
+/// Serialize all component pools
+fn serializeComponents(
+    world: anytype,
+    comptime ComponentTypes: type,
+    writer: anytype,
+) !void {
+    const component_info = @typeInfo(ComponentTypes);
+    const component_fields = component_info.@"struct".fields;
 
-    // Serialize component pools
     inline for (component_fields, 0..) |field, i| {
         const Component = field.type;
 
@@ -62,18 +92,27 @@ pub fn serialize(
         const type_name_hash = format.hashTypeName(Component);
 
         // Write component metadata
-        try w.writeInt(u16, component_id, .little);
-        try w.writeInt(u64, type_name_hash, .little);
+        try writer.writeInt(u16, component_id, .little);
+        try writer.writeInt(u64, type_name_hash, .little);
 
         // Serialize component storage (tag or sparse set)
         if (comptime isTagComponent(Component)) {
-            try tag_storage_ser.serialize(Component, &world.component_pool[i], w);
+            try tag_storage_ser.serialize(Component, &world.component_pool[i], writer);
         } else {
-            try sparse_set_ser.serialize(Component, &world.component_pool[i], w);
+            try sparse_set_ser.serialize(Component, &world.component_pool[i], writer);
         }
     }
+}
 
-    // Serialize resources
+/// Serialize all resources
+fn serializeResources(
+    world: anytype,
+    comptime ResourceTypes: type,
+    writer: anytype,
+) !void {
+    const resource_info = @typeInfo(ResourceTypes);
+    const resource_fields = resource_info.@"struct".fields;
+
     inline for (resource_fields, 0..) |field, i| {
         const Resource = field.type;
 
@@ -86,8 +125,8 @@ pub fn serialize(
         const type_name_hash = format.hashTypeName(Resource);
 
         // Write resource metadata
-        try w.writeInt(u16, resource_id, .little);
-        try w.writeInt(u64, type_name_hash, .little);
+        try writer.writeInt(u16, resource_id, .little);
+        try writer.writeInt(u64, type_name_hash, .little);
 
         // Check if resource is initialized
         const is_initialized = blk: {
@@ -102,14 +141,23 @@ pub fn serialize(
         }
 
         // Serialize as initialized
-        try w.writeInt(u8, 1, .little);
+        try writer.writeInt(u8, 1, .little);
 
         // Serialize resource data
         const Serializer = traits.getSerializer(Resource);
-        try Serializer.serialize(world.resource_pool[i], w);
+        try Serializer.serialize(world.resource_pool[i], writer);
     }
+}
 
-    // Serialize events (read buffer only)
+/// Serialize all events (read buffer only)
+fn serializeEvents(
+    world: anytype,
+    comptime EventTypes: type,
+    writer: anytype,
+) !void {
+    const event_info = @typeInfo(EventTypes);
+    const event_fields = event_info.@"struct".fields;
+
     inline for (event_fields, 0..) |field, i| {
         const Event = field.type;
 
@@ -122,24 +170,20 @@ pub fn serialize(
         const type_name_hash = format.hashTypeName(Event);
 
         // Write event metadata
-        try w.writeInt(u16, event_id, .little);
-        try w.writeInt(u64, type_name_hash, .little);
+        try writer.writeInt(u16, event_id, .little);
+        try writer.writeInt(u64, type_name_hash, .little);
 
         // Write read buffer only
         const read_buffer = world.event_pool[i].read_buffer.items;
         const read_count: u32 = @intCast(read_buffer.len);
-        try w.writeInt(u32, read_count, .little);
+        try writer.writeInt(u32, read_count, .little);
 
         // Serialize events
         const Serializer = traits.getSerializer(Event);
         for (read_buffer) |event| {
-            try Serializer.serialize(event, w);
+            try Serializer.serialize(event, writer);
         }
     }
-
-    // Write CRC32 checksum footer
-    const crc = try checksum_writer.finish();
-    try writer.writeInt(u32, crc, .little);
 }
 
 /// Deserialize World from reader
@@ -150,160 +194,12 @@ pub fn deserialize(
     comptime EventTypes: type,
     reader: anytype,
 ) !void {
-    const component_info = @typeInfo(ComponentTypes);
-    const component_fields = component_info.@"struct".fields;
-    const resource_info = @typeInfo(ResourceTypes);
-    const resource_fields = resource_info.@"struct".fields;
-    const event_info = @typeInfo(EventTypes);
-    const event_fields = event_info.@"struct".fields;
-
     // Create buffered checksum reader (excluding footer)
     var checksum_reader = reader_mod.bufferedChecksumReader(reader);
     const r = checksum_reader.reader();
 
-    // Read and validate header
-    const header = try format.Header.read(r);
-
-    // Validate type metadata hash
-    const expected_hash = format.computeWorldHash(ComponentTypes, ResourceTypes, EventTypes);
-    if (header.type_metadata_hash != expected_hash) {
-        return error.TypeMismatch;
-    }
-
-    // Validate component/resource/event counts
-    if (header.component_type_count != component_fields.len) {
-        return error.ComponentCountMismatch;
-    }
-    if (header.resource_type_count != resource_fields.len) {
-        return error.ResourceCountMismatch;
-    }
-    if (header.event_type_count != event_fields.len) {
-        return error.EventCountMismatch;
-    }
-
-    // Deserialize EntityRegistry
-    world.entity_registry = try entity_registry_ser.deserialize(r);
-
-    // Deserialize component pools
-    inline for (component_fields, 0..) |field, i| {
-        const Component = field.type;
-
-        // Skip components that opt out of deserialization at comptime
-        if (comptime !traits.shouldSerialize(Component)) {
-            // Initialize to default/empty state for excluded components
-            world.component_pool[i].deinit();
-            world.component_pool[i] = ComponentStorage(Component).init(world.allocator);
-            continue;
-        }
-
-        // Read component metadata
-        const component_id = try compat.readInt(r, u16, .little);
-        if (component_id != i) return error.ComponentIdMismatch;
-
-        const type_name_hash = try compat.readInt(r, u64, .little);
-        const expected_type_hash = format.hashTypeName(Component);
-        if (type_name_hash != expected_type_hash) {
-            return error.ComponentTypeMismatch;
-        }
-
-        // Deinit existing storage
-        world.component_pool[i].deinit();
-
-        // Deserialize component storage
-        if (comptime isTagComponent(Component)) {
-            world.component_pool[i] = try tag_storage_ser.deserialize(
-                Component,
-                world.allocator,
-                r,
-            );
-        } else {
-            world.component_pool[i] = try sparse_set_ser.deserialize(
-                Component,
-                world.allocator,
-                r,
-                header.format_version,
-            );
-        }
-    }
-
-    // Deserialize resources
-    inline for (resource_fields, 0..) |field, i| {
-        const Resource = field.type;
-
-        // Skip resources that opt out of deserialization at comptime
-        if (comptime !traits.shouldSerialize(Resource)) {
-            // Resources that opt out of serialization are left in their current state
-            // or can be re-initialized by the user as needed
-            continue;
-        }
-
-        // Read resource metadata
-        const resource_id = try compat.readInt(r, u16, .little);
-        if (resource_id != i) return error.ResourceIdMismatch;
-
-        const type_name_hash = try compat.readInt(r, u64, .little);
-        const expected_type_hash = format.hashTypeName(Resource);
-        if (type_name_hash != expected_type_hash) {
-            return error.ResourceTypeMismatch;
-        }
-
-        // Read initialized flag
-        const is_initialized = try compat.readInt(r, u8, .little);
-        if (is_initialized == 0) {
-            return error.UninitializedResource;
-        }
-
-        // Deserialize resource data
-        const Serializer = traits.getSerializer(Resource);
-        world.resource_pool[i] = try Serializer.deserialize(r);
-
-        // Mark resource as initialized
-        if (comptime resource_fields.len > 0) {
-            world.resource_initialized.set(i);
-        }
-    }
-
-    // Deserialize events (read buffer only)
-    inline for (event_fields, 0..) |field, i| {
-        const Event = field.type;
-
-        // Skip events that opt out of deserialization at comptime
-        if (comptime !traits.shouldSerialize(Event)) {
-            // Clear both buffers for excluded events
-            world.event_pool[i].read_buffer.clearRetainingCapacity();
-            world.event_pool[i].write_buffer.clearRetainingCapacity();
-            continue;
-        }
-
-        // Read event metadata
-        const event_id = try compat.readInt(r, u16, .little);
-        if (event_id != i) return error.EventIdMismatch;
-
-        const type_name_hash = try compat.readInt(r, u64, .little);
-        const expected_type_hash = format.hashTypeName(Event);
-        if (type_name_hash != expected_type_hash) {
-            return error.EventTypeMismatch;
-        }
-
-        // Clear existing read buffer
-        world.event_pool[i].read_buffer.clearRetainingCapacity();
-
-        // Read read buffer count
-        const read_count = try compat.readInt(r, u32, .little);
-
-        // Reserve capacity
-        try world.event_pool[i].read_buffer.ensureTotalCapacity(world.allocator, read_count);
-
-        // Deserialize events
-        const Serializer = traits.getSerializer(Event);
-        for (0..read_count) |_| {
-            const event = try Serializer.deserialize(r);
-            world.event_pool[i].read_buffer.appendAssumeCapacity(event);
-        }
-
-        // Clear write buffer
-        world.event_pool[i].write_buffer.clearRetainingCapacity();
-    }
+    // Deserialize using core logic
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, r);
 
     // Read and validate CRC32 checksum
     const expected_crc = try checksum_reader.readChecksumFooter();
@@ -376,6 +272,17 @@ fn deserializeWithoutCRC(
     comptime EventTypes: type,
     reader: anytype,
 ) !void {
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, reader);
+}
+
+/// Core deserialization logic shared by deserialize and deserializeWithoutCRC
+fn deserializeCore(
+    world: anytype,
+    comptime ComponentTypes: type,
+    comptime ResourceTypes: type,
+    comptime EventTypes: type,
+    reader: anytype,
+) !void {
     const component_info = @typeInfo(ComponentTypes);
     const component_fields = component_info.@"struct".fields;
     const resource_info = @typeInfo(ResourceTypes);
@@ -383,11 +290,8 @@ fn deserializeWithoutCRC(
     const event_info = @typeInfo(EventTypes);
     const event_fields = event_info.@"struct".fields;
 
-    // Use reader directly (no checksum tracking)
-    const r = reader;
-
     // Read and validate header
-    const header = try format.Header.read(r);
+    const header = try format.Header.read(reader);
 
     // Validate type metadata hash
     const expected_hash = format.computeWorldHash(ComponentTypes, ResourceTypes, EventTypes);
@@ -407,40 +311,45 @@ fn deserializeWithoutCRC(
     }
 
     // Deserialize EntityRegistry
-    world.entity_registry = try entity_registry_ser.deserialize(r);
+    world.entity_registry = try entity_registry_ser.deserialize(reader);
 
     // Deserialize component pools
     inline for (component_fields, 0..) |field, i| {
         const Component = field.type;
 
+        // Skip components that opt out of deserialization at comptime
         if (comptime !traits.shouldSerialize(Component)) {
+            // Initialize to default/empty state for excluded components
             world.component_pool[i].deinit();
             world.component_pool[i] = ComponentStorage(Component).init(world.allocator);
             continue;
         }
 
-        const component_id = try compat.readInt(r, u16, .little);
+        // Read component metadata
+        const component_id = try compat.readInt(reader, u16, .little);
         if (component_id != i) return error.ComponentIdMismatch;
 
-        const type_name_hash = try compat.readInt(r, u64, .little);
+        const type_name_hash = try compat.readInt(reader, u64, .little);
         const expected_type_hash = format.hashTypeName(Component);
         if (type_name_hash != expected_type_hash) {
             return error.ComponentTypeMismatch;
         }
 
+        // Deinit existing storage
         world.component_pool[i].deinit();
 
+        // Deserialize component storage
         if (comptime isTagComponent(Component)) {
             world.component_pool[i] = try tag_storage_ser.deserialize(
                 Component,
                 world.allocator,
-                r,
+                reader,
             );
         } else {
             world.component_pool[i] = try sparse_set_ser.deserialize(
                 Component,
                 world.allocator,
-                r,
+                reader,
                 header.format_version,
             );
         }
@@ -450,63 +359,78 @@ fn deserializeWithoutCRC(
     inline for (resource_fields, 0..) |field, i| {
         const Resource = field.type;
 
+        // Skip resources that opt out of deserialization at comptime
         if (comptime !traits.shouldSerialize(Resource)) {
+            // Resources that opt out of serialization are left in their current state
+            // or can be re-initialized by the user as needed
             continue;
         }
 
-        const resource_id = try compat.readInt(r, u16, .little);
+        // Read resource metadata
+        const resource_id = try compat.readInt(reader, u16, .little);
         if (resource_id != i) return error.ResourceIdMismatch;
 
-        const type_name_hash = try compat.readInt(r, u64, .little);
+        const type_name_hash = try compat.readInt(reader, u64, .little);
         const expected_type_hash = format.hashTypeName(Resource);
         if (type_name_hash != expected_type_hash) {
             return error.ResourceTypeMismatch;
         }
 
-        const is_initialized = try compat.readInt(r, u8, .little);
+        // Read initialized flag
+        const is_initialized = try compat.readInt(reader, u8, .little);
         if (is_initialized == 0) {
             return error.UninitializedResource;
         }
 
+        // Deserialize resource data
         const Serializer = traits.getSerializer(Resource);
-        world.resource_pool[i] = try Serializer.deserialize(r);
+        world.resource_pool[i] = try Serializer.deserialize(reader);
 
+        // Mark resource as initialized
         if (comptime resource_fields.len > 0) {
             world.resource_initialized.set(i);
         }
     }
 
-    // Deserialize events
+    // Deserialize events (read buffer only)
     inline for (event_fields, 0..) |field, i| {
         const Event = field.type;
 
+        // Skip events that opt out of deserialization at comptime
         if (comptime !traits.shouldSerialize(Event)) {
+            // Clear both buffers for excluded events
             world.event_pool[i].read_buffer.clearRetainingCapacity();
             world.event_pool[i].write_buffer.clearRetainingCapacity();
             continue;
         }
 
-        const event_id = try compat.readInt(r, u16, .little);
+        // Read event metadata
+        const event_id = try compat.readInt(reader, u16, .little);
         if (event_id != i) return error.EventIdMismatch;
 
-        const type_name_hash = try compat.readInt(r, u64, .little);
+        const type_name_hash = try compat.readInt(reader, u64, .little);
         const expected_type_hash = format.hashTypeName(Event);
         if (type_name_hash != expected_type_hash) {
             return error.EventTypeMismatch;
         }
 
+        // Clear existing read buffer
         world.event_pool[i].read_buffer.clearRetainingCapacity();
 
-        const read_count = try compat.readInt(r, u32, .little);
+        // Read read buffer count
+        const read_count = try compat.readInt(reader, u32, .little);
+
+        // Reserve capacity
         try world.event_pool[i].read_buffer.ensureTotalCapacity(world.allocator, read_count);
 
+        // Deserialize events
         const Serializer = traits.getSerializer(Event);
         for (0..read_count) |_| {
-            const event = try Serializer.deserialize(r);
+            const event = try Serializer.deserialize(reader);
             world.event_pool[i].read_buffer.appendAssumeCapacity(event);
         }
 
+        // Clear write buffer
         world.event_pool[i].write_buffer.clearRetainingCapacity();
     }
-    // No CRC validation - already done upfront
 }
