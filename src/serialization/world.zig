@@ -307,6 +307,9 @@ pub fn deserializeFromFile(
         return error.EndOfStream;
     }
 
+    // Rewind to start of file (getEndPos moves cursor to EOF)
+    try file.seekTo(0);
+
     // Allocate buffer for entire file
     const data = try world.allocator.alloc(u8, @intCast(file_size));
     defer world.allocator.free(data);
