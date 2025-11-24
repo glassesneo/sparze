@@ -57,6 +57,16 @@ addTag(entity, comptime Tag: type) !void
 removeTag(entity, comptime Tag: type) !void
 destroyEntity(entity) !void
 
+// Resource operations (all immediate)
+setResource(comptime R: type, resource: R) !void
+getResource(comptime R: type) R
+getResourcePtr(comptime R: type) *const R
+getResourcePtrMut(comptime R: type) *R
+tryGetResource(comptime R: type) !*const R
+tryGetResourceMut(comptime R: type) !*R
+initResources(resources: anytype) !void
+isResourceInitialized(comptime R: type) bool
+
 // Group & serialization (immediate)
 createGroup(comptime GroupComponents: type) !void
 serializeToFile(path: []const u8) !void
@@ -86,13 +96,50 @@ while (running) {
 |-----------|--------|--------|
 | `createEntity()` | Immediate | Need ID for subsequent commands |
 | `createGroup()` | Immediate | Group setup |
+| Resource ops | Immediate | Global state, immediate access needed |
 | Component ops | Deferred | Safe during iteration |
 | `destroyEntity()` | Deferred | Safe during iteration |
 | Serialization | Immediate | Direct world access |
 
 ## Critical Patterns
 
-### 1. Use Commands during iteration
+### 1. Resource access through Commands
+
+Resources can be accessed either through Commands or system parameter injection:
+
+```zig
+// Option 1: Via Resource parameter (preferred for read-only)
+fn updateSystem(delta: Resource(DeltaTime), commands: anytype) !void {
+    const dt = delta.value.dt;
+    // Use dt...
+}
+
+// Option 2: Via Commands (useful for initialization or conditional access)
+fn initSystem(commands: anytype) !void {
+    try commands.initResources(.{
+        .delta_time = DeltaTime{ .dt = 0.016 },
+        .score = Score{ .points = 0 },
+    });
+}
+
+// Option 3: Mixed - Resource parameter + Commands mutation
+fn scoreSystem(score: ResourceMut(Score), commands: anytype) !void {
+    score.value.points += 100;  // Via parameter
+
+    // Can also access via Commands
+    if (commands.isResourceInitialized(GameConfig)) {
+        const config = commands.getResource(GameConfig);
+        // Use config...
+    }
+}
+```
+
+**Safety**: Commands resource methods have same safety features as World:
+- Debug assertions fire on uninitialized access
+- `tryGetResource*()` variants return errors
+- `initResources()` for bulk initialization
+
+### 2. Use Commands during iteration
 
 ```zig
 // Good
@@ -106,7 +153,7 @@ for (entities) |entity| {
 }
 ```
 
-### 2. Multi-stage with events
+### 3. Multi-stage with events
 
 ```zig
 fn collisionDetection(

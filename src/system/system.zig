@@ -298,6 +298,124 @@ pub fn Commands(comptime World: type) type {
         pub fn createGroup(self: Self, comptime GroupComponents: type) !void {
             return self.world.createGroup(GroupComponents);
         }
+
+        // ====================================================================
+        // Resource Methods (immediate execution, delegate to World)
+        // ====================================================================
+
+        /// Set a resource value and mark it as initialized (immediate execution).
+        ///
+        /// Example:
+        /// ```zig
+        /// fn setupSystem(commands: anytype) !void {
+        ///     try commands.setResource(DeltaTime, .{ .dt = 0.016 });
+        /// }
+        /// ```
+        pub fn setResource(self: Self, comptime R: type, resource: R) !void {
+            return self.world.setResource(R, resource);
+        }
+
+        /// Get a copy of a resource value (immediate execution).
+        /// Asserts in Debug/ReleaseSafe builds if resource is uninitialized.
+        ///
+        /// Example:
+        /// ```zig
+        /// fn readSystem(commands: anytype) !void {
+        ///     const delta = commands.getResource(DeltaTime);
+        ///     std.debug.print("dt: {}\n", .{delta.dt});
+        /// }
+        /// ```
+        pub fn getResource(self: Self, comptime R: type) R {
+            return self.world.getResource(R);
+        }
+
+        /// Get a const pointer to a resource (immediate execution).
+        /// Asserts in Debug/ReleaseSafe builds if resource is uninitialized.
+        ///
+        /// Example:
+        /// ```zig
+        /// fn readSystem(commands: anytype) !void {
+        ///     const config_ptr = commands.getResourcePtr(GameConfig);
+        ///     std.debug.print("gravity: {}\n", .{config_ptr.gravity});
+        /// }
+        /// ```
+        pub fn getResourcePtr(self: Self, comptime R: type) *const R {
+            return self.world.getResourcePtr(R);
+        }
+
+        /// Get a mutable pointer to a resource (immediate execution).
+        /// Asserts in Debug/ReleaseSafe builds if resource is uninitialized.
+        ///
+        /// Example:
+        /// ```zig
+        /// fn updateSystem(commands: anytype) !void {
+        ///     const score_ptr = commands.getResourcePtrMut(Score);
+        ///     score_ptr.points += 100;
+        /// }
+        /// ```
+        pub fn getResourcePtrMut(self: Self, comptime R: type) *R {
+            return self.world.getResourcePtrMut(R);
+        }
+
+        /// Try to get a const pointer to a resource, returning an error if uninitialized.
+        /// This is a safe alternative to getResourcePtr() that provides runtime checking.
+        ///
+        /// Example:
+        /// ```zig
+        /// fn safeReadSystem(commands: anytype) !void {
+        ///     const config_ptr = try commands.tryGetResource(GameConfig);
+        ///     std.debug.print("gravity: {}\n", .{config_ptr.gravity});
+        /// }
+        /// ```
+        pub fn tryGetResource(self: Self, comptime R: type) !*const R {
+            return self.world.tryGetResource(R);
+        }
+
+        /// Try to get a mutable pointer to a resource, returning an error if uninitialized.
+        /// This is a safe alternative to getResourcePtrMut() that provides runtime checking.
+        ///
+        /// Example:
+        /// ```zig
+        /// fn safeUpdateSystem(commands: anytype) !void {
+        ///     const score_ptr = try commands.tryGetResourceMut(Score);
+        ///     score_ptr.points += 100;
+        /// }
+        /// ```
+        pub fn tryGetResourceMut(self: Self, comptime R: type) !*R {
+            return self.world.tryGetResourceMut(R);
+        }
+
+        /// Initialize multiple resources at once using struct literal syntax (immediate execution).
+        /// This is a convenience method for bulk initialization at startup.
+        ///
+        /// Example:
+        /// ```zig
+        /// fn initSystem(commands: anytype) !void {
+        ///     try commands.initResources(.{
+        ///         .delta_time = DeltaTime{ .dt = 0.016 },
+        ///         .score = Score{ .points = 0 },
+        ///         .config = GameConfig{ .gravity = 9.8 },
+        ///     });
+        /// }
+        /// ```
+        pub fn initResources(self: Self, resources: anytype) !void {
+            return self.world.initResources(resources);
+        }
+
+        /// Check if a resource has been initialized (immediate execution).
+        ///
+        /// Example:
+        /// ```zig
+        /// fn checkSystem(commands: anytype) !void {
+        ///     if (commands.isResourceInitialized(GameConfig)) {
+        ///         const config = commands.getResource(GameConfig);
+        ///         // Use config...
+        ///     }
+        /// }
+        /// ```
+        pub fn isResourceInitialized(self: Self, comptime R: type) bool {
+            return self.world.isResourceInitialized(R);
+        }
     };
 }
 
