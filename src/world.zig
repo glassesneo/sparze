@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Struct = std.builtin.Type.Struct;
 const StructField = std.builtin.Type.StructField;
 const Allocator = std.mem.Allocator;
@@ -424,20 +425,63 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
 
         pub fn getResource(self: Self, comptime R: type) R {
             const id = comptime getResourceId(R);
+            // Debug-mode assertion to catch uninitialized resource access
+            if (comptime resource_pool_length > 0 and builtin.mode != .ReleaseFast) {
+                std.debug.assert(self.resource_initialized.isSet(id));
+            }
             return self.resource_pool[id];
         }
 
         pub fn getResourcePtr(self: *Self, comptime R: type) *const R {
             const id = comptime getResourceId(R);
+            // Debug-mode assertion to catch uninitialized resource access
+            if (comptime resource_pool_length > 0 and builtin.mode != .ReleaseFast) {
+                std.debug.assert(self.resource_initialized.isSet(id));
+            }
             return &self.resource_pool[id];
         }
 
         pub fn getResourcePtrMut(self: *Self, comptime R: type) *R {
             const id = comptime getResourceId(R);
-            // Mark resource as initialized when getting mutable pointer
-            // This handles the case where users mutate resources in-place
+            // Debug-mode assertion to ensure resource is initialized before mutation
+            if (comptime resource_pool_length > 0 and builtin.mode != .ReleaseFast) {
+                std.debug.assert(self.resource_initialized.isSet(id));
+            }
+            return &self.resource_pool[id];
+        }
+
+        /// Try to get a const pointer to a resource, returning an error if uninitialized.
+        /// This is a safe alternative to getResourcePtr() that provides runtime checking.
+        ///
+        /// Example:
+        /// ```zig
+        /// const config_ptr = try world.tryGetResource(GameConfig);
+        /// std.debug.print("Gravity: {}\n", .{config_ptr.gravity});
+        /// ```
+        pub fn tryGetResource(self: *Self, comptime R: type) !*const R {
+            const id = comptime getResourceId(R);
             if (comptime resource_pool_length > 0) {
-                self.resource_initialized.set(id);
+                if (!self.resource_initialized.isSet(id)) {
+                    return error.UninitializedResource;
+                }
+            }
+            return &self.resource_pool[id];
+        }
+
+        /// Try to get a mutable pointer to a resource, returning an error if uninitialized.
+        /// This is a safe alternative to getResourcePtrMut() that provides runtime checking.
+        ///
+        /// Example:
+        /// ```zig
+        /// const state_ptr = try world.tryGetResourceMut(GameState);
+        /// state_ptr.score += 100;
+        /// ```
+        pub fn tryGetResourceMut(self: *Self, comptime R: type) !*R {
+            const id = comptime getResourceId(R);
+            if (comptime resource_pool_length > 0) {
+                if (!self.resource_initialized.isSet(id)) {
+                    return error.UninitializedResource;
+                }
             }
             return &self.resource_pool[id];
         }
@@ -450,10 +494,34 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
+        /// Initialize multiple resources at once using struct literal syntax.
+        /// This is a convenience method for bulk initialization at startup.
+        ///
+        /// Example:
+        /// ```zig
+        /// try world.initResources(.{
+        ///     .delta_time = DeltaTime{ .dt = 0.016 },
+        ///     .score = Score{ .points = 0 },
+        ///     .config = GameConfig{ .gravity = 9.8 },
+        /// });
+        /// ```
+        pub fn initResources(self: *Self, resources: anytype) !void {
+            const info = @typeInfo(@TypeOf(resources));
+            switch (info) {
+                .@"struct" => |struct_info| {
+                    inline for (struct_info.fields) |field| {
+                        const ResourceType = @TypeOf(@field(resources, field.name));
+                        try self.setResource(ResourceType, @field(resources, field.name));
+                    }
+                },
+                else => @compileError("initResources expects a struct literal"),
+            }
+        }
+
         /// Mark a resource as initialized.
         /// This should be called after directly mutating resource_pool[i] to ensure
-        /// the resource can be serialized. Prefer using setResource() or getResourcePtrMut()
-        /// which automatically mark resources as initialized.
+        /// the resource can be serialized. Prefer using setResource()
+        /// which automatically marks resources as initialized.
         pub fn markResourceInitialized(self: *Self, comptime R: type) void {
             if (comptime resource_pool_length > 0) {
                 const id = comptime getResourceId(R);
@@ -1293,7 +1361,7 @@ test "System with resource, allocator, query, and commands" {
 
             // Process each enemy, tracking score
             for (enemies.entities) |_| {
-                score.value.value += 10;
+                score.value.value += 100;
                 try spawn_positions.append(allocator, @as(f32, @floatFromInt(score.value.value)));
             }
 
@@ -1329,13 +1397,13 @@ test "System with resource, allocator, query, and commands" {
     try world.endFrame();
 
     // Verify score was updated
-    try std.testing.expectEqual(@as(i32, 20), world.getResource(Score).value);
+    try std.testing.expectEqual(@as(i32, 200), world.getResource(Score).value);
 
     // Verify entities were spawned with positions
     const pos_query = SingleQuery(Position).init(world.getSparseSetPtr(Position));
     try std.testing.expectEqual(@as(usize, 2), pos_query.entities.len);
-    try std.testing.expectEqual(@as(f32, 10.0), pos_query.components[0].x);
-    try std.testing.expectEqual(@as(f32, 20.0), pos_query.components[1].x);
+    try std.testing.expectEqual(@as(f32, 100.0), pos_query.components[0].x);
+    try std.testing.expectEqual(@as(f32, 200.0), pos_query.components[1].x);
 }
 
 test "World with components and resources together" {
@@ -1955,7 +2023,7 @@ test "Resource initialization tracking" {
     try std.testing.expect(world.isResourceInitialized(Score));
 }
 
-test "getResourcePtrMut marks resource as initialized" {
+test "getResourcePtrMut allows mutation after initialization" {
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
@@ -1972,12 +2040,18 @@ test "getResourcePtrMut marks resource as initialized" {
     try std.testing.expect(!world.isResourceInitialized(GameConfig));
     try std.testing.expect(!world.isResourceInitialized(Score));
 
-    // Get mutable pointer and modify - this should mark as initialized
+    // Initialize resources using setResource
+    try world.setResource(GameConfig, .{ .gravity = 0.0 });
+    try world.setResource(Score, .{ .points = 0 });
+    try std.testing.expect(world.isResourceInitialized(GameConfig));
+    try std.testing.expect(world.isResourceInitialized(Score));
+
+    // Get mutable pointer and modify - resources should remain initialized
     const config = world.getResourcePtrMut(GameConfig);
     config.gravity = 9.8;
     try std.testing.expect(world.isResourceInitialized(GameConfig));
 
-    // Verify serialization succeeds after using getResourcePtrMut
+    // Verify serialization succeeds
     const score = world.getResourcePtrMut(Score);
     score.points = 100;
     try std.testing.expect(world.isResourceInitialized(Score));

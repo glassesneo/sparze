@@ -49,13 +49,60 @@ World(
 
 Global singletons accessible via `Resource(T)` injection.
 
-```zig
-world.setResource(DeltaTime, DeltaTime{ .value = 0.016 });
+### Initialization
 
+**IMPORTANT**: Resources must be initialized before use. Accessing uninitialized resources will:
+- **Debug/ReleaseSafe builds**: Trigger assertion (panic)
+- **ReleaseFast builds**: Return undefined memory (zeroes)
+
+### Initialization Methods
+
+```zig
+// Method 1: Individual initialization
+try world.setResource(DeltaTime, .{ .value = 0.016 });
+try world.setResource(Score, .{ .points = 0 });
+
+// Method 2: Bulk initialization (recommended for startup)
+try world.initResources(.{
+    .delta_time = DeltaTime{ .value = 0.016 },
+    .score = Score{ .points = 0 },
+    .config = GameConfig{ .gravity = 9.8 },
+});
+
+// Method 3: Direct pool access (requires manual marking)
+world.resource_pool[0] = DeltaTime{ .value = 0.016 };
+world.markResourceInitialized(DeltaTime);
+```
+
+### Accessing Resources
+
+```zig
+// In systems (preferred)
 fn updateSystem(delta: Resource(DeltaTime)) !void {
-    const dt = delta.value;
+    const dt = delta.value.value;
+}
+
+// Direct access (unchecked, zero-cost)
+const delta = world.getResource(DeltaTime);
+const delta_ptr = world.getResourcePtr(DeltaTime);
+const delta_mut = world.getResourcePtrMut(DeltaTime);
+
+// Safe checked access (returns error if uninitialized)
+const delta_ptr = try world.tryGetResource(DeltaTime);
+const delta_mut = try world.tryGetResourceMut(DeltaTime);
+
+// Check initialization status
+if (world.isResourceInitialized(DeltaTime)) {
+    // Safe to access
 }
 ```
+
+### Best Practices
+
+1. **Initialize all resources at startup** using `initResources()`
+2. **Use `Resource(T)` injection in systems** for clean code
+3. **Use `tryGetResource*()` for optional resources** that might not exist
+4. **Run tests in Debug mode** to catch initialization bugs early
 
 ## Events
 

@@ -54,6 +54,7 @@ test {
     _ = @import("storage/tag_storage_test.zig");
     _ = @import("query/filter_test.zig");
     _ = @import("system/system_test.zig");
+    _ = @import("world_resource_tests.zig");
     std.testing.refAllDecls(@This());
 }
 
