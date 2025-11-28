@@ -138,10 +138,14 @@ pub fn CommandBuffer(comptime World: type) type {
             for (self.commands.items) |*cmd| {
                 switch (cmd.type) {
                     .add_component => {
+                        // Skip if entity is not alive (prevents zombie entities)
+                        if (!world.isAlive(cmd.entity)) continue;
                         const comp_data = cmd.component_data.?;
                         try world.addComponentFromBytes(cmd.entity, comp_data.type_id, comp_data.data[0..comp_data.len]);
                     },
                     .remove_component => {
+                        // Skip if entity is not alive (prevents operations on dead entities)
+                        if (!world.isAlive(cmd.entity)) continue;
                         const comp_data = cmd.component_data.?;
                         world.removeComponentById(cmd.entity, comp_data.type_id);
                     },
