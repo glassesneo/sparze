@@ -568,8 +568,9 @@ test "Commands handle entity recycling with version validation" {
     // because the command was for the old version (v0)
     try std.testing.expect(!world.hasComponent(entity_v1, Position));
 
-    // Old entity should still be dead
+    // Old entity should still be dead and not have the component
     try std.testing.expect(!world.isAlive(entity_v0));
+    try std.testing.expect(!world.hasComponent(entity_v0, Position));
 
     // New entity should still be alive
     try std.testing.expect(world.isAlive(entity_v1));
