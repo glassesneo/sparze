@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const StructField = std.builtin.Type.StructField;
 
 const entity_module = @import("../entity/entity.zig");
 const Entity = entity_module.Entity;
+const EntityRegistry = entity_module.EntityRegistry;
 
 const sparse_set_module = @import("../storage/sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
@@ -135,6 +137,7 @@ pub fn Query(comptime QueryComponents: type) type {
 
         query_component_pool: QueryComponentPoolType,
         entities: []const Entity,
+        entity_registry: *const EntityRegistry,
 
         pub fn init(world: anytype) Self {
             // Find the smallest sparse set to minimize iterations
@@ -161,6 +164,7 @@ pub fn Query(comptime QueryComponents: type) type {
             return .{
                 .query_component_pool = component_pool,
                 .entities = candidate_entities,
+                .entity_registry = &world.entity_registry,
             };
         }
 
@@ -209,6 +213,11 @@ pub fn Query(comptime QueryComponents: type) type {
 
         /// Filter entities based on required components
         pub fn filter(self: Self, entity: Entity) bool {
+            // Early exit for destroyed entities (Debug/ReleaseSafe only)
+            if (comptime builtin.mode != .ReleaseFast) {
+                if (!self.entity_registry.isAlive(entity)) return false;
+            }
+
             const GetStorage = struct {
                 fn call(s: Self, comptime T: type) *const ComponentStorage(T) {
                     return s.getComponentStoragePtr(T);
@@ -663,6 +672,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
 
         tag_pool: TagPoolType,
         entities: []const Entity,
+        entity_registry: *const EntityRegistry,
 
         pub fn init(world: anytype) Self {
             // Find the smallest tag storage to minimize iterations
@@ -688,6 +698,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
             return .{
                 .tag_pool = tag_pool,
                 .entities = candidate_entities,
+                .entity_registry = &world.entity_registry,
             };
         }
 
@@ -706,6 +717,11 @@ pub fn TagQuery(comptime QueryTags: type) type {
 
         /// Filter entities based on required tags
         pub fn filter(self: Self, entity: Entity) bool {
+            // Early exit for destroyed entities (Debug/ReleaseSafe only)
+            if (comptime builtin.mode != .ReleaseFast) {
+                if (!self.entity_registry.isAlive(entity)) return false;
+            }
+
             const GetStorage = struct {
                 fn call(s: Self, comptime T: type) *const TagStorage(T) {
                     return s.getTagStoragePtr(T);
