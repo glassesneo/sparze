@@ -423,3 +423,154 @@ test "Commands destroyEntity handles multiple destroy commands for same entity" 
     try std.testing.expect(!world.isAlive(entity));
     try std.testing.expect(!world.hasComponent(entity, Health));
 }
+
+test "Commands prevent zombie entity: destroy then add component" {
+    const Position = struct { x: f32, y: f32 };
+    const Health = struct { hp: i32 };
+
+    const TestWorld = @import("../world.zig").World(struct { Position, Health }, struct {}, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create an entity with Position
+    const entity = world.createEntity();
+    try world.addComponent(entity, Position, .{ .x = 100.0, .y = 50.0 });
+
+    // System that destroys entity then tries to add a component
+    const ZombieSystem = struct {
+        var target: ?@import("../entity/entity.zig").Entity = null;
+
+        fn system(commands: anytype) !void {
+            if (target) |e| {
+                try commands.destroyEntity(e);
+                // This should NOT resurrect the entity
+                try commands.addComponent(e, Health, .{ .hp = 100 });
+            }
+        }
+    };
+
+    ZombieSystem.target = entity;
+
+    // Verify entity is alive before system runs
+    try std.testing.expect(world.isAlive(entity));
+    try std.testing.expect(world.hasComponent(entity, Position));
+
+    world.beginFrame();
+    try world.runSystem(ZombieSystem.system);
+    try world.endFrame();
+
+    // CRITICAL: Entity should be dead and should NOT have Health component
+    try std.testing.expect(!world.isAlive(entity));
+    try std.testing.expect(!world.hasComponent(entity, Position));
+    try std.testing.expect(!world.hasComponent(entity, Health)); // Should NOT be added
+}
+
+test "Commands prevent zombie entity: destroy then remove component" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+
+    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create an entity with both components
+    const entity = world.createEntity();
+    try world.addComponent(entity, Position, .{ .x = 100.0, .y = 50.0 });
+    try world.addComponent(entity, Velocity, .{ .dx = 1.0, .dy = 2.0 });
+
+    // System that destroys entity then tries to remove a component
+    const ZombieSystem = struct {
+        var target: ?@import("../entity/entity.zig").Entity = null;
+
+        fn system(commands: anytype) !void {
+            if (target) |e| {
+                try commands.destroyEntity(e);
+                // This should be a no-op (entity is already being destroyed)
+                try commands.removeComponent(e, Velocity);
+            }
+        }
+    };
+
+    ZombieSystem.target = entity;
+
+    world.beginFrame();
+    try world.runSystem(ZombieSystem.system);
+    try world.endFrame();
+
+    // Entity should be dead
+    try std.testing.expect(!world.isAlive(entity));
+    try std.testing.expect(!world.hasComponent(entity, Position));
+    try std.testing.expect(!world.hasComponent(entity, Velocity));
+}
+
+test "Commands handle entity recycling with version validation" {
+    const Position = struct { x: f32, y: f32 };
+
+    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Create first entity and get its ID
+    const entity_v0 = world.createEntity();
+    try world.addComponent(entity_v0, Position, .{ .x = 100.0, .y = 50.0 });
+
+    // Verify it's alive
+    try std.testing.expect(world.isAlive(entity_v0));
+
+    // Destroy the entity (immediate)
+    world.destroyEntity(entity_v0);
+    try std.testing.expect(!world.isAlive(entity_v0));
+
+    // Create new entity - should recycle the same index but with incremented version
+    const entity_v1 = world.createEntity();
+
+    // The new entity should have same index but different version
+    const Entity = @import("../entity/entity.zig").Entity;
+    const getIndex = @import("../entity/entity.zig").getIndex;
+    const getVersion = @import("../entity/entity.zig").getVersion;
+    try std.testing.expectEqual(getIndex(entity_v0), getIndex(entity_v1));
+    try std.testing.expect(getVersion(entity_v0) != getVersion(entity_v1));
+
+    // System that queues commands for the OLD entity (stale reference)
+    const StaleCommandSystem = struct {
+        var stale_entity: ?Entity = null;
+
+        fn system(commands: anytype) !void {
+            if (stale_entity) |e| {
+                // Try to add component to the OLD entity version
+                try commands.addComponent(e, Position, .{ .x = 999.0, .y = 999.0 });
+            }
+        }
+    };
+
+    StaleCommandSystem.stale_entity = entity_v0; // OLD version
+
+    world.beginFrame();
+    try world.runSystem(StaleCommandSystem.system);
+    try world.endFrame();
+
+    // The new entity (v1) should NOT have received the component
+    // because the command was for the old version (v0)
+    try std.testing.expect(!world.hasComponent(entity_v1, Position));
+
+    // Old entity should still be dead
+    try std.testing.expect(!world.isAlive(entity_v0));
+
+    // New entity should still be alive
+    try std.testing.expect(world.isAlive(entity_v1));
+}

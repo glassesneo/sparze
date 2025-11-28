@@ -79,6 +79,16 @@ Internal queue for deferred operations. Components stored in `InlineStorage` ([2
 
 **flush()** called by `world.endFrame()` to execute all queued commands.
 
+### Safety Guarantees
+
+Command execution includes entity liveness validation to prevent "zombie entities":
+
+- **add_component**: Skipped if entity is not alive (prevents resurrection)
+- **remove_component**: Skipped if entity is not alive (no-op on dead entities)
+- **destroy_entity**: Checks `isAlive()` before destruction (idempotent)
+
+This ensures that if a `destroyEntity` command is queued before `addComponent` or `removeComponent` commands for the same entity, the component operations are safely ignored. Entity version checking automatically handles entity recycling scenarios.
+
 ## Frame Lifecycle
 
 ```zig
