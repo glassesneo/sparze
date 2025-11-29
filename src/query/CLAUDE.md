@@ -14,6 +14,22 @@ Query Filters enable entity iteration in system functions via parameter injectio
 | `TagQuery(struct {...})` | No | Yes | Runtime filtering, tags only |
 | `Group(struct {...})` | Yes | Yes | Fastest, no filtering |
 
+## Entity Liveness Validation
+
+**Query** and **TagQuery** filters automatically validate entity liveness in **Debug** and **ReleaseSafe** builds to prevent iteration over destroyed entities. This provides defense-in-depth safety at zero cost in production.
+
+**Key behaviors**:
+- **Debug/ReleaseSafe**: `filter()` checks `entity_registry.isAlive()` before component checks
+- **ReleaseFast**: Validation compiled out for zero overhead
+- **Automatic**: No API changes required, validation is transparent
+- **Safety**: Prevents systems from processing destroyed entities
+
+**Performance impact**:
+- Debug/ReleaseSafe: ~1-2 CPU cycles per entity check
+- ReleaseFast: 0% overhead (validation removed)
+
+This validation complements command buffer safety guarantees (see [System Functions](../system/CLAUDE.md)) to ensure destroyed entities never reach system logic.
+
 ## SingleQuery(T) / SingleTag(T)
 
 Direct packed array access. No modifiers.
