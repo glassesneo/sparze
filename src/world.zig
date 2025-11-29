@@ -486,7 +486,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return &self.resource_pool[id];
         }
 
-        pub fn setResource(self: *Self, comptime R: type, resource: R) !void {
+        pub fn setResource(self: *Self, comptime R: type, resource: R) void {
             const id = comptime getResourceId(R);
             self.resource_pool[id] = resource;
             if (comptime resource_pool_length > 0) {
@@ -511,7 +511,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                 .@"struct" => |struct_info| {
                     inline for (struct_info.fields) |field| {
                         const ResourceType = @TypeOf(@field(resources, field.name));
-                        try self.setResource(ResourceType, @field(resources, field.name));
+                        self.setResource(ResourceType, @field(resources, field.name));
                     }
                 },
                 else => @compileError("initResources expects a struct literal"),
@@ -1953,7 +1953,7 @@ test "Serialization fails for uninitialized resources" {
     try world.addComponent(entity, Position, .{ .x = 10.0, .y = 20.0 });
 
     // Initialize only one resource, leaving the other uninitialized
-    try world.setResource(GameConfig, .{ .gravity = 9.8 });
+    world.setResource(GameConfig, .{ .gravity = 9.8 });
 
     // Try to serialize - should fail because Score is not initialized
     var buffer: std.ArrayList(u8) = .{};
@@ -1982,8 +1982,8 @@ test "Serialization succeeds when all resources are initialized" {
     try world.addComponent(entity, Position, .{ .x = 10.0, .y = 20.0 });
 
     // Initialize all resources
-    try world.setResource(GameConfig, .{ .gravity = 9.8 });
-    try world.setResource(Score, .{ .points = 100 });
+    world.setResource(GameConfig, .{ .gravity = 9.8 });
+    world.setResource(Score, .{ .points = 100 });
 
     // Serialize - should succeed
     var buffer: std.ArrayList(u8) = .{};
@@ -2013,12 +2013,12 @@ test "Resource initialization tracking" {
     try std.testing.expect(!world.isResourceInitialized(Score));
 
     // Set GameConfig
-    try world.setResource(GameConfig, .{ .gravity = 9.8 });
+    world.setResource(GameConfig, .{ .gravity = 9.8 });
     try std.testing.expect(world.isResourceInitialized(GameConfig));
     try std.testing.expect(!world.isResourceInitialized(Score));
 
     // Set Score
-    try world.setResource(Score, .{ .points = 100 });
+    world.setResource(Score, .{ .points = 100 });
     try std.testing.expect(world.isResourceInitialized(GameConfig));
     try std.testing.expect(world.isResourceInitialized(Score));
 }
@@ -2041,8 +2041,8 @@ test "getResourcePtrMut allows mutation after initialization" {
     try std.testing.expect(!world.isResourceInitialized(Score));
 
     // Initialize resources using setResource
-    try world.setResource(GameConfig, .{ .gravity = 0.0 });
-    try world.setResource(Score, .{ .points = 0 });
+    world.setResource(GameConfig, .{ .gravity = 0.0 });
+    world.setResource(Score, .{ .points = 0 });
     try std.testing.expect(world.isResourceInitialized(GameConfig));
     try std.testing.expect(world.isResourceInitialized(Score));
 

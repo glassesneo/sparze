@@ -312,11 +312,11 @@ pub fn Commands(comptime World: type) type {
         /// Example:
         /// ```zig
         /// fn setupSystem(commands: anytype) !void {
-        ///     try commands.setResource(DeltaTime, .{ .dt = 0.016 });
+        ///     commands.setResource(DeltaTime, .{ .dt = 0.016 });
         /// }
         /// ```
-        pub fn setResource(self: Self, comptime R: type, resource: R) !void {
-            return self.world.setResource(R, resource);
+        pub fn setResource(self: Self, comptime R: type, resource: R) void {
+            self.world.setResource(R, resource);
         }
 
         /// Get a copy of a resource value (immediate execution).

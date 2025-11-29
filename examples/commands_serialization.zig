@@ -198,8 +198,8 @@ pub fn main() !void {
     defer world.deinit();
 
     // Initialize resources
-    try world.setResource(Score, .{ .points = 0, .level = 1 });
-    try world.setResource(GameTime, .{ .seconds = 0.0 });
+    world.setResource(Score, .{ .points = 0, .level = 1 });
+    world.setResource(GameTime, .{ .seconds = 0.0 });
 
     const save_path = "examples/commands_save.spze";
 

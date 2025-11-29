@@ -17,7 +17,7 @@ test "Commands.setResource marks resource as initialized" {
 
     const SetResourceSystem = struct {
         fn system(commands: anytype) !void {
-            try commands.setResource(GameConfig, .{ .gravity = 9.8 });
+            commands.setResource(GameConfig, .{ .gravity = 9.8 });
         }
     };
 
@@ -47,7 +47,7 @@ test "Commands.getResource with initialized resource" {
     defer world.deinit();
 
     // Initialize resource
-    try world.setResource(Score, .{ .points = 100 });
+    world.setResource(Score, .{ .points = 100 });
 
     const ReadResourceSystem = struct {
         fn system(commands: anytype) !void {
@@ -73,7 +73,7 @@ test "Commands.getResourcePtr and getResourcePtrMut" {
     defer world.deinit();
 
     // Initialize resource
-    try world.setResource(GameState, .{ .level = 1, .score = 0 });
+    world.setResource(GameState, .{ .level = 1, .score = 0 });
 
     const MutateResourceSystem = struct {
         fn system(commands: anytype) !void {
@@ -131,7 +131,7 @@ test "Commands.tryGetResource succeeds when initialized" {
     defer world.deinit();
 
     // Initialize resource
-    try world.setResource(GameConfig, .{ .gravity = 9.8 });
+    world.setResource(GameConfig, .{ .gravity = 9.8 });
 
     const TryGetSystem = struct {
         fn system(commands: anytype) !void {
@@ -165,7 +165,7 @@ test "Commands.tryGetResourceMut error handling" {
     try world.runSystem(TryGetMutUninitializedSystem.system);
 
     // Initialize resource
-    try world.setResource(Score, .{ .points = 0 });
+    world.setResource(Score, .{ .points = 0 });
 
     const TryGetMutSuccessSystem = struct {
         fn system(commands: anytype) !void {
@@ -243,7 +243,7 @@ test "Commands.isResourceInitialized check" {
             try std.testing.expect(!commands.isResourceInitialized(GameConfig));
 
             // Initialize it
-            try commands.setResource(GameConfig, .{ .gravity = 9.8 });
+            commands.setResource(GameConfig, .{ .gravity = 9.8 });
 
             // Should be initialized now
             try std.testing.expect(commands.isResourceInitialized(GameConfig));
@@ -319,7 +319,7 @@ test "Commands resource operations are immediate" {
     const ImmediateSystem = struct {
         fn system(commands: anytype) !void {
             // Set resource
-            try commands.setResource(Score, .{ .points = 100 });
+            commands.setResource(Score, .{ .points = 100 });
 
             // Immediately readable (not deferred like component operations)
             const score = commands.getResource(Score);

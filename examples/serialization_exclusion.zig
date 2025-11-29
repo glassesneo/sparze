@@ -63,12 +63,12 @@ fn createTestWorld(allocator: std.mem.Allocator) !World {
     var world = World.init(allocator);
 
     // Initialize persistent resources
-    try world.setResource(GameConfig, GameConfig{ .gravity = 9.8, .max_speed = 50.0 });
+    world.setResource(GameConfig, GameConfig{ .gravity = 9.8, .max_speed = 50.0 });
 
     // Initialize transient resources (won't be saved)
     var player_name: [32]u8 = undefined;
     @memcpy(player_name[0..7], "Player1");
-    try world.setResource(SessionData, SessionData{ .player_name = player_name, .login_time = 12345 });
+    world.setResource(SessionData, SessionData{ .player_name = player_name, .login_time = 12345 });
 
     // Create player entity with both persistent and transient components
     const player = world.createEntity();
