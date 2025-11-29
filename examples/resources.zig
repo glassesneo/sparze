@@ -176,18 +176,18 @@ pub fn main() !void {
     defer world.deinit();
 
     // Initialize all resources - REQUIRED before use
-    try world.setResource(DeltaTime, .{ .dt = 0.016 }); // 60 FPS
-    try world.setResource(Score, .{
+    world.setResource(DeltaTime, .{ .dt = 0.016 }); // 60 FPS
+    world.setResource(Score, .{
         .points = 0,
         .combo = 0,
         .high_score = 0,
     });
-    try world.setResource(GameConfig, .{
+    world.setResource(GameConfig, .{
         .gravity = 9.8,
         .max_speed = 100.0,
         .friction = 0.1,
     });
-    try world.setResource(GameState, .{
+    world.setResource(GameState, .{
         .level = 1,
         .paused = false,
     });

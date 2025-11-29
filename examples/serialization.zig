@@ -75,8 +75,8 @@ fn createTestWorld(allocator: std.mem.Allocator) !World {
     var world = World.init(allocator);
 
     // Initialize resources
-    try world.setResource(DeltaTime, .{ .dt = 0.016 });
-    try world.setResource(Score, .{ .points = 1000, .combo = 5 });
+    world.setResource(DeltaTime, .{ .dt = 0.016 });
+    world.setResource(Score, .{ .points = 1000, .combo = 5 });
 
     // Create player entity
     const player = world.createEntity();

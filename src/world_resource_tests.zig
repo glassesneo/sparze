@@ -101,7 +101,7 @@ test "tryGetResource succeeds when initialized" {
     defer world.deinit();
 
     // Initialize resource
-    try world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
+    world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
 
     // Should succeed
     const config_ptr = try world.tryGetResource(GameConfig);
@@ -146,7 +146,7 @@ test "tryGetResourceMut succeeds when initialized" {
     defer world.deinit();
 
     // Initialize resource
-    try world.setResource(GameState, .{ .score = 0, .level = 1 });
+    world.setResource(GameState, .{ .score = 0, .level = 1 });
 
     // Should succeed and allow mutation
     const state_ptr = try world.tryGetResourceMut(GameState);
@@ -179,7 +179,7 @@ test "getResourcePtrMut does not auto-mark as initialized" {
     try std.testing.expect(!world.isResourceInitialized(GameConfig));
 
     // Initialize it properly first
-    try world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
+    world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
 
     // Now it should be initialized
     try std.testing.expect(world.isResourceInitialized(GameConfig));
@@ -212,7 +212,7 @@ test "setResource marks resource as initialized" {
     try std.testing.expect(!world.isResourceInitialized(GameConfig));
 
     // Set resource
-    try world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
+    world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
 
     // Should be marked as initialized
     try std.testing.expect(world.isResourceInitialized(GameConfig));
@@ -285,7 +285,7 @@ test "initResources can initialize subset of resources" {
     try std.testing.expect(!world.isResourceInitialized(GameConfig));
 
     // Initialize the remaining one separately
-    try world.setResource(GameConfig, .{ .gravity = 9.8 });
+    world.setResource(GameConfig, .{ .gravity = 9.8 });
     try std.testing.expect(world.isResourceInitialized(GameConfig));
 }
 
@@ -310,8 +310,8 @@ test "initialized resources work normally with assertions" {
     defer world.deinit();
 
     // Initialize resources
-    try world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
-    try world.setResource(GameState, .{ .score = 0, .level = 1 });
+    world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
+    world.setResource(GameState, .{ .score = 0, .level = 1 });
 
     // All getters should work fine
     const config = world.getResource(GameConfig);
