@@ -106,12 +106,11 @@ test "EventStorage multiple frames" {
     defer storage.deinit();
 
     // Simulate 3 frames
-    var frame: u32 = 0;
-    while (frame < 3) : (frame += 1) {
+    for (0..3) |frame| {
         // Write events for current frame
         var i: i32 = 0;
         while (i < 5) : (i += 1) {
-            try storage.enqueue(.{ .frame = frame, .value = i });
+            try storage.enqueue(.{ .frame = @intCast(frame), .value = i });
         }
 
         // Swap buffers
