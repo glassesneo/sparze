@@ -82,5 +82,6 @@
         "LICENSE",
         "README.md",
         "CLAUDE.md",
+        "SKILL.md",
     },
 }
