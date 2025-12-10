@@ -36,21 +36,21 @@ pub const TagPage = struct {
     }
 
     /// Check if a bit is set at the given slot index
-    fn isSet(self: *const TagPage, slot_idx: u16) bool {
+    inline fn isSet(self: *const TagPage, slot_idx: u16) bool {
         const word_idx = slot_idx / bits_per_word;
         const bit_idx: u6 = @intCast(slot_idx % bits_per_word);
         return (self.tag_bits[word_idx] & (@as(u64, 1) << bit_idx)) != 0;
     }
 
     /// Set a bit at the given slot index
-    fn setBit(self: *TagPage, slot_idx: u16) void {
+    inline fn setBit(self: *TagPage, slot_idx: u16) void {
         const word_idx = slot_idx / bits_per_word;
         const bit_idx: u6 = @intCast(slot_idx % bits_per_word);
         self.tag_bits[word_idx] |= @as(u64, 1) << bit_idx;
     }
 
     /// Clear a bit at the given slot index
-    fn clearBit(self: *TagPage, slot_idx: u16) void {
+    inline fn clearBit(self: *TagPage, slot_idx: u16) void {
         const word_idx = slot_idx / bits_per_word;
         const bit_idx: u6 = @intCast(slot_idx % bits_per_word);
         self.tag_bits[word_idx] &= ~(@as(u64, 1) << bit_idx);
@@ -252,7 +252,7 @@ pub fn TagStorage(comptime C: type) type {
         ///     // Entity has the tag
         /// }
         /// ```
-        pub fn contains(self: Self, entity: Entity) bool {
+        pub inline fn contains(self: Self, entity: Entity) bool {
             const sparse_index = getIndex(entity);
             const page_idx = sparse_index >> page_shift;
             const slot_idx: u16 = @intCast(sparse_index & page_mask);

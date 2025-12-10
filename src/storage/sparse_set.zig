@@ -121,7 +121,7 @@ pub fn SparseSet(comptime C: type) type {
 
         /// Check whether the set contains a component for the given entity.
         /// Complexity: O(1).
-        pub fn contains(self: Self, entity: Entity) bool {
+        pub inline fn contains(self: Self, entity: Entity) bool {
             return self.hasIndex(entity);
         }
 
@@ -224,7 +224,7 @@ pub fn SparseSet(comptime C: type) type {
 
         /// Internal helper: check whether an entity maps to a valid dense entry.
         /// Complexity: O(1).
-        fn hasIndex(self: Self, entity: Entity) bool {
+        inline fn hasIndex(self: Self, entity: Entity) bool {
             const sparse_index = getIndex(entity);
             const page_idx = sparse_index >> page_shift;
             const slot_idx = sparse_index & page_mask;
