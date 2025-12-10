@@ -113,7 +113,7 @@ fn setupGroupSystem(commands: anytype) !void {
 }
 
 /// Group-based movement system (fast iteration)
-fn groupMovementSystem(group: sparze.Group(MovementGroup)) !void {
+fn groupMovementSystem(group: sparze.Group(MovementGroup)) void {
     // Optimize: group provides direct array access, no per-entity queries
     const positions = group.getMutArrayOf(Position);
     const healths = group.getArrayOf(Health);

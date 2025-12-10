@@ -42,7 +42,7 @@ fn physicsSystem(
     config: sparze.Resource(GameConfig),
     state: sparze.Resource(GameState),
     movement: sparze.Query(struct { Position, Velocity, sparze.Exclude(Dead) }),
-) !void {
+) void {
     if (state.value.paused) return; // Skip physics when paused
 
     const dt = delta.value.dt;
@@ -139,7 +139,7 @@ fn levelSystem(
     score: sparze.Resource(Score),
     state: sparze.ResourceMut(GameState),
     config: sparze.ResourceMut(GameConfig),
-) !void {
+) void {
     // Level up every 1000 points
     const new_level = @as(i32, @intFromFloat(@floor(@as(f32, @floatFromInt(score.value.points)) / 1000.0))) + 1;
 
@@ -159,7 +159,7 @@ fn levelSystem(
 fn statsSystem(
     score: sparze.Resource(Score),
     state: sparze.Resource(GameState),
-) !void {
+) void {
     std.debug.print("\n📊 Game Stats:\n", .{});
     std.debug.print("   Score: {d} (High: {d})\n", .{ score.value.points, score.value.high_score });
     std.debug.print("   Combo: x{d}\n", .{score.value.combo});

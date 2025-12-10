@@ -113,7 +113,7 @@ fn printWorldStateSystem(
     names: sparze.Query(struct { Position, Name }),
     delta: sparze.Resource(DeltaTime),
     score: sparze.Resource(Score),
-) !void {
+) void {
     // Print resources
     std.debug.print("DeltaTime: {d:.4}\n", .{delta.value.dt});
     std.debug.print("Score: {d} (combo: {d})\n", .{ score.value.points, score.value.combo });
@@ -213,7 +213,7 @@ pub fn main() !void {
         fn verify(
             players: sparze.SingleTag(Player),
             enemies: sparze.SingleTag(Enemy),
-        ) !void {
+        ) void {
             if (players.entities.len == 1) {
                 std.debug.print("✅ Player count correct\n", .{});
             } else {

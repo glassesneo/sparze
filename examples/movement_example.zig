@@ -26,7 +26,7 @@ fn spawnSystem(commands: anytype) !void {
 }
 
 // Define system as plain function
-fn movementSystem(group: sparze.Group(MovementGroup)) !void {
+fn movementSystem(group: sparze.Group(MovementGroup)) void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
     for (positions, velocities) |*pos, vel| {

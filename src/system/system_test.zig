@@ -185,7 +185,7 @@ test "System function verifies allocator is world allocator" {
     const CheckAllocatorSystem = struct {
         var captured_allocator: ?std.mem.Allocator = null;
 
-        fn system(allocator: std.mem.Allocator) !void {
+        fn system(allocator: std.mem.Allocator) void {
             captured_allocator = allocator;
         }
     };

@@ -25,15 +25,15 @@ const Commands = sparze.Commands;
 const MovementGroup = struct { Position, Velocity };
 
 // Define systems as regular functions
-fn startupSystem() !void {
+fn startupSystem() void {
     std.debug.print("Startup system called!\n", .{});
 }
 
-fn terminationSystem() !void {
+fn terminationSystem() void {
     std.debug.print("Termination system called!\n", .{});
 }
 
-fn movementSystem(group: Group(MovementGroup)) !void {
+fn movementSystem(group: Group(MovementGroup)) void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -44,34 +44,34 @@ fn movementSystem(group: Group(MovementGroup)) !void {
     }
 }
 
-fn healthSystem(query: SingleQuery(Health)) !void {
+fn healthSystem(query: SingleQuery(Health)) void {
     for (query.entities, query.components) |entity, health| {
         std.debug.print("entity: {any}, health: {d} hp\n", .{ entity, health.hp });
     }
 }
 
-fn positionSystem(query: SingleQuery(Position)) !void {
+fn positionSystem(query: SingleQuery(Position)) void {
     for (query.entities, query.components) |entity, *pos| {
         std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y });
         pos.y -= 1;
     }
 }
 
-fn noQuerySystem() !void {
+fn noQuerySystem() void {
     std.debug.print("This system has no queries!\n", .{});
 }
 
 fn multiQuerySystem(
     movement_group: Group(MovementGroup),
     health_query: SingleQuery(Health),
-) !void {
+) void {
     std.debug.print("Multi-query system:\n", .{});
     std.debug.print("  Movement entities: {}\n", .{movement_group.getEntities().len});
     std.debug.print("  Health entities: {}\n", .{health_query.entities.len});
 }
 
 // Query example: Multi-component query without requiring a group
-fn combatQuerySystem(query: Query(struct { Position, Health })) !void {
+fn combatQuerySystem(query: Query(struct { Position, Health })) void {
     std.debug.print("Combat query (no group needed):\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {

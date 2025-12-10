@@ -37,7 +37,7 @@ const RenderGroup = struct { Sprite, sparze.Free(Position), sparze.Free(Health) 
 // This is allowed because Health is FREE in PhysicsGroup and RenderGroup
 const CombatGroup = struct { Health, Shield };
 
-fn physicsSystem(physics: sparze.Group(PhysicsGroup)) !void {
+fn physicsSystem(physics: sparze.Group(PhysicsGroup)) void {
     const entities = physics.getEntities();
 
     // Owned components: direct array access (fast, cache-friendly)
@@ -61,7 +61,7 @@ fn physicsSystem(physics: sparze.Group(PhysicsGroup)) !void {
     }
 }
 
-fn renderSystem(render: sparze.Group(RenderGroup)) !void {
+fn renderSystem(render: sparze.Group(RenderGroup)) void {
     const entities = render.getEntities();
 
     // Owned component: direct array access
@@ -79,7 +79,7 @@ fn renderSystem(render: sparze.Group(RenderGroup)) !void {
     }
 }
 
-fn combatSystem(combat: sparze.Group(CombatGroup)) !void {
+fn combatSystem(combat: sparze.Group(CombatGroup)) void {
     const healths = combat.getArrayOf(Health);
     const shields = combat.getMutArrayOf(Shield);
 

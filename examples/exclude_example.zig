@@ -19,7 +19,7 @@ const TagQuery = sparze.TagQuery;
 const Exclude = sparze.Exclude;
 
 // System 1: Move all entities that have position and velocity, but exclude static objects
-fn movementSystem(query: Query(struct { Position, Velocity, Exclude(Static) })) !void {
+fn movementSystem(query: Query(struct { Position, Velocity, Exclude(Static) })) void {
     std.debug.print("\n=== Movement System (Exclude Static) ===\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
@@ -36,7 +36,7 @@ fn movementSystem(query: Query(struct { Position, Velocity, Exclude(Static) })) 
 }
 
 // System 2: Process living enemies (exclude dead ones)
-fn livingEnemySystem(query: Query(struct { Position, Enemy, Exclude(Dead) })) !void {
+fn livingEnemySystem(query: Query(struct { Position, Enemy, Exclude(Dead) })) void {
     std.debug.print("\n=== Living Enemy System (Exclude Dead) ===\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
@@ -50,7 +50,7 @@ fn livingEnemySystem(query: Query(struct { Position, Enemy, Exclude(Dead) })) !v
 }
 
 // System 3: Process active enemies (exclude frozen and dead)
-fn activeEnemySystem(query: TagQuery(struct { Enemy, Exclude(Frozen), Exclude(Dead) })) !void {
+fn activeEnemySystem(query: TagQuery(struct { Enemy, Exclude(Frozen), Exclude(Dead) })) void {
     std.debug.print("\n=== Active Enemy System (Exclude Frozen & Dead) ===\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
@@ -63,7 +63,7 @@ fn activeEnemySystem(query: TagQuery(struct { Enemy, Exclude(Frozen), Exclude(De
 }
 
 // System 4: Damage damageable entities (exclude dead and bosses)
-fn damageSystem(query: Query(struct { Health, Exclude(Dead), Exclude(Boss) })) !void {
+fn damageSystem(query: Query(struct { Health, Exclude(Dead), Exclude(Boss) })) void {
     std.debug.print("\n=== Damage System (Exclude Dead) ===\n", .{});
     const base_damage: i32 = 10;
 

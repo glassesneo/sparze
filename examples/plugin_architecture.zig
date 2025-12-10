@@ -66,7 +66,7 @@ const MovementGroup = struct { Position, Velocity };
 const CombatGroup = struct { Health, Armor };
 
 // Define systems as regular functions
-fn movementSystem(group: Group(MovementGroup)) !void {
+fn movementSystem(group: Group(MovementGroup)) void {
     const positions = group.getMutArrayOf(Position);
     const velocities = group.getArrayOf(Velocity);
 
@@ -77,7 +77,7 @@ fn movementSystem(group: Group(MovementGroup)) !void {
     }
 }
 
-fn combatSystem(group: Group(CombatGroup)) !void {
+fn combatSystem(group: Group(CombatGroup)) void {
     const entities = group.getEntities();
     std.debug.print("Combat system - processing {} entities\n", .{entities.len});
 }

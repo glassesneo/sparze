@@ -211,7 +211,7 @@ test "Query with Exclude in system function" {
     const MovementSystem = struct {
         var updated_count: usize = 0;
 
-        fn system(query: Query(struct { Position, Velocity, Exclude(Static) })) !void {
+        fn system(query: Query(struct { Position, Velocity, Exclude(Static) })) void {
             updated_count = 0;
             for (query.entities) |entity| {
                 if (query.filter(entity)) {
@@ -482,7 +482,7 @@ test "World system function with SingleQuery" {
     const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {});
 
     const UpdatePositions = struct {
-        fn system(query: SingleQuery(Position)) !void {
+        fn system(query: SingleQuery(Position)) void {
             for (query.components) |*pos| {
                 pos.x += 1.0;
                 pos.y += 1.0;
@@ -520,7 +520,7 @@ test "World system function with Group" {
     const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {});
 
     const MovementSystem = struct {
-        fn system(group: Group(struct { Position, Velocity })) !void {
+        fn system(group: Group(struct { Position, Velocity })) void {
             const positions = group.getMutArrayOf(Position);
             const velocities = group.getArrayOf(Velocity);
 
@@ -707,7 +707,7 @@ test "World system function with Query" {
     const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Health }, struct {}, struct {});
 
     const CombatSystem = struct {
-        fn system(query: Query(struct { Position, Health })) !void {
+        fn system(query: Query(struct { Position, Health })) void {
             for (query.entities) |entity| {
                 if (query.filter(entity)) {
                     const pos = query.getComponent(entity, Position);

@@ -23,7 +23,7 @@ const TagQuery = sparze.TagQuery;
 const Query = sparze.Query;
 
 // System that processes only player entities
-fn playerSystem(query: SingleTag(Player)) !void {
+fn playerSystem(query: SingleTag(Player)) void {
     std.debug.print("Player entities: {}\n", .{query.entities.len});
     for (query.entities) |entity| {
         std.debug.print("  Player entity: {}\n", .{entity});
@@ -31,7 +31,7 @@ fn playerSystem(query: SingleTag(Player)) !void {
 }
 
 // System that processes only enemy entities
-fn enemySystem(query: SingleTag(Enemy)) !void {
+fn enemySystem(query: SingleTag(Enemy)) void {
     std.debug.print("Enemy entities: {}\n", .{query.entities.len});
     for (query.entities) |entity| {
         std.debug.print("  Enemy entity: {}\n", .{entity});
@@ -39,7 +39,7 @@ fn enemySystem(query: SingleTag(Enemy)) !void {
 }
 
 // System that combines tags with regular components
-fn activePlayerHealthSystem(query: Query(struct { Player, Active, Health })) !void {
+fn activePlayerHealthSystem(query: Query(struct { Player, Active, Health })) void {
     std.debug.print("Active players with health:\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
@@ -53,7 +53,7 @@ fn activePlayerHealthSystem(query: Query(struct { Player, Active, Health })) !vo
 }
 
 // System that processes enemies with position (mixing tags and components)
-fn enemyPositionSystem(query: Query(struct { Enemy, Position })) !void {
+fn enemyPositionSystem(query: Query(struct { Enemy, Position })) void {
     std.debug.print("Enemies with position:\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
@@ -67,7 +67,7 @@ fn enemyPositionSystem(query: Query(struct { Enemy, Position })) !void {
 }
 
 // System demonstrating boss enemies (entities with multiple tags)
-fn bossSystem(query: TagQuery(struct { Enemy, Boss })) !void {
+fn bossSystem(query: TagQuery(struct { Enemy, Boss })) void {
     std.debug.print("Boss enemies:\n", .{});
     var count: usize = 0;
     for (query.entities) |entity| {
@@ -80,7 +80,7 @@ fn bossSystem(query: TagQuery(struct { Enemy, Boss })) !void {
 }
 
 // NEW: System demonstrating optional tags - processes all enemies, checks for boss status
-fn enemyProcessingSystem(query: TagQuery(struct { Enemy, ?Boss, ?Active })) !void {
+fn enemyProcessingSystem(query: TagQuery(struct { Enemy, ?Boss, ?Active })) void {
     std.debug.print("Processing all enemies (with optional Boss/Active tags):\n", .{});
     var regular_count: usize = 0;
     var boss_count: usize = 0;
@@ -111,7 +111,7 @@ fn enemyProcessingSystem(query: TagQuery(struct { Enemy, ?Boss, ?Active })) !voi
 }
 
 // NEW: System demonstrating Query with both regular components and tags
-fn combatTargetingSystem(query: Query(struct { Position, Enemy }), commands: anytype) !void {
+fn combatTargetingSystem(query: Query(struct { Position, Enemy }), commands: anytype) void {
     std.debug.print("Combat targeting (all enemies with Position):\n", .{});
     // Get Boss tag storage to check for boss status
     const boss_storage = commands.world.getTagStoragePtr(Boss);

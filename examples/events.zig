@@ -107,7 +107,7 @@ fn deathSystem(
 }
 
 /// System that updates positions based on velocity
-fn movementSystem(movement: sparze.Group(struct { Position, Velocity })) !void {
+fn movementSystem(movement: sparze.Group(struct { Position, Velocity })) void {
     const positions = movement.getMutArrayOf(Position);
     const velocities = movement.getArrayOf(Velocity);
 

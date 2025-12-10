@@ -70,7 +70,7 @@ pub fn main() !void {
 
             // Benchmark: iterate all unique pairs
             const CollisionSystem = struct {
-                fn run(query: sparze.Query(struct { Position, Radius })) !void {
+                fn run(query: sparze.Query(struct { Position, Radius })) void {
                     var iter = query.combinations();
                     var pair_count: usize = 0;
 
@@ -240,4 +240,3 @@ fn printBenchmark(name: []const u8, iterations: usize, elapsed_ns: i128) void {
 
     std.debug.print("{s}: {d:.2}ms total, {d:.3}µs per iteration ({d} iterations)\n", .{ name, elapsed_ms, per_iter_us, iterations });
 }
-

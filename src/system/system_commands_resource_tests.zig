@@ -16,7 +16,7 @@ test "Commands.setResource marks resource as initialized" {
     defer world.deinit();
 
     const SetResourceSystem = struct {
-        fn system(commands: anytype) !void {
+        fn system(commands: anytype) void {
             commands.setResource(GameConfig, .{ .gravity = 9.8 });
         }
     };

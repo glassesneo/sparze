@@ -3,6 +3,7 @@
 **Location:** `src/system/system.zig`
 
 System functions execute game logic via parameter injection. **Cannot directly accept `World` as parameter.**
+System return type can be `void` (no errors) or `!void` (propagates errors); `World.runSystem` will `try` only when the system function actually returns an error union.
 
 ## Parameter Injection
 

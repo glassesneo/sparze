@@ -557,7 +557,11 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                 break :construct_args args;
             };
 
-            try @call(.auto, system_fn, system_args);
+            if (system_type_info.return_type.? == void) {
+                @call(.auto, system_fn, system_args);
+            } else {
+                try @call(.auto, system_fn, system_args);
+            }
         }
     }.run;
 }

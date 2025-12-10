@@ -11,7 +11,7 @@ const Query = sparze.Query;
 
 /// Movement system processes all entities with Position and Velocity,
 /// optionally considering Health for damage-based slowdown
-fn movementSystem(query: Query(struct { Position, Velocity, ?Health })) !void {
+fn movementSystem(query: Query(struct { Position, Velocity, ?Health })) void {
     std.debug.print("\n=== Movement System ===\n", .{});
 
     for (query.entities) |entity| {
@@ -39,7 +39,7 @@ fn movementSystem(query: Query(struct { Position, Velocity, ?Health })) !void {
 
 /// Combat system processes entities with Health,
 /// optionally considering Shield for damage reduction
-fn combatSystem(query: Query(struct { Health, ?Shield })) !void {
+fn combatSystem(query: Query(struct { Health, ?Shield })) void {
     std.debug.print("\n=== Combat System (applying damage) ===\n", .{});
 
     const damage = 15;
@@ -66,7 +66,7 @@ fn combatSystem(query: Query(struct { Health, ?Shield })) !void {
 
 /// Status display system shows all entities with Position,
 /// optionally displaying Health and Shield if present
-fn statusDisplaySystem(query: Query(struct { Position, ?Health, ?Shield })) !void {
+fn statusDisplaySystem(query: Query(struct { Position, ?Health, ?Shield })) void {
     std.debug.print("\n=== Entity Status ===\n", .{});
 
     for (query.entities) |entity| {
