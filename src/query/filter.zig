@@ -257,6 +257,7 @@ pub fn Query(comptime QueryComponents: type) type {
             i: usize = 0,
             j: usize = 1,
             query: *const Query(QueryComponents),
+            i_cached: bool = false, // Track if entity_i filter result is cached
 
             pub fn next(self: *CombinationIterator) ?struct { Entity, Entity } {
                 const entities = self.query.entities;
@@ -265,14 +266,18 @@ pub fn Query(comptime QueryComponents: type) type {
                 while (self.i < entities.len) {
                     const entity_i = entities[self.i];
 
-                    // Optimized: check entity_i filter once before inner loop
-                    const i_passes_filter = self.query.filter(entity_i);
+                    // Check entity_i filter only if not cached (first time or after increment)
+                    if (!self.i_cached) {
+                        const i_passes_filter = self.query.filter(entity_i);
 
-                    // Skip inner loop if entity_i doesn't pass filter
-                    if (!i_passes_filter) {
-                        self.i += 1;
-                        self.j = self.i + 1;
-                        continue;
+                        // Skip inner loop if entity_i doesn't pass filter
+                        if (!i_passes_filter) {
+                            self.i += 1;
+                            self.j = self.i + 1;
+                            self.i_cached = false;
+                            continue;
+                        }
+                        self.i_cached = true;
                     }
 
                     while (self.j < entities.len) {
@@ -290,6 +295,7 @@ pub fn Query(comptime QueryComponents: type) type {
                     // Move to next i and reset j
                     self.i += 1;
                     self.j = self.i + 1;
+                    self.i_cached = false; // Invalidate cache when moving to next i
                 }
 
                 return null;
@@ -333,6 +339,7 @@ pub fn CrossProductIterator(comptime Query1: type, comptime Query2: type) type {
         query2: *const Query2,
         i: usize = 0,
         j: usize = 0,
+        entity1_cached: bool = false, // Track if entity1 filter result is cached
 
         pub fn init(query1: *const Query1, query2: *const Query2) Self {
             return .{
@@ -348,14 +355,18 @@ pub fn CrossProductIterator(comptime Query1: type, comptime Query2: type) type {
             while (self.i < self.query1.entities.len) {
                 const entity1 = self.query1.entities[self.i];
 
-                // Optimized: check entity1 filter once before inner loop
-                const entity1_passes = self.query1.filter(entity1);
+                // Check entity1 filter only if not cached (first time or after increment)
+                if (!self.entity1_cached) {
+                    const entity1_passes = self.query1.filter(entity1);
 
-                // Skip inner loop if entity1 doesn't pass filter
-                if (!entity1_passes) {
-                    self.i += 1;
-                    self.j = 0;
-                    continue;
+                    // Skip inner loop if entity1 doesn't pass filter
+                    if (!entity1_passes) {
+                        self.i += 1;
+                        self.j = 0;
+                        self.entity1_cached = false;
+                        continue;
+                    }
+                    self.entity1_cached = true;
                 }
 
                 while (self.j < self.query2.entities.len) {
@@ -369,6 +380,7 @@ pub fn CrossProductIterator(comptime Query1: type, comptime Query2: type) type {
                 }
                 self.i += 1;
                 self.j = 0;
+                self.entity1_cached = false; // Invalidate cache when moving to next entity1
             }
             return null;
         }
