@@ -85,6 +85,9 @@ pub const Header = struct {
 /// FNV-1a hash function for type names
 /// Fast, simple, good distribution for short strings
 pub fn fnv1aHash(bytes: []const u8) u64 {
+    // Support type names up to ~10,000 characters at comptime
+    // (realistic worst case is <200 chars, but this provides safety margin)
+    @setEvalBranchQuota(10000);
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
 
