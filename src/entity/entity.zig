@@ -1,27 +1,49 @@
 const std = @import("std");
 
-/// 32-bit entity handle encoded as [version:16 | index:16].
-/// The lower 16 bits select the dense index in the registry; the upper 16 bits are a generation/version guard that invalidates stale handles after destroy().
-pub const Entity = u32;
 pub const EntityIndex = u16;
 pub const EntityVersion = u16;
 pub const max_entities = std.math.maxInt(EntityIndex);
 
-pub const index_bits: u5 = 16;
-pub const version_bits: u5 = 16;
-pub const index_mask: u32 = (1 << index_bits) - 1;
-pub const version_mask: u32 = (1 << version_bits) - 1;
+/// 32-bit entity handle packed as [version:16 | index:16].
+/// The lower 16 bits (index) select the dense slot in the registry; the upper 16 bits (version) are a generation guard that invalidates stale handles after destroy().
+pub const Entity = packed struct(u32) {
+    index: EntityIndex,
+    version: EntityVersion,
+
+    /// Creates an Entity from index and version.
+    pub fn init(index: EntityIndex, version: EntityVersion) Entity {
+        return .{ .index = index, .version = version };
+    }
+
+    /// Converts the Entity to its underlying u32 representation.
+    /// Useful for serialization and binary operations.
+    pub fn toInt(self: Entity) u32 {
+        return @bitCast(self);
+    }
+
+    /// Creates an Entity from a u32 representation.
+    /// Useful for deserialization.
+    pub fn fromInt(value: u32) Entity {
+        return @bitCast(value);
+    }
+
+    /// Format function for std.fmt printing with {f} specifier.
+    /// Prints as "Entity(index=N, version=M)".
+    pub fn format(self: Entity, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("Entity(index={d}, version={d})", .{ self.index, self.version });
+    }
+};
 
 /// Extracts the 16-bit index from an Entity identifier.
 /// Complexity: O(1).
 pub fn getIndex(entity: Entity) EntityIndex {
-    return @intCast(entity & index_mask);
+    return entity.index;
 }
 
 /// Extracts the 16-bit version from an Entity identifier.
 /// Complexity: O(1).
 pub fn getVersion(entity: Entity) EntityVersion {
-    return @intCast((entity >> index_bits) & version_mask);
+    return entity.version;
 }
 
 /// Fixed-capacity entity registry (max_entities) that hands out recyclable entity handles.
@@ -55,7 +77,7 @@ pub const EntityRegistry = struct {
             const next_index = getIndex(head_value);
 
             // Advance the head and decrease available count.
-            self.next_index_to_recycle = next_index;
+            self.next_index_to_recycle = Entity.init(next_index, 0);
             self.available -= 1;
             break :recycle .{ head_index, version };
         } else new: {
@@ -90,7 +112,7 @@ pub const EntityRegistry = struct {
         self.entities[index] = makeEntity(prev_head_index, new_version);
 
         // Update head and counters.
-        self.next_index_to_recycle = index;
+        self.next_index_to_recycle = Entity.init(index, 0);
         self.available += 1;
     }
 
@@ -113,7 +135,7 @@ pub const EntityRegistry = struct {
     }
 
     fn makeEntity(index: EntityIndex, version: EntityVersion) Entity {
-        return (@as(u32, version) << index_bits) | (@as(u32, index) & index_mask);
+        return Entity.init(index, version);
     }
 
     test "makeEntity packs index and version correctly" {

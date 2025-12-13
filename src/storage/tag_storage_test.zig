@@ -7,7 +7,7 @@ const TestTag = struct {};
 
 // Helper to create entity with given index and version
 fn makeEntity(index: u16, version: u16) Entity {
-    return (@as(u32, version) << 16) | @as(u32, index);
+    return Entity.init(index, version);
 }
 
 test "TagStorage - basic set and contains" {

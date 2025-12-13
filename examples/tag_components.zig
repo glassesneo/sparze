@@ -26,7 +26,7 @@ const Query = sparze.Query;
 fn playerSystem(query: SingleTag(Player)) void {
     std.debug.print("Player entities: {}\n", .{query.entities.len});
     for (query.entities) |entity| {
-        std.debug.print("  Player entity: {}\n", .{entity});
+        std.debug.print("  Player entity: {f}\n", .{entity});
     }
 }
 
@@ -34,7 +34,7 @@ fn playerSystem(query: SingleTag(Player)) void {
 fn enemySystem(query: SingleTag(Enemy)) void {
     std.debug.print("Enemy entities: {}\n", .{query.entities.len});
     for (query.entities) |entity| {
-        std.debug.print("  Enemy entity: {}\n", .{entity});
+        std.debug.print("  Enemy entity: {f}\n", .{entity});
     }
 }
 
@@ -45,7 +45,7 @@ fn activePlayerHealthSystem(query: Query(struct { Player, Active, Health })) voi
     for (query.entities) |entity| {
         if (query.filter(entity)) {
             const health = query.getComponent(entity, Health);
-            std.debug.print("  Entity {}: {} HP\n", .{ entity, health.hp });
+            std.debug.print("  {f}: {} HP\n", .{ entity, health.hp });
             count += 1;
         }
     }
@@ -59,7 +59,7 @@ fn enemyPositionSystem(query: Query(struct { Enemy, Position })) void {
     for (query.entities) |entity| {
         if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position);
-            std.debug.print("  Enemy {} at ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
+            std.debug.print("  Enemy {f} at ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
             count += 1;
         }
     }
@@ -72,7 +72,7 @@ fn bossSystem(query: TagQuery(struct { Enemy, Boss })) void {
     var count: usize = 0;
     for (query.entities) |entity| {
         if (query.filter(entity)) {
-            std.debug.print("  Boss entity: {}\n", .{entity});
+            std.debug.print("  Boss entity: {f}\n", .{entity});
             count += 1;
         }
     }
@@ -91,7 +91,7 @@ fn enemyProcessingSystem(query: TagQuery(struct { Enemy, ?Boss, ?Active })) void
             const is_boss = query.hasTag(entity, Boss);
             const is_active = query.hasTag(entity, Active);
 
-            std.debug.print("  Entity {}: ", .{entity});
+            std.debug.print("  {f}: ", .{entity});
             if (is_boss) {
                 std.debug.print("BOSS", .{});
                 boss_count += 1;
@@ -123,7 +123,7 @@ fn combatTargetingSystem(query: Query(struct { Position, Enemy }), commands: any
             // Check if this enemy has the Boss tag
             const is_boss = boss_storage.contains(entity);
             const target_priority = if (is_boss) "HIGH" else "NORMAL";
-            std.debug.print("  Target {} at ({d:.1}, {d:.1}) - Priority: {s}\n", .{ entity, pos.x, pos.y, target_priority });
+            std.debug.print("  Target {f} at ({d:.1}, {d:.1}) - Priority: {s}\n", .{ entity, pos.x, pos.y, target_priority });
         }
     }
 }

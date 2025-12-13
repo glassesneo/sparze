@@ -26,13 +26,13 @@ fn movementSystem(query: Query(struct { Position, Velocity, ?Health })) void {
             // Optional: reduce speed if entity is low on health
             if (query.getOptional(entity, Health)) |health| {
                 if (health.hp < 30) {
-                    std.debug.print("Entity {} is injured (HP: {}), moving slower\n", .{ entity, health.hp });
+                    std.debug.print("{f} is injured (HP: {}), moving slower\n", .{ entity, health.hp });
                     pos.x -= vel.dx * 0.5; // Move at half speed
                     pos.y -= vel.dy * 0.5;
                 }
             }
 
-            std.debug.print("Entity {}: moved to ({d:.2}, {d:.2})\n", .{ entity, pos.x, pos.y });
+            std.debug.print("{f}: moved to ({d:.2}, {d:.2})\n", .{ entity, pos.x, pos.y });
         }
     }
 }
@@ -55,11 +55,11 @@ fn combatSystem(query: Query(struct { Health, ?Shield })) void {
                 const absorbed = @min(shield.value, actual_damage);
                 shield.value -= absorbed;
                 actual_damage -= absorbed;
-                std.debug.print("Entity {}: shield absorbed {} damage ({} remaining)\n", .{ entity, absorbed, shield.value });
+                std.debug.print("{f}: shield absorbed {} damage ({} remaining)\n", .{ entity, absorbed, shield.value });
             }
 
             health.hp -= actual_damage;
-            std.debug.print("Entity {}: took {} damage, HP: {}\n", .{ entity, actual_damage, health.hp });
+            std.debug.print("{f}: took {} damage, HP: {}\n", .{ entity, actual_damage, health.hp });
         }
     }
 }
@@ -73,7 +73,7 @@ fn statusDisplaySystem(query: Query(struct { Position, ?Health, ?Shield })) void
         if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position);
 
-            std.debug.print("Entity {} at ({d:.2}, {d:.2})", .{ entity, pos.x, pos.y });
+            std.debug.print("{f} at ({d:.2}, {d:.2})", .{ entity, pos.x, pos.y });
 
             if (query.getOptional(entity, Health)) |health| {
                 std.debug.print(" | HP: {}", .{health.hp});

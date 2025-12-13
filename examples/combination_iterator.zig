@@ -36,7 +36,7 @@ fn collisionDetectionSystem(query: sparze.Query(struct { Position, Radius })) vo
         // Check for collision
         const collision_distance = radius_a.value + radius_b.value;
         if (distance < collision_distance) {
-            std.debug.print("Collision detected between Entity({d}) and Entity({d})\n", .{
+            std.debug.print("Collision detected between {f} and {f}\n", .{
                 entity_a,
                 entity_b,
             });
