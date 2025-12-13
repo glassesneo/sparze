@@ -75,7 +75,7 @@ fn collisionResponseSystem(
     commands: anytype,
 ) !void {
     for (collision_reader.queue) |collision| {
-        std.debug.print("Processing collision: projectile={d} enemy={d}\n", .{
+        std.debug.print("Processing collision: projectile={f} enemy={f}\n", .{
             collision.projectile,
             collision.enemy,
         });
@@ -87,12 +87,12 @@ fn collisionResponseSystem(
         for (health_query.entities, health_query.components) |entity, *health| {
             if (entity == collision.enemy) {
                 health.hp -= 25;
-                std.debug.print("  Enemy {d} took damage, HP: {d}\n", .{ entity, health.hp });
+                std.debug.print("  {f} took damage, HP: {d}\n", .{ entity, health.hp });
 
                 // Mark as dead if HP <= 0
                 if (health.hp <= 0) {
                     try commands.addTag(entity, Dead);
-                    std.debug.print("  Enemy {d} died\n", .{entity});
+                    std.debug.print("  {f} died\n", .{entity});
                 }
                 break;
             }
@@ -116,19 +116,19 @@ pub fn main() !void {
     try world.addTag(proj1, Projectile);
     try world.addComponent(proj1, Transform, .{ .x = 10.0, .y = 10.0 });
     try world.addComponent(proj1, Collider, .{ .radius = 5.0 });
-    std.debug.print("  Projectile {d} at (10.0, 10.0)\n", .{proj1});
+    std.debug.print("  Projectile {f} at (10.0, 10.0)\n", .{proj1});
 
     const proj2 = world.createEntity();
     try world.addTag(proj2, Projectile);
     try world.addComponent(proj2, Transform, .{ .x = 50.0, .y = 50.0 });
     try world.addComponent(proj2, Collider, .{ .radius = 5.0 });
-    std.debug.print("  Projectile {d} at (50.0, 50.0)\n", .{proj2});
+    std.debug.print("  Projectile {f} at (50.0, 50.0)\n", .{proj2});
 
     const proj3 = world.createEntity();
     try world.addTag(proj3, Projectile);
     try world.addComponent(proj3, Transform, .{ .x = 100.0, .y = 100.0 });
     try world.addComponent(proj3, Collider, .{ .radius = 5.0 });
-    std.debug.print("  Projectile {d} at (100.0, 100.0)\n", .{proj3});
+    std.debug.print("  Projectile {f} at (100.0, 100.0)\n", .{proj3});
 
     // Spawn enemies
     std.debug.print("\nSpawning enemies...\n", .{});
@@ -137,21 +137,21 @@ pub fn main() !void {
     try world.addComponent(enemy1, Transform, .{ .x = 15.0, .y = 15.0 }); // Close to proj1
     try world.addComponent(enemy1, Collider, .{ .radius = 10.0 });
     try world.addComponent(enemy1, Health, .{ .hp = 100 });
-    std.debug.print("  Enemy {d} at (15.0, 15.0) with HP=100\n", .{enemy1});
+    std.debug.print("  Enemy {f} at (15.0, 15.0) with HP=100\n", .{enemy1});
 
     const enemy2 = world.createEntity();
     try world.addTag(enemy2, Enemy);
     try world.addComponent(enemy2, Transform, .{ .x = 55.0, .y = 55.0 }); // Close to proj2
     try world.addComponent(enemy2, Collider, .{ .radius = 10.0 });
     try world.addComponent(enemy2, Health, .{ .hp = 50 });
-    std.debug.print("  Enemy {d} at (55.0, 55.0) with HP=50\n", .{enemy2});
+    std.debug.print("  Enemy {f} at (55.0, 55.0) with HP=50\n", .{enemy2});
 
     const enemy3 = world.createEntity();
     try world.addTag(enemy3, Enemy);
     try world.addComponent(enemy3, Transform, .{ .x = 200.0, .y = 200.0 }); // Far from all projectiles
     try world.addComponent(enemy3, Collider, .{ .radius = 10.0 });
     try world.addComponent(enemy3, Health, .{ .hp = 75 });
-    std.debug.print("  Enemy {d} at (200.0, 200.0) with HP=75\n", .{enemy3});
+    std.debug.print("  Enemy {f} at (200.0, 200.0) with HP=75\n", .{enemy3});
 
     // Run collision detection for multiple frames
     std.debug.print("\n=== Frame 1: Initial collision detection ===\n", .{});
@@ -178,7 +178,7 @@ pub fn main() !void {
     // Print enemy health
     const health_query = sparze.SingleQuery(Health).init(world.getSparseSetPtr(Health));
     for (health_query.entities, health_query.components) |entity, health| {
-        std.debug.print("  Enemy {d}: HP={d}\n", .{ entity, health.hp });
+        std.debug.print("  {f}: HP={d}\n", .{ entity, health.hp });
     }
 
     std.debug.print("\n=== Performance comparison note ===\n", .{});

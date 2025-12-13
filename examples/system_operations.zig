@@ -40,19 +40,19 @@ fn movementSystem(group: Group(MovementGroup)) void {
     for (group.getEntities(), positions, velocities) |entity, *pos, vel| {
         pos.x += vel.x * 0.02;
         pos.y += vel.y * 0.02;
-        std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}, vel: {any}\n", .{ entity, pos.x, pos.y, vel });
+        std.debug.print("{f}, pos: .{{ .x = {d}, .y = {d} }}, vel: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y, vel.x, vel.y });
     }
 }
 
 fn healthSystem(query: SingleQuery(Health)) void {
     for (query.entities, query.components) |entity, health| {
-        std.debug.print("entity: {any}, health: {d} hp\n", .{ entity, health.hp });
+        std.debug.print("{f}, health: {d} hp\n", .{ entity, health.hp });
     }
 }
 
 fn positionSystem(query: SingleQuery(Position)) void {
     for (query.entities, query.components) |entity, *pos| {
-        std.debug.print("entity: {any}, pos: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y });
+        std.debug.print("{f}, pos: .{{ .x = {d}, .y = {d} }}\n", .{ entity, pos.x, pos.y });
         pos.y -= 1;
     }
 }
@@ -83,7 +83,7 @@ fn combatQuerySystem(query: Query(struct { Position, Health })) void {
                 const dist_sq = pos.x * pos.x + pos.y * pos.y;
                 if (dist_sq > 2500.0) {
                     health.hp -= 5;
-                    std.debug.print("  Entity {} taking damage! HP: {} (distance: {d:.1})\n", .{ entity, health.hp, @sqrt(dist_sq) });
+                    std.debug.print("  {f} taking damage! HP: {} (distance: {d:.1})\n", .{ entity, health.hp, @sqrt(dist_sq) });
                 }
                 count += 1;
             }

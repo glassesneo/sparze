@@ -56,6 +56,10 @@ test {
     _ = @import("system/system_test.zig");
     _ = @import("system/system_commands_resource_tests.zig");
     _ = @import("world_resource_tests.zig");
+    // Serialization tests
+    _ = @import("serialization/entity_registry.zig");
+    _ = @import("serialization/sparse_set.zig");
+    _ = @import("serialization/tag_storage.zig");
     std.testing.refAllDecls(@This());
 }
 

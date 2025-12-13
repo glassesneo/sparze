@@ -35,6 +35,6 @@ pub fn main() !void {
     // Query and print positions
     const query = SingleQuery(Position).init(world.getSparseSetPtr(Position));
     for (query.entities, query.components) |entity, pos| {
-        std.debug.print("entity: {any}, position: ({d}, {d})\n", .{ entity, pos.x, pos.y });
+        std.debug.print("{f}, position: ({d}, {d})\n", .{ entity, pos.x, pos.y });
     }
 }

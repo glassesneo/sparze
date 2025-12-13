@@ -1559,7 +1559,7 @@ test "World isAlive entity validation" {
     try std.testing.expect(!world.isAlive(entity));
 
     // Test with never-allocated entity
-    const fake_entity: Entity = 999999;
+    const fake_entity = Entity.fromInt(999999);
     try std.testing.expect(!world.isAlive(fake_entity));
 }
 

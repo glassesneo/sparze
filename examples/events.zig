@@ -85,11 +85,11 @@ fn damageSystem(
     for (reader.queue) |damage| {
         if (health_query.getOptionalMut(damage.entity, Health)) |health| {
             health.hp -= damage.amount;
-            std.debug.print("Entity {any} took {d} damage, remaining HP: {d}\n", .{ damage.entity, damage.amount, health.hp });
+            std.debug.print("{f} took {d} damage, remaining HP: {d}\n", .{ damage.entity, damage.amount, health.hp });
 
             if (health.hp <= 0) {
                 try death_writer.enqueue(.{ .entity = damage.entity });
-                std.debug.print("Entity {any} died!\n", .{damage.entity});
+                std.debug.print("{f} died!\n", .{damage.entity});
             }
         }
     }
@@ -102,7 +102,7 @@ fn deathSystem(
 ) !void {
     for (reader.queue) |death| {
         try commands.destroyEntity(death.entity);
-        std.debug.print("Entity {any} destroyed\n", .{death.entity});
+        std.debug.print("{f} destroyed\n", .{death.entity});
     }
 }
 

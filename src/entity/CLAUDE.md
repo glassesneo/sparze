@@ -4,7 +4,15 @@
 
 **Responsibility**: 32-bit entity lifecycle management with version-based recycling.
 
-**Structure**: Entity = 32-bit ID (lower 16 bits: index 0-65,534, upper 16 bits: version)
+**Structure**: Entity = packed struct(u32) with two u16 fields:
+- `index` (lower 16 bits): dense slot index 0-65,534
+- `version` (upper 16 bits): generation guard for stale handle detection
+
+**API**:
+- `Entity.init(index, version)` - Create entity from components
+- `Entity.toInt()` - Convert to u32 for serialization
+- `Entity.fromInt(u32)` - Create from u32 for deserialization
+- `getIndex(entity)` / `getVersion(entity)` - Extract fields
 
 **Key Behaviors**:
 - Free list recycling: Destroyed entity index recycled with incremented version

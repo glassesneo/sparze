@@ -28,7 +28,7 @@ fn movementSystem(query: Query(struct { Position, Velocity, Exclude(Static) })) 
             const vel = query.getComponent(entity, Velocity);
             pos.x += vel.dx;
             pos.y += vel.dy;
-            std.debug.print("  Entity {} moved to ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
+            std.debug.print("  {f} moved to ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
             count += 1;
         }
     }
@@ -42,7 +42,7 @@ fn livingEnemySystem(query: Query(struct { Position, Enemy, Exclude(Dead) })) vo
     for (query.entities) |entity| {
         if (query.filter(entity)) {
             const pos = query.getComponent(entity, Position);
-            std.debug.print("  Living enemy {} at ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
+            std.debug.print("  Living enemy {f} at ({d:.1}, {d:.1})\n", .{ entity, pos.x, pos.y });
             count += 1;
         }
     }
@@ -55,7 +55,7 @@ fn activeEnemySystem(query: TagQuery(struct { Enemy, Exclude(Frozen), Exclude(De
     var count: usize = 0;
     for (query.entities) |entity| {
         if (query.filter(entity)) {
-            std.debug.print("  Active enemy: {}\n", .{entity});
+            std.debug.print("  Active enemy: {f}\n", .{entity});
             count += 1;
         }
     }
@@ -71,7 +71,7 @@ fn damageSystem(query: Query(struct { Health, Exclude(Dead), Exclude(Boss) })) v
         if (query.filter(entity)) {
             const health = query.getComponentMut(entity, Health);
             health.hp -= base_damage;
-            std.debug.print("  Entity {} took {} damage, HP: {}\n", .{ entity, base_damage, health.hp });
+            std.debug.print("  {f} took {} damage, HP: {}\n", .{ entity, base_damage, health.hp });
         }
     }
 }

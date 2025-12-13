@@ -43,7 +43,7 @@ pub fn serialize(
 
     // Write packed entity array
     for (tag_storage.packed_array.items) |entity| {
-        try writer.writeInt(u32, entity, .little);
+        try writer.writeInt(u32, entity.toInt(), .little);
     }
 }
 
@@ -92,7 +92,7 @@ pub fn deserialize(
 
     // Read packed entity array
     for (0..entity_count) |_| {
-        const entity = try compat.readInt(reader, u32, .little);
+        const entity = Entity.fromInt(try compat.readInt(reader, u32, .little));
         tag_storage.packed_array.appendAssumeCapacity(entity);
     }
 
@@ -133,16 +133,18 @@ test "TagStorage serialization with entities" {
     const Tag = struct {};
     const TagStorageType = tag_storage_mod.TagStorage(Tag);
 
-    var buffer: [1024]u8 = undefined;
+    // Buffer needs to be large enough for a full TagPage:
+    // 64 u64 tag_bits (512 bytes) + 4096 u32 sparse_to_dense (16384 bytes) + metadata
+    var buffer: [32 * 1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
 
     var tag_storage = TagStorageType.init(testing.allocator);
     defer tag_storage.deinit();
 
     // Add tags for various entities
-    const entity1: Entity = 0 | (0 << 16); // index 0, version 0
-    const entity2: Entity = 5 | (0 << 16); // index 5, version 0
-    const entity3: Entity = 10 | (1 << 16); // index 10, version 1
+    const entity1 = Entity.init(0, 0); // index 0, version 0
+    const entity2 = Entity.init(5, 0); // index 5, version 0
+    const entity3 = Entity.init(10, 1); // index 10, version 1
 
     try tag_storage.set(entity1);
     try tag_storage.set(entity2);
@@ -165,7 +167,7 @@ test "TagStorage serialization with entities" {
     try testing.expect(loaded.contains(entity3));
 
     // Verify non-tagged entities don't have tags
-    const entity4: Entity = 7 | (0 << 16);
+    const entity4 = Entity.init(7, 0);
     try testing.expect(!loaded.contains(entity4));
 }
 
@@ -182,7 +184,7 @@ test "TagStorage serialization many entities" {
     // Add many tags
     const count = 1000;
     for (0..count) |i| {
-        const entity: Entity = @intCast(i | (0 << 16));
+        const entity = Entity.init(@intCast(i), 0);
         try tag_storage.set(entity);
     }
 
@@ -200,7 +202,7 @@ test "TagStorage serialization many entities" {
     try testing.expectEqual(@as(usize, count), loaded.packed_array.items.len);
 
     for (0..count) |i| {
-        const entity: Entity = @intCast(i | (0 << 16));
+        const entity = Entity.init(@intCast(i), 0);
         try testing.expect(loaded.contains(entity));
     }
 }
@@ -218,7 +220,7 @@ test "TagStorage serialization sparse indices" {
     // Add tags at sparse indices
     const sparse_indices = [_]u16{ 0, 100, 500, 1000, 5000, 10000 };
     for (sparse_indices) |index| {
-        const entity: Entity = @as(u32, index) | (0 << 16);
+        const entity = Entity.init(index, 0);
         try tag_storage.set(entity);
     }
 
@@ -236,11 +238,11 @@ test "TagStorage serialization sparse indices" {
     try testing.expectEqual(@as(usize, sparse_indices.len), loaded.packed_array.items.len);
 
     for (sparse_indices) |index| {
-        const entity: Entity = @as(u32, index) | (0 << 16);
+        const entity = Entity.init(index, 0);
         try testing.expect(loaded.contains(entity));
     }
 
     // Verify intermediate indices don't have tags
-    const entity_50: Entity = 50 | (0 << 16);
+    const entity_50 = Entity.init(50, 0);
     try testing.expect(!loaded.contains(entity_50));
 }

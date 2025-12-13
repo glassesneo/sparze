@@ -11,12 +11,12 @@ pub fn serialize(registry: *const EntityRegistry, writer: anytype) !void {
     // Write metadata
     try writer.writeInt(u16, registry.next_index, .little);
     try writer.writeInt(u16, registry.available, .little);
-    try writer.writeInt(u32, registry.next_index_to_recycle, .little);
+    try writer.writeInt(u32, registry.next_index_to_recycle.toInt(), .little);
 
     // Write entire entities array to preserve free list structure
     // This is critical for maintaining entity versioning and recycling state
     for (registry.entities) |entity_value| {
-        try writer.writeInt(u32, entity_value, .little);
+        try writer.writeInt(u32, entity_value.toInt(), .little);
     }
 }
 
@@ -28,11 +28,11 @@ pub fn deserialize(reader: anytype) !EntityRegistry {
     // Read metadata
     registry.next_index = try compat.readInt(reader, u16, .little);
     registry.available = try compat.readInt(reader, u16, .little);
-    registry.next_index_to_recycle = try compat.readInt(reader, u32, .little);
+    registry.next_index_to_recycle = Entity.fromInt(try compat.readInt(reader, u32, .little));
 
     // Read entire entities array
     for (&registry.entities) |*entity_value| {
-        entity_value.* = try compat.readInt(reader, u32, .little);
+        entity_value.* = Entity.fromInt(try compat.readInt(reader, u32, .little));
     }
 
     return registry;

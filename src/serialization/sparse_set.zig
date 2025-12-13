@@ -62,7 +62,7 @@ pub fn serialize(
 
     // Write packed entity array
     for (sparse_set.packed_array.items) |entity| {
-        try writer.writeInt(u32, entity, .little);
+        try writer.writeInt(u32, entity.toInt(), .little);
     }
 
     // Write component data using appropriate serializer
@@ -154,7 +154,7 @@ pub fn deserialize(
 
     // Read packed entity array
     for (0..dense_count) |_| {
-        const entity = try compat.readInt(reader, u32, .little);
+        const entity = Entity.fromInt(try compat.readInt(reader, u32, .little));
         sparse_set.packed_array.appendAssumeCapacity(entity);
     }
 
@@ -204,9 +204,9 @@ test "SparseSet serialization with components" {
     defer sparse_set.deinit();
 
     // Add components for various entities
-    const entity1: Entity = 0 | (0 << 16); // index 0, version 0
-    const entity2: Entity = 5 | (0 << 16); // index 5, version 0
-    const entity3: Entity = 10 | (1 << 16); // index 10, version 1
+    const entity1 = Entity.init(0, 0); // index 0, version 0
+    const entity2 = Entity.init(5, 0); // index 5, version 0
+    const entity3 = Entity.init(10, 1); // index 10, version 1
 
     try sparse_set.insert(entity1, .{ .x = 1.0, .y = 2.0 });
     try sparse_set.insert(entity2, .{ .x = 3.0, .y = 4.0 });
@@ -249,9 +249,9 @@ test "SparseSet serialization with group" {
     defer sparse_set.deinit();
 
     // Add components
-    const entity1: Entity = 0 | (0 << 16);
-    const entity2: Entity = 1 | (0 << 16);
-    const entity3: Entity = 2 | (0 << 16);
+    const entity1 = Entity.init(0, 0);
+    const entity2 = Entity.init(1, 0);
+    const entity3 = Entity.init(2, 0);
 
     try sparse_set.insert(entity1, .{ .value = 10 });
     try sparse_set.insert(entity2, .{ .value = 20 });
@@ -285,9 +285,9 @@ test "SparseSet serialization multiple pages" {
 
     // Add components across multiple pages
     // Page 0: entity 0, Page 1: entity 4096, Page 2: entity 8192
-    const entity1: Entity = 0 | (0 << 16);
-    const entity2: Entity = 4096 | (0 << 16);
-    const entity3: Entity = 8192 | (0 << 16);
+    const entity1 = Entity.init(0, 0);
+    const entity2 = Entity.init(4096, 0);
+    const entity3 = Entity.init(8192, 0);
 
     try sparse_set.insert(entity1, .{ .id = 1 });
     try sparse_set.insert(entity2, .{ .id = 2 });
@@ -320,9 +320,9 @@ test "SparseSet serialization v2 very sparse pages" {
     defer sparse_set.deinit();
 
     // Add 1 entity to page 0, 1 to page 1, 1 to page 2
-    const entity1: Entity = 0 | (0 << 16); // Page 0, slot 0
-    const entity2: Entity = 4096 | (0 << 16); // Page 1, slot 0
-    const entity3: Entity = 8192 | (0 << 16); // Page 2, slot 0
+    const entity1 = Entity.init(0, 0); // Page 0, slot 0
+    const entity2 = Entity.init(4096, 0); // Page 1, slot 0
+    const entity3 = Entity.init(8192, 0); // Page 2, slot 0
 
     try sparse_set.insert(entity1, .{ .value = 100 });
     try sparse_set.insert(entity2, .{ .value = 200 });
@@ -363,7 +363,7 @@ test "SparseSet serialization v2 sparse pages (10 entities per page)" {
     var i: u16 = 0;
     while (i < 10) : (i += 1) {
         const entity_index: EntityIndex = i * 400; // Spread across page
-        const entity: Entity = entity_index | (0 << 16);
+        const entity = Entity.init(entity_index, 0);
         try sparse_set.insert(entity, .{ .id = i, .data = @as(u32, i) * 1000 });
     }
 
@@ -379,8 +379,8 @@ test "SparseSet serialization v2 sparse pages (10 entities per page)" {
     try testing.expectEqual(@as(usize, 10), loaded.components.items.len);
 
     // Verify first and last entities
-    const first_entity: Entity = 0 | (0 << 16);
-    const last_entity: Entity = (9 * 400) | (0 << 16);
+    const first_entity = Entity.init(0, 0);
+    const last_entity = Entity.init(9 * 400, 0);
 
     try testing.expectEqual(@as(u16, 0), loaded.get(first_entity).?.id);
     try testing.expectEqual(@as(u16, 9), loaded.get(last_entity).?.id);
@@ -403,7 +403,7 @@ test "SparseSet serialization v2 medium density pages" {
     // Add 500 entities to page 0
     var i: u16 = 0;
     while (i < 500) : (i += 1) {
-        const entity: Entity = i | (0 << 16);
+        const entity = Entity.init(i, 0);
         try sparse_set.insert(entity, .{ .value = i });
     }
 
@@ -419,9 +419,9 @@ test "SparseSet serialization v2 medium density pages" {
     try testing.expectEqual(@as(usize, 500), loaded.components.items.len);
 
     // Spot check some entities
-    try testing.expectEqual(@as(u16, 0), loaded.get(0 | (0 << 16)).?.value);
-    try testing.expectEqual(@as(u16, 250), loaded.get(250 | (0 << 16)).?.value);
-    try testing.expectEqual(@as(u16, 499), loaded.get(499 | (0 << 16)).?.value);
+    try testing.expectEqual(@as(u16, 0), loaded.get(Entity.init(0, 0)).?.value);
+    try testing.expectEqual(@as(u16, 250), loaded.get(Entity.init(250, 0)).?.value);
+    try testing.expectEqual(@as(u16, 499), loaded.get(Entity.init(499, 0)).?.value);
 
     // v2 should be moderately efficient
     // v1: 4100 bytes per page, v2: ~(500 * 4) + overhead = ~2KB
@@ -442,7 +442,7 @@ test "SparseSet serialization v2 dense pages" {
     // Add 4000 entities to page 0 (almost full page)
     var i: u16 = 0;
     while (i < 4000) : (i += 1) {
-        const entity: Entity = i | (0 << 16);
+        const entity = Entity.init(i, 0);
         try sparse_set.insert(entity, .{ .id = i });
     }
 
@@ -458,9 +458,9 @@ test "SparseSet serialization v2 dense pages" {
     try testing.expectEqual(@as(usize, 4000), loaded.components.items.len);
 
     // Verify boundary entities
-    try testing.expectEqual(@as(u16, 0), loaded.get(0 | (0 << 16)).?.id);
-    try testing.expectEqual(@as(u16, 1999), loaded.get(1999 | (0 << 16)).?.id);
-    try testing.expectEqual(@as(u16, 3999), loaded.get(3999 | (0 << 16)).?.id);
+    try testing.expectEqual(@as(u16, 0), loaded.get(Entity.init(0, 0)).?.id);
+    try testing.expectEqual(@as(u16, 1999), loaded.get(Entity.init(1999, 0)).?.id);
+    try testing.expectEqual(@as(u16, 3999), loaded.get(Entity.init(3999, 0)).?.id);
 
     // For dense pages, v2 will be larger than v1, but that's acceptable
     // v1: ~12,290 bytes, v2: ~16,386 bytes
@@ -480,9 +480,9 @@ test "SparseSet serialization v2 file size verification sparse" {
     defer sparse_set.deinit();
 
     // Add 3 entities across 3 pages (worst case for v1)
-    try sparse_set.insert(0 | (0 << 16), .{ .val = 1 });
-    try sparse_set.insert(4096 | (0 << 16), .{ .val = 2 });
-    try sparse_set.insert(8192 | (0 << 16), .{ .val = 3 });
+    try sparse_set.insert(Entity.init(0, 0), .{ .val = 1 });
+    try sparse_set.insert(Entity.init(4096, 0), .{ .val = 2 });
+    try sparse_set.insert(Entity.init(8192, 0), .{ .val = 3 });
 
     // Serialize
     try serialize(Component, &sparse_set, fbs.writer());
