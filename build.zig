@@ -1,26 +1,16 @@
 const std = @import("std");
 
 const examples = [_]Example{
-    .{ .name = "basic" },
-    .{ .name = "combination_iterator" },
-    .{ .name = "cross_product" },
-    .{ .name = "events" },
-    .{ .name = "exclude_example" },
-    .{ .name = "plugin_architecture" },
-    .{ .name = "system_operations" },
-    .{ .name = "movement_example" },
-    .{ .name = "multiple_groups" },
-    .{ .name = "partial_owning_groups" },
-    .{ .name = "optional_components" },
-    .{ .name = "performance_benchmark" },
-    .{ .name = "performance_bottleneck_benchmark" },
-    .{ .name = "tag_components" },
-    .{ .name = "tag_storage_benchmark" },
-    .{ .name = "query_vs_group_benchmark" },
-    .{ .name = "reserve_benchmark" },
-    .{ .name = "resources" },
-    .{ .name = "serialization" },
-    .{ .name = "commands_serialization" },
+    .{ .name = "world_bootstrap" },
+    .{ .name = "commands_lifecycle" },
+    .{ .name = "resources_init" },
+    .{ .name = "queries_filters" },
+    .{ .name = "tags_and_tagquery" },
+    .{ .name = "groups_full_owning" },
+    .{ .name = "groups_partial_free" },
+    .{ .name = "events_pipeline" },
+    .{ .name = "pairs_and_cross_products" },
+    .{ .name = "serialization_and_replay" },
 };
 
 const Example = struct {
