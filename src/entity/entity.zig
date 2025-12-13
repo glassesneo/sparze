@@ -29,7 +29,7 @@ pub const Entity = packed struct(u32) {
 
     /// Format function for std.fmt printing with {f} specifier.
     /// Prints as "Entity(index=N, version=M)".
-    pub fn format(self: Entity, writer: *std.io.Writer) std.io.Writer.Error!void {
+    pub fn format(self: Entity, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("Entity(index={d}, version={d})", .{ self.index, self.version });
     }
 };
