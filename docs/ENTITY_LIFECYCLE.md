@@ -5,13 +5,35 @@ Detailed documentation of entity creation, destruction, and version-based recycl
 ## Entity Structure
 
 ```zig
-pub const Entity = u32;
-pub const max_entities = 65535;
+const std = @import("std");
+
+pub const EntityIndex = u16;
+pub const EntityVersion = u16;
+pub const max_entities = std.math.maxInt(EntityIndex);
+
+pub const Entity = packed struct(u32) {
+    index: EntityIndex,
+    version: EntityVersion,
+
+    pub fn init(index: EntityIndex, version: EntityVersion) Entity {
+        return .{ .index = index, .version = version };
+    }
+
+    pub fn toInt(self: Entity) u32 {
+        return @bitCast(self);
+    }
+
+    pub fn fromInt(value: u32) Entity {
+        return @bitCast(value);
+    }
+};
 ```
 
-**Layout**: 32-bit identifier
-- **Lower 16 bits**: Index (0-65,534)
-- **Upper 16 bits**: Version
+**Layout**: 32-bit packed struct
+- **index** (lower 16 bits): Dense slot index (0-65,534)
+- **version** (upper 16 bits): Generation guard
+
+`Entity` is still bit-compatible with the previous u32 representation; use `toInt()` / `fromInt()` for serialization.
 
 **Example**:
 ```
@@ -32,9 +54,9 @@ User Code
   │     │     │
   │     │     ├─ Free list empty?
   │     │     │   ├─ Yes → Allocate new index, version = 0
-  │     │     │   └─ No → Pop from free list, increment version
+  │     │     │   └─ No → Pop from free list, reuse stored version
   │     │     │
-  │     │     └─> Return entity ID (index | version << 16)
+  │     │     └─> Return Entity{ index, version } (bitcast to u32 when needed)
   │     │
   │     └─> Return entity (immediately usable)
   │
@@ -78,7 +100,7 @@ User Code
               │         ├─ Increment version at index
               │         │
               │         └─ Add index to free list
-              │             (stored in entity_data[index])
+              │             (stored in entities[index])
               │
               └─> Old entity IDs now invalid (version mismatch)
 ```
@@ -93,28 +115,17 @@ User Code
 
 ### Free List Structure
 
-EntityRegistry uses an **implicit free list** stored in the entity_data array itself:
+EntityRegistry keeps an **implicit free list** inside the packed `Entity` values:
 
-```
-Active entities: entity_data[index] = version
-Free entities:   entity_data[index] = next_free_index | 0x8000_0000
-                                       └──────┬────────┘   └────┬────┘
-                                          Next index        Flag bit
-```
+- **Alive slot**: `entities[index] = Entity{ .index = index, .version = current }`
+- **Free slot**: `entities[index] = Entity{ .index = next_free_index, .version = next_version }`
+- **Head pointer**: `next_index_to_recycle.index` stores the head index (version field unused); `available` counts free slots
 
-**Example state**:
-```
-Index:  [0] [1] [2] [3] [4] [5]
-Data:   [2] [5] [3] [1] [1] [0x8000_0002]
-        │   │   │   │   │   └─> Free (next: 2)
-        │   │   │   │   └─> Active (version 1)
-        │   │   │   └─> Active (version 1)
-        │   │   └─> Active (version 3)
-        │   └─> Active (version 5)
-        └─> Active (version 2)
+Because `isAlive()` checks `entities[index].index == index`, free slots are automatically rejected (their index field points to the next free node instead).
 
-free_head = 5
-```
+**Free list updates**:
+- `destroy(entity)`: bump version, write `entities[index] = Entity{ .index = prev_head_index, .version = bumped_version }`, set `next_index_to_recycle` to this index, increment `available`.
+- `create()`: pop `next_index_to_recycle.index`, read its stored version, advance head to the stored `next_free_index`, decrement `available`, and return `Entity{ .index = popped_index, .version = stored_version }`.
 
 ### Lifecycle Example
 
@@ -122,33 +133,38 @@ free_head = 5
 
 ```
 1. Initial state:
-   free_head = 0 (empty)
-   entity_data = []
+   next_index = 0, available = 0
+   entities = []
 
 2. Create entity A:
    → Allocate index 0, version 0
-   → Entity A = 0x0000_0000
-   → entity_data[0] = 0
+   → Entity A = Entity{ .index = 0, .version = 0 }
+   → entities[0] = Entity{ .index = 0, .version = 0 }
+   → next_index = 1
 
 3. Create entity B:
    → Allocate index 1, version 0
-   → Entity B = 0x0000_0001
-   → entity_data[1] = 0
+   → Entity B = Entity{ .index = 1, .version = 0 }
+   → entities[1] = Entity{ .index = 1, .version = 0 }
+   → next_index = 2
 
-4. Destroy entity A (ID 0x0000_0000):
-   → Increment version: entity_data[0] = 1
-   → Add to free list: entity_data[0] = 0x8000_0000 (next: 0, version encoded)
-   → free_head = 0
-   → Old ID 0x0000_0000 now invalid
+4. Destroy entity A (Entity{ .index = 0, .version = 0 }):
+   → bumped_version = 1
+   → prev_head_index = 0 (free list was empty)
+   → entities[0] = Entity{ .index = 0, .version = 1 }   // free node: points to itself
+   → next_index_to_recycle = Entity{ .index = 0, .version = 0 }
+   → available = 1
 
 5. Create entity C:
-   → Pop from free list: index 0, increment version
-   → Entity C = 0x0001_0000 (version 1, index 0)
-   → entity_data[0] = 1 (active, version 1)
+   → Pop head index = 0, stored_version = 1, stored_next = 0
+   → next_index_to_recycle = Entity{ .index = stored_next, .version = 0 }
+   → entities[0] = Entity{ .index = 0, .version = 1 }   // now alive
+   → Entity C = Entity{ .index = 0, .version = 1 }
+   → available = 0
 
-6. Try to use old entity A (0x0000_0000):
-   → isAlive(0x0000_0000)?
-   → entity_data[0] = 1 (version mismatch: 0 != 1)
+6. Try to use old entity A (Entity{ .index = 0, .version = 0 }):
+   → isAlive(old_entity)?
+   → entities[0] = Entity{ .index = 0, .version = 1 } (version mismatch)
    → Returns false → Safe rejection!
 ```
 
@@ -157,7 +173,7 @@ free_head = 5
 After 65,535 recycles at the same index, version wraps to 0:
 
 ```
-entity_data[index] = (current_version + 1) & 0xFFFF
+const new_version: EntityVersion = current_version + 1; // wraps after 0xFFFF
 ```
 
 **Probability of collision**:
@@ -208,10 +224,11 @@ Frame N end (flush):
 ### 1. Version Checking (Use-After-Free Prevention)
 
 ```zig
-pub fn isAlive(self: *const EntityRegistry, entity: Entity) bool {
-    const index = entity & 0xFFFF;
-    const version = entity >> 16;
-    return self.entity_data[index] == version;
+pub fn isAlive(self: EntityRegistry, entity: Entity) bool {
+    const index = getIndex(entity);
+    if (index >= self.next_index) return false; // never allocated
+    const slot = self.entities[index];
+    return slot.index == index and slot.version == entity.version;
 }
 ```
 
@@ -245,9 +262,14 @@ Before executing each deferred operation:
 ```zig
 pub fn destroy(self: *EntityRegistry, entity: Entity) void {
     // No isAlive check - caller's responsibility
-    const index = entity & 0xFFFF;
-    self.entity_data[index] += 1; // Increment version
-    // Add to free list...
+    const index = getIndex(entity);
+    const current = self.entities[index];
+    const new_version: EntityVersion = current.version + 1;
+    const prev_head_index = if (self.available == 0) index else self.next_index_to_recycle.index;
+
+    self.entities[index] = Entity{ .index = prev_head_index, .version = new_version };
+    self.next_index_to_recycle = Entity{ .index = index, .version = 0 };
+    self.available += 1;
 }
 ```
 
@@ -257,8 +279,8 @@ pub fn destroy(self: *EntityRegistry, entity: Entity) void {
 
 ```
 EntityRegistry memory:
-  entity_data: 65,535 entities × u32 = 256 KB
-  free list overhead: stored in entity_data (no additional cost)
+  entities: 65,535 entities × 4 bytes = 256 KB
+  free list overhead: stored in entities (no additional cost)
   Metadata: ~16 bytes
 
 Total: ~256 KB fixed allocation
@@ -275,7 +297,7 @@ Total: ~256 KB fixed allocation
 | isAlive() | O(1) | Array lookup + comparison |
 | Version increment | O(1) | Bitwise operations |
 
-**Cache efficiency**: entity_data array accessed sequentially during iteration (good locality).
+**Cache efficiency**: entities array accessed sequentially during iteration (good locality).
 
 ## Example: Full Lifecycle
 

@@ -25,7 +25,7 @@ Sparze is a **compile-time ECS** (Entity Component System) where all component, 
 
 | Structure | Location | Purpose | Details |
 |-----------|----------|---------|---------|
-| Entity | `src/entity/entity.zig` | 32-bit identifier | 16-bit index + 16-bit version |
+| Entity | `src/entity/entity.zig` | 32-bit identifier | Packed struct(u32): 16-bit index + 16-bit version |
 | EntityRegistry | `src/entity/entity.zig` | Lifecycle management | Free list recycling, version tracking |
 
 **Memory footprint**: ~256 KB fixed allocation (65,536 entities max)
