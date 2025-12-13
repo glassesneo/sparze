@@ -300,6 +300,6 @@ try world.addComponent(player, Weapon{ ... });
 ```
 
 See also:
-- @docs/ARCHITECTURE.md for EntityRegistry structure
-- @docs/STORAGE_INTERNALS.md for component cleanup details
-- @docs/SYSTEM_PATTERNS.md for entity creation patterns in systems
+- docs/ARCHITECTURE.md for EntityRegistry structure
+- docs/STORAGE_INTERNALS.md for component cleanup details
+- docs/SYSTEM_PATTERNS.md for entity creation patterns in systems

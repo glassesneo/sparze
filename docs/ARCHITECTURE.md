@@ -149,6 +149,6 @@ Sparze optimizes for cache efficiency through three mechanisms:
 - Version checking for recycled entities
 
 See also:
-- @docs/ENTITY_LIFECYCLE.md for entity creation/deletion flows
-- @docs/STORAGE_INTERNALS.md for detailed storage mechanics
-- @docs/SYSTEM_PATTERNS.md for CommandBuffer usage patterns
+- docs/ENTITY_LIFECYCLE.md for entity creation/deletion flows
+- docs/STORAGE_INTERNALS.md for detailed storage mechanics
+- docs/SYSTEM_PATTERNS.md for CommandBuffer usage patterns

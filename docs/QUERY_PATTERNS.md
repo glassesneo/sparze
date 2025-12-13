@@ -365,5 +365,5 @@ Group(struct { Position, Velocity, Free(Health) })
    ```
 
 See also:
-- @docs/ARCHITECTURE.md for filter internals
-- @docs/SYSTEM_PATTERNS.md for system integration examples
+- docs/ARCHITECTURE.md for filter internals
+- docs/SYSTEM_PATTERNS.md for system integration examples

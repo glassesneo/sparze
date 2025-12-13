@@ -678,6 +678,6 @@ fn flush(self: *CommandBuffer, world: *World) !void {
    ```
 
 See also:
-- @docs/QUERY_PATTERNS.md for iteration patterns
-- @docs/ENTITY_LIFECYCLE.md for entity management
-- @docs/ARCHITECTURE.md for system architecture
+- docs/QUERY_PATTERNS.md for iteration patterns
+- docs/ENTITY_LIFECYCLE.md for entity management
+- docs/ARCHITECTURE.md for system architecture

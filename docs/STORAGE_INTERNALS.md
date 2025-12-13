@@ -518,6 +518,6 @@ fn collisionResponse(
 | Events | EventStorage | O(event_count) | Frame-delayed messaging |
 
 See also:
-- @docs/ARCHITECTURE.md for high-level overview
-- @docs/ENTITY_LIFECYCLE.md for entity management
-- @docs/QUERY_PATTERNS.md for iteration patterns
+- docs/ARCHITECTURE.md for high-level overview
+- docs/ENTITY_LIFECYCLE.md for entity management
+- docs/QUERY_PATTERNS.md for iteration patterns

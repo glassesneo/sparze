@@ -30,7 +30,7 @@ const Enemy = struct {};  // 0 bytes
 // 10,000 enemies = ~4 KB (entity IDs only)
 ```
 
-**Memory savings**: ~98% reduction for sparse entity distributions (see @docs/STORAGE_INTERNALS.md)
+**Memory savings**: ~98% reduction for sparse entity distributions (see docs/STORAGE_INTERNALS.md)
 
 ### Pre-allocation with reserve()
 
@@ -425,6 +425,6 @@ zig build run-benchmark-sparse_vs_dense
    - Solution: Use zero-sized structs (tags)
 
 See also:
-- @docs/QUERY_PATTERNS.md for iteration strategies
-- @docs/STORAGE_INTERNALS.md for memory layout details
-- @docs/ARCHITECTURE.md for design principles
+- docs/QUERY_PATTERNS.md for iteration strategies
+- docs/STORAGE_INTERNALS.md for memory layout details
+- docs/ARCHITECTURE.md for design principles
