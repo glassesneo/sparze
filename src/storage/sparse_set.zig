@@ -34,8 +34,10 @@ pub const SparsePage = struct {
     }
 };
 
-/// SparseSet creates a new sparse set type for the given component type.
-/// Complexity: O(1) for type generation (compile-time).
+/// Paged sparse-set storage for component C.
+/// Uses a paginated sparse array (sparse slot -> dense index) and a packed dense prefix.
+/// Supports group-owned prefixing: a contiguous [0..group_info.size) region stores entities that satisfy a Group's owned set for cache-friendly iteration.
+/// Sparse slots store dense indices only for matching generation/version to avoid aliasing stale entity handles.
 pub fn SparseSet(comptime C: type) type {
     return struct {
         const Self = @This();
@@ -125,15 +127,14 @@ pub fn SparseSet(comptime C: type) type {
             return self.hasIndex(entity);
         }
 
-        /// Retrieve the component associated with an entity, if present.
-        /// Complexity: O(1).
+        /// Returns a copy of the component if the sparse slot maps to the current entity generation; otherwise null (guards against recycled handles).
         pub fn get(self: Self, entity: Entity) ?Component {
             const ptr = self.getPtr(entity) orelse return null;
             return ptr.*;
         }
 
-        /// Retrieve a pointer to the component associated with an entity, if present.
-        /// Complexity: O(1).
+        /// Returns a pointer into the dense array when the sparse slot matches the current generation; null for stale/missing entries.
+        /// Pointers remain stable across swapRemove unless their owning element is the one moved; callers must re-fetch pointers after remove() of other entities.
         pub fn getPtr(self: *const Self, entity: Entity) ?*const Component {
             if (!self.hasIndex(entity)) return null;
 
@@ -146,8 +147,8 @@ pub fn SparseSet(comptime C: type) type {
             return &self.components.items[dense_index];
         }
 
-        /// Retrieve a mutable pointer to the component associated with an entity, if present.
-        /// Complexity: O(1).
+        /// Returns a pointer into the dense array when the sparse slot matches the current generation; null for stale/missing entries.
+        /// Pointers remain stable across swapRemove unless their owning element is the one moved; callers must re-fetch pointers after remove() of other entities.
         pub fn getPtrMut(self: *Self, entity: Entity) ?*Component {
             if (!self.hasIndex(entity)) return null;
 
@@ -160,8 +161,10 @@ pub fn SparseSet(comptime C: type) type {
             return &self.components.items[dense_index];
         }
 
-        /// Insert or replace a component for the given entity.
-        /// Complexity: O(1) amortized (ArrayList may reallocate).
+        /// Inserts or replaces a component for an entity.
+        /// Reuse path verifies the entity generation matches the packed_array to prevent writing over a stale sparse slot.
+        /// Appends to the packed array; does not maintain group prefix ordering—Group.moveToGroup must be called by the group maintainer.
+        /// Amortized O(1); may allocate a sparse page or grow the dense arrays.
         pub fn insert(self: *Self, entity: Entity, component: Component) !void {
             const sparse_index = getIndex(entity);
             const page_idx = sparse_index >> page_shift;
@@ -191,8 +194,9 @@ pub fn SparseSet(comptime C: type) type {
             page.slots[slot_idx] = dense_index;
         }
 
-        /// Remove the component associated with an entity, if it exists.
-        /// Complexity: O(1).
+        /// Removes a component if present.
+        /// Swap-removes from dense storage and rewrites the moved entity's sparse slot, preserving dense compactness. Does NOT update group_info.size—caller must invoke moveFromGroup() first if entity is in a group prefix.
+        /// No-op for missing or stale entities.
         pub fn remove(self: *Self, entity: Entity) void {
             if (!self.hasIndex(entity)) return;
 
@@ -236,7 +240,9 @@ pub fn SparseSet(comptime C: type) type {
             return entity == self.packed_array.items[dense_index];
         }
 
-        /// Move entity to group area (at the beginning of packed array)
+        /// Moves an owned component into the group-owned prefix [0, group_info.size).
+        /// No-op if the entity is already in the prefix; swapElements updates both dense arrays and sparse slots to keep dense indices coherent.
+        /// Used by world/group maintenance to maintain archetype-like packed order for group iteration.
         pub fn moveToGroup(self: *Self, entity: Entity) void {
             // Optimized: check page/slot directly instead of calling contains()
             const sparse_index = getIndex(entity);
@@ -255,7 +261,8 @@ pub fn SparseSet(comptime C: type) type {
             self.group_info.size += 1;
         }
 
-        /// Move entity out of group area
+        /// Evicts an entity from the group-owned prefix by swapping it with the last prefix element, shrinking group_info.size.
+        /// Safe to call even if the entity is not in the prefix (no effect).
         pub fn moveFromGroup(self: *Self, entity: Entity) void {
             // Optimized: check page/slot directly instead of calling contains()
             const sparse_index = getIndex(entity);
@@ -298,16 +305,20 @@ pub fn SparseSet(comptime C: type) type {
             page.slots[slot_idx] = new_index;
         }
 
-        /// Get entities in group (at start of packed array)
+        /// Returns the contiguous group-owned prefix slice used by Group queries.
+        /// Slice length equals group_info.size; free components never appear here.
         pub fn getGroupEntities(self: *const Self) []const Entity {
             return self.packed_array.items[0..self.group_info.size];
         }
 
-        /// Get components in group (at start of components array)
+        /// Returns the contiguous group-owned prefix slice used by Group queries.
+        /// Slice length equals group_info.size; free components never appear here.
         pub fn getGroupComponents(self: *const Self) []const Component {
             return self.components.items[0..self.group_info.size];
         }
 
+        /// Returns the contiguous group-owned prefix slice used by Group queries.
+        /// Slice length equals group_info.size; free components never appear here.
         pub fn getGroupComponentsMut(self: *const Self) []Component {
             return self.components.items[0..self.group_info.size];
         }

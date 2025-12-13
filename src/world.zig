@@ -65,6 +65,7 @@ fn GroupKey(comptime owned_count: usize, comptime free_count: usize) type {
     };
 }
 
+/// Construct a compile-time ECS World factory from component/resource/event type tuples; returns a type that can be instantiated with `init(allocator)`.
 pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
     const component_info = @typeInfo(Components);
     if (component_info != .@"struct") @compileError("Invalid form of components");
@@ -175,6 +176,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         groups: ArrayList(GroupInfo),
         command_buffer: CommandBuffer(Self),
 
+        /// Initialize an empty World with zeroed resources (uninitialized), empty component/event storages, and no groups; resources must be initialized with `setResource()` or `initResources()` before use.
         pub fn init(allocator: Allocator) Self {
             return .{
                 .allocator = allocator,
@@ -200,6 +202,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             };
         }
 
+        /// Deinitialize the World, freeing all component storages, event storages, group metadata, and the command buffer.
         pub fn deinit(self: *Self) void {
             self.command_buffer.deinit();
             for (self.groups.items) |*group| {
@@ -215,6 +218,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
+        /// Map a component type to its compile-time index in the component pool; the position in the Components struct field list becomes the stable ID.
         pub fn getComponentId(comptime C: type) u16 {
             // The order of components become the id
             return inline for (component_fields, 0..) |field, i| {
@@ -222,6 +226,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             } else @compileError("Unknown component type: " ++ @typeName(C));
         }
 
+        /// Map a resource type to its compile-time index in the resource pool; the position in the Resources struct field list becomes the stable ID.
         pub fn getResourceId(comptime R: type) u16 {
             // The order of resources become the id
             return inline for (resource_fields, 0..) |field, i| {
@@ -229,6 +234,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             } else @compileError("Unknown resource type: " ++ @typeName(R));
         }
 
+        /// Map an event type to its compile-time index in the event pool; the position in the Events struct field list becomes the stable ID.
         pub fn getEventId(comptime E: type) u16 {
             // The order of events become the id
             return inline for (event_fields, 0..) |field, i| {
@@ -423,6 +429,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return @ptrCast(self.getComponentStoragePtr(C));
         }
 
+        /// Retrieve a copy of a resource value; panics in Debug/ReleaseSafe if the resource is uninitialized (zero-cost in ReleaseFast).
         pub fn getResource(self: Self, comptime R: type) R {
             const id = comptime getResourceId(R);
             // Debug-mode assertion to catch uninitialized resource access
@@ -432,6 +439,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return self.resource_pool[id];
         }
 
+        /// Retrieve a const pointer to a resource; panics in Debug/ReleaseSafe if the resource is uninitialized (zero-cost in ReleaseFast).
         pub fn getResourcePtr(self: *Self, comptime R: type) *const R {
             const id = comptime getResourceId(R);
             // Debug-mode assertion to catch uninitialized resource access
@@ -441,6 +449,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return &self.resource_pool[id];
         }
 
+        /// Retrieve a mutable pointer to a resource; panics in Debug/ReleaseSafe if the resource is uninitialized (zero-cost in ReleaseFast).
         pub fn getResourcePtrMut(self: *Self, comptime R: type) *R {
             const id = comptime getResourceId(R);
             // Debug-mode assertion to ensure resource is initialized before mutation
@@ -486,6 +495,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return &self.resource_pool[id];
         }
 
+        /// Store a resource value and mark it as initialized; subsequent calls to `getResource()` will succeed without panic.
         pub fn setResource(self: *Self, comptime R: type, resource: R) void {
             const id = comptime getResourceId(R);
             self.resource_pool[id] = resource;
@@ -538,24 +548,24 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
+        /// Access the mutable event storage for an event type; enables direct writes to the current frame's write buffer via EventWriter.
         pub fn getEventStoragePtrMut(self: *Self, comptime E: type) *EventStorage(E) {
             const id = comptime getEventId(E);
             return &self.event_pool[id];
         }
 
+        /// Access the const event storage for an event type; enables direct reads from the previous frame's read buffer via EventReader.
         pub fn getEventStoragePtr(self: *const Self, comptime E: type) *const EventStorage(E) {
             const id = comptime getEventId(E);
             return &self.event_pool[id];
         }
 
-        /// Complexity: O(1).
+        /// Allocate a new entity handle; reuses recycled indices when available. Panics in Debug/ReleaseSafe if exceeding max_entities; in ReleaseFast causes out-of-bounds write (undefined behavior). Complexity: O(1).
         pub fn createEntity(self: *Self) Entity {
             return self.entity_registry.create();
         }
 
-        /// Destroys an Entity and removes it from all registered component pools.
-        /// The entity identifier becomes invalid and may be recycled for future entities.
-        /// Complexity: O(c) where c = number of registered component types.
+        /// Destroys an Entity and removes it from all registered component pools. The entity identifier becomes invalid and may be recycled for future entities. CRITICAL: Must only be called on live entities; double-destroy corrupts the free list. Complexity: O(c) where c = number of registered component types.
         pub fn destroyEntity(self: *Self, entity: Entity) void {
             self.entity_registry.destroy(entity);
             inline for (component_fields) |field| {
@@ -563,6 +573,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
+        /// Add a component to an entity (immediate execution); dispatches to addTag for zero-sized components (no group update) or sparse-set insert for regular components (with group membership update).
         pub fn addComponent(self: *Self, entity: Entity, comptime C: type, component: C) !void {
             if (comptime isTagComponent(C)) {
                 try self.addTag(entity, C);
@@ -575,6 +586,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
+        /// Add multiple components to an entity from a tuple (immediate execution); iterates the tuple and calls addComponent() for each component.
         pub fn addComponents(self: *Self, entity: Entity, comptime components: anytype) !void {
             inline for (components) |component| {
                 const C = @TypeOf(component);
@@ -596,7 +608,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
-        /// Add component from raw bytes (used by CommandBuffer)
+        /// Deserialize a component from type-erased bytes and add it to an entity (used by CommandBuffer to replay deferred commands); validates size and dispatches to `addComponent()`.
         pub fn addComponentFromBytes(self: *Self, entity: Entity, type_id: u16, bytes: []const u8) !void {
             inline for (component_fields, 0..) |field, i| {
                 if (i == type_id) {
@@ -617,19 +629,23 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return error.InvalidComponentId;
         }
 
+        /// Retrieve a component value copy if the entity possesses it; returns null if absent (compile error for tag components—use `hasComponent()` instead).
         pub fn getComponent(self: *Self, entity: Entity, comptime C: type) ?C {
             if (comptime isTagComponent(C)) @compileError("Cannot get tag component value, use hasComponent to check for tag presence");
             return self.getSparseSetPtr(C).get(entity);
         }
 
+        /// Check whether an entity handle is still valid (index allocated and version matches); returns false for recycled/destroyed entities.
         pub fn isAlive(self: Self, entity: Entity) bool {
             return self.entity_registry.isAlive(entity);
         }
 
+        /// Check whether an entity possesses a specific component (works for both regular and tag components).
         pub fn hasComponent(self: Self, entity: Entity, comptime C: type) bool {
             return self.getComponentStorage(C).contains(entity);
         }
 
+        /// Remove a component from an entity (immediate execution); dispatches to removeTag for zero-sized components or sparse-set remove for regular components, updating groups if needed.
         pub fn removeComponent(self: *Self, entity: Entity, comptime C: type) void {
             if (comptime isTagComponent(C)) {
                 self.removeTag(entity, C);
@@ -658,6 +674,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             }
         }
 
+        /// Create an entity and immediately attach all components from a tuple (immediate execution); equivalent to `createEntity()` followed by `addComponents()`.
         pub fn createEntityWith(self: *Self, comptime components: anytype) !Entity {
             const entity = self.createEntity();
             try self.addComponents(entity, components);

@@ -14,6 +14,7 @@ pub fn EventStorage(comptime E: type) type {
         write_buffer: std.ArrayList(E),
         read_buffer: std.ArrayList(E),
 
+        /// Create an empty double-buffer with no pre-reserved capacity; events start in an empty write buffer and the read buffer is initially empty.
         pub fn init(allocator: Allocator) Self {
             return .{
                 .allocator = allocator,
@@ -22,6 +23,7 @@ pub fn EventStorage(comptime E: type) type {
             };
         }
 
+        /// Free both buffers; call after ensuring no outstanding slices point into the read/write arrays.
         pub fn deinit(self: *Self) void {
             self.write_buffer.deinit(self.allocator);
             self.read_buffer.deinit(self.allocator);
@@ -32,12 +34,12 @@ pub fn EventStorage(comptime E: type) type {
             try self.write_buffer.append(self.allocator, event);
         }
 
-        /// Clear the write buffer
+        /// Reset the current frame's write buffer while retaining capacity; does not touch the readable buffer from the previous frame.
         pub fn clear(self: *Self) void {
             self.write_buffer.clearRetainingCapacity();
         }
 
-        /// Swap buffers: write_buffer becomes read_buffer
+        /// Flip write/read buffers at a frame boundary; events written in frame N become readable in frame N+1 and the old read buffer becomes the next write buffer. Caller must call clear() after swap() to empty the new write buffer (World.beginFrame does this).
         pub fn swap(self: *Self) void {
             // Swap the buffers
             const temp = self.write_buffer;

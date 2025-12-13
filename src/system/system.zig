@@ -30,7 +30,7 @@ const CommandType = enum {
     destroy_entity,
 };
 
-/// Type-erased component data for command buffer with inline storage
+/// Type-erased component payload stored inline (no heap allocation); used by CommandBuffer to record component additions/removals with up to `max_size` bytes.
 fn ComponentData(comptime max_size: comptime_int) type {
     return struct {
         type_id: u16,
@@ -43,7 +43,7 @@ fn ComponentData(comptime max_size: comptime_int) type {
     };
 }
 
-/// A single command in the command buffer
+/// A single deferred command (add/remove component, destroy entity) with type-erased payload; stored in CommandBuffer and replayed at `endFrame()`.
 fn Command(comptime max_size: comptime_int) type {
     return struct {
         type: CommandType,
@@ -73,6 +73,7 @@ pub fn CommandBuffer(comptime World: type) type {
         allocator: std.mem.Allocator,
         commands: std.ArrayList(CommandStruct),
 
+        /// Initialize an empty command buffer with no pre-allocated capacity; commands will be recorded during system execution.
         pub fn init(allocator: std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
@@ -80,6 +81,7 @@ pub fn CommandBuffer(comptime World: type) type {
             };
         }
 
+        /// Deinitialize the command buffer, freeing all recorded commands and the command array.
         pub fn deinit(self: *Self) void {
             for (self.commands.items) |*cmd| {
                 cmd.deinit(self.allocator);
@@ -87,6 +89,7 @@ pub fn CommandBuffer(comptime World: type) type {
             self.commands.deinit(self.allocator);
         }
 
+        /// Clear all recorded commands while retaining allocated capacity; called after flush() to prepare for the next frame.
         pub fn clear(self: *Self) void {
             for (self.commands.items) |*cmd| {
                 cmd.deinit(self.allocator);
@@ -94,7 +97,7 @@ pub fn CommandBuffer(comptime World: type) type {
             self.commands.clearRetainingCapacity();
         }
 
-        /// Record a component addition (inline storage, no heap allocation)
+        /// Append a component addition command with type-erased payload copied into inline storage (no heap allocation); returns error if component exceeds `max_component_size`.
         pub fn recordAddComponent(self: *Self, entity: Entity, type_id: u16, data: []const u8) !void {
             if (data.len > max_comp_size) return error.ComponentTooLarge;
 
@@ -111,7 +114,7 @@ pub fn CommandBuffer(comptime World: type) type {
             });
         }
 
-        /// Record a component removal
+        /// Append a component removal command; the component will be removed when flush() is called if the entity is still alive.
         pub fn recordRemoveComponent(self: *Self, entity: Entity, type_id: u16) !void {
             try self.commands.append(self.allocator, .{
                 .type = .remove_component,
@@ -124,7 +127,7 @@ pub fn CommandBuffer(comptime World: type) type {
             });
         }
 
-        /// Record an entity destruction
+        /// Append an entity destruction command; the entity and all its components will be removed when flush() is called if the entity is still alive.
         pub fn recordDestroyEntity(self: *Self, entity: Entity) !void {
             try self.commands.append(self.allocator, .{
                 .type = .destroy_entity,
@@ -133,7 +136,7 @@ pub fn CommandBuffer(comptime World: type) type {
             });
         }
 
-        /// Execute all recorded commands
+        /// Replay buffered commands in recording order, skipping dead entities, then clear the buffer; used by `world.endFrame()` to execute all deferred operations.
         pub fn flush(self: *Self, world: *World) !void {
             for (self.commands.items) |*cmd| {
                 switch (cmd.type) {
@@ -229,19 +232,23 @@ pub fn Commands(comptime World: type) type {
             try self.command_buffer.recordRemoveComponent(entity, type_id);
         }
 
+        /// Queue a zero-sized tag addition for deferred execution; compile-time errors if `C` is not a tag component (zero-sized struct).
         pub fn addTag(self: Self, entity: Entity, comptime C: type) !void {
             try self.addComponent(entity, C, C{});
         }
 
+        /// Queue removal of a tag component; no-op if the entity lacks the tag when commands flush (deferred execution).
         pub fn removeTag(self: Self, entity: Entity, comptime C: type) !void {
             if (!isTagComponent(C)) @compileError("removeTag can only be used with tag components");
             try self.removeComponent(entity, C);
         }
 
+        /// Access the const sparse-set pointer for a component type; allows direct read access to component storage (immediate execution).
         pub fn getSparseSetPtr(self: Self, comptime C: type) *const SparseSet(C) {
             return self.world.getSparseSetPtr(C);
         }
 
+        /// Access the mutable sparse-set pointer for a component type; allows direct modification of component storage (immediate execution, use with caution during iteration).
         pub fn getSparseSetPtrMut(self: Self, comptime C: type) *SparseSet(C) {
             return self.world.getSparseSetPtrMut(C);
         }
@@ -423,20 +430,7 @@ pub fn Commands(comptime World: type) type {
     };
 }
 
-/// SingleQuery is a query filter that provides iteration over entities with a single component.
-///
-/// This is the simplest and most efficient query filter for accessing entities with
-/// a single component type. It provides direct access to packed component arrays for
-/// cache-friendly iteration.
-///
-/// Example:
-/// ```zig
-/// fn healthSystem(query: SingleQuery(Health)) !void {
-///     for (query.entities, query.components) |entity, health| {
-///         // Process each entity with Health component
-///     }
-/// }
-/// ```
+/// Build a tuple type from a system function's parameter list at compile time; converts `anytype` parameters to Commands(World) and preserves all other types for parameter injection.
 fn constructSystemArgsType(comptime fn_info: std.builtin.Type.Fn, comptime World: type) type {
     const CommandsType = Commands(World);
     var fields: [fn_info.params.len]StructField = undefined;

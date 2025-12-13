@@ -77,6 +77,10 @@ pub const TagPage = struct {
 /// - State flags (e.g., `const Disabled = struct {};`)
 /// - Group membership (e.g., `const Enemy = struct {};`)
 ///
+/// TagStorage specializes zero-sized marker components; `C` must be an empty struct or tag.
+/// Uses a paged bitset plus packed entity array (swap-remove) so iteration order is unstable.
+/// Stores no component payload—only presence bits and reverse indices.
+///
 /// Complexity:
 /// - set(): O(1) amortized
 /// - unset(): O(1)

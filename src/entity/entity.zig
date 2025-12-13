@@ -1,5 +1,7 @@
 const std = @import("std");
 
+/// 32-bit entity handle encoded as [version:16 | index:16].
+/// The lower 16 bits select the dense index in the registry; the upper 16 bits are a generation/version guard that invalidates stale handles after destroy().
 pub const Entity = u32;
 pub const EntityIndex = u16;
 pub const EntityVersion = u16;
@@ -22,6 +24,8 @@ pub fn getVersion(entity: Entity) EntityVersion {
     return @intCast((entity >> index_bits) & version_mask);
 }
 
+/// Fixed-capacity entity registry (max_entities) that hands out recyclable entity handles.
+/// Maintains an implicit LIFO free list encoded inside the dense slot (next_index_to_recycle) and bumps the version guard on destroy() to detect stale handles.
 pub const EntityRegistry = struct {
     entities: [max_entities]Entity,
     next_index: EntityIndex,
@@ -38,9 +42,10 @@ pub const EntityRegistry = struct {
         };
     }
 
-    /// Returns a new Entity identifier, recycling a previously destroyed one if available.
-    /// Creates new indices sequentially when no recycled entities are available.
-    /// Complexity: O(1).
+    /// Allocates a new entity handle.
+    /// Reuses a recycled dense index when available; otherwise grows sequentially until max_entities.
+    /// Writes the current version into the slot so future isAlive() checks can reject stale generation numbers.
+    /// Panics in Debug/ReleaseSafe if allocation would exceed max_entities; in ReleaseFast, exceeding capacity causes out-of-bounds write (undefined behavior).
     pub fn create(self: *EntityRegistry) Entity {
         const index, const version = if (self.available > 0) recycle: {
             // Recycle from the implicit free list.
@@ -67,9 +72,9 @@ pub const EntityRegistry = struct {
         return entity;
     }
 
-    /// Destroys an Entity and adds its index to the implicit free list.
-    /// Increments the version so stale identifiers can be detected.
-    /// Complexity: O(1).
+    /// Retires an entity and pushes its dense index onto the free list.
+    /// Increments the 16-bit version guard so previously issued handles for the same index fail isAlive().
+    /// CRITICAL: Must only be called on live entities; calling destroy() twice on the same handle will corrupt the free list (duplicates index, double-increments available counter).
     pub fn destroy(self: *EntityRegistry, entity: Entity) void {
         const index = getIndex(entity);
         const current = self.entities[index];
@@ -89,9 +94,8 @@ pub const EntityRegistry = struct {
         self.available += 1;
     }
 
-    /// Returns whether the given entity handle refers to a currently alive entity.
-    /// Performs bounds and version checks; stale or never-allocated handles return false.
-    /// Complexity: O(1).
+    /// Checks both bounds and version guard for a handle.
+    /// Returns false for never-allocated indices or stale generations whose version no longer matches the registry slot.
     pub fn isAlive(self: EntityRegistry, entity: Entity) bool {
         const index = getIndex(entity);
         // If index was never allocated, it's not alive.

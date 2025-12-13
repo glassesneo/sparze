@@ -59,6 +59,7 @@ pub fn SingleQuery(comptime QueryComponent: type) type {
         entities: []const Entity,
         components: []Component,
 
+        /// Bind directly to a component's sparse set; exposes every entity/component pair in packed order without additional filtering.
         pub fn init(sparse_set: *const SparseSet(Component)) Self {
             return .{
                 .entities = sparse_set.packed_array.items,
@@ -139,6 +140,7 @@ pub fn Query(comptime QueryComponents: type) type {
         entities: []const Entity,
         entity_registry: *const EntityRegistry,
 
+        /// Builds a runtime query anchored to the smallest component set to minimize iterations; callers must still invoke `filter(entity)` before accessing components.
         pub fn init(world: anytype) Self {
             // Find the smallest sparse set to minimize iterations
             // We need to find this at runtime, but we can iterate all component types at comptime
@@ -168,6 +170,7 @@ pub fn Query(comptime QueryComponents: type) type {
             };
         }
 
+        /// Maps a component type to its compile-time index within this query's component tuple; the position in the struct field list becomes the stable ID.
         pub fn getComponentId(comptime C: type) u16 {
             // The order of components become the id
             return inline for (component_fields, 0..) |field, i| {
@@ -187,31 +190,33 @@ pub fn Query(comptime QueryComponents: type) type {
             return @constCast(self.query_component_pool[id]);
         }
 
-        /// Get immutable component for an entity
-        /// Note: Cannot be used with tag components (zero-sized components)
+        /// Retrieve a component value copy for an entity via sparse-set lookup; panics if entity lacks the component (use after `filter()` to ensure presence).
+        /// Cannot be used with tag components (zero-sized components).
         pub fn getComponent(self: Self, entity: Entity, comptime C: type) C {
             const storage = self.getComponentStoragePtr(C);
             return storage.*.get(entity).?;
         }
 
-        /// Get mutable component pointer for an entity
-        /// Note: Cannot be used with tag components (zero-sized components)
+        /// Retrieve a mutable component pointer for an entity via sparse-set lookup; panics if entity lacks the component (use after `filter()` to ensure presence).
+        /// Cannot be used with tag components (zero-sized components).
         pub fn getComponentMut(self: Self, entity: Entity, comptime C: type) *C {
             const sparse_set = self.getComponentStoragePtrMut(C);
             return sparse_set.*.getPtrMut(entity).?;
         }
 
+        /// Retrieve a component value copy if present; returns null if the entity lacks the component (safe accessor for optional components marked with `?T`).
         pub fn getOptional(self: Self, entity: Entity, comptime C: type) ?C {
             const storage = self.getComponentStoragePtr(C);
             return storage.*.get(entity);
         }
 
+        /// Retrieve a mutable component pointer if present; returns null if the entity lacks the component (safe accessor for optional components marked with `?T`).
         pub fn getOptionalMut(self: Self, entity: Entity, comptime C: type) ?*C {
             const sparse_set = self.getComponentStoragePtrMut(C);
             return sparse_set.*.getPtrMut(entity);
         }
 
-        /// Filter entities based on required components
+        /// Check whether an entity satisfies all required components (respecting Optional/Exclude modifiers); returns false for destroyed entities in Debug/ReleaseSafe builds.
         pub fn filter(self: Self, entity: Entity) bool {
             // Early exit for destroyed entities (Debug/ReleaseSafe only)
             if (comptime builtin.mode != .ReleaseFast) {
@@ -226,13 +231,14 @@ pub fn Query(comptime QueryComponents: type) type {
             return filterWithModifiers(component_fields, entity, self, GetStorage.call);
         }
 
+        /// Construct a stateful iterator that yields entities passing the filter one-by-one; manually advances position via `next()`.
         pub fn iterator(self: *Self) Iterator {
             return Iterator{
                 .query = self,
             };
         }
 
-        /// Returns an iterator over all unique pairs of entities
+        /// Construct a stateful iterator that yields all unique entity pairs (i < j) from this query; ideal for collision detection among entities of the same type.
         pub fn combinations(self: *const Self) CombinationIterator {
             return CombinationIterator{
                 .query = self,
@@ -494,6 +500,7 @@ pub fn Group(comptime GroupComponents: type) type {
 
         group_component_pool: GroupComponentPoolType,
 
+        /// Captures sparse-set pointers for all group components; assumes `world.createGroup(GroupComponents)` has been called so owned components are already packed at the group head.
         pub fn init(world: anytype) Self {
             var component_pool: GroupComponentPoolType = undefined;
 
@@ -509,6 +516,7 @@ pub fn Group(comptime GroupComponents: type) type {
             };
         }
 
+        /// Maps a component type to its compile-time index within this group's component tuple; the position in the struct field list becomes the stable ID.
         pub fn getComponentId(comptime C: type) u16 {
             // The order of components become the id
             return inline for (component_fields, 0..) |field, i| {
@@ -529,6 +537,7 @@ pub fn Group(comptime GroupComponents: type) type {
             } else false;
         }
 
+        /// Returns the slice of entities in the group-owned prefix; all entities in this slice are guaranteed to possess all owned components contiguously.
         pub fn getEntities(self: Self) []const Entity {
             // Use the first owned component's sparse set to get group entities
             // (At least one owned component is guaranteed by createGroup validation)
@@ -537,7 +546,7 @@ pub fn Group(comptime GroupComponents: type) type {
             } else unreachable;
         }
 
-        /// Get array of owned components (compile error if component is free)
+        /// Access the group-owned component array directly (cache-friendly sequential iteration); compile error if the component is marked Free.
         pub fn getArrayOf(self: Self, comptime C: type) []const C {
             if (!comptime isOwned(C)) {
                 @compileError("Cannot use getArrayOf() on free component '" ++ @typeName(C) ++ "'. " ++
@@ -547,7 +556,7 @@ pub fn Group(comptime GroupComponents: type) type {
             return self.getSparseSetPtr(C).getGroupComponents();
         }
 
-        /// Get mutable array of owned components (compile error if component is free)
+        /// Access the mutable group-owned component array for direct in-place updates; compile error if the component is marked Free.
         pub fn getMutArrayOf(self: Self, comptime C: type) []C {
             if (!comptime isOwned(C)) {
                 @compileError("Cannot use getMutArrayOf() on free component '" ++ @typeName(C) ++ "'. " ++
@@ -557,13 +566,13 @@ pub fn Group(comptime GroupComponents: type) type {
             return self.getSparseSetPtr(C).getGroupComponentsMut();
         }
 
-        /// Get component for an entity (works for both owned and free components)
+        /// Retrieve a component value copy for an entity; works for both owned (direct index) and free (sparse lookup) components; panics if entity lacks the component.
         pub fn getComponent(self: Self, entity: Entity, comptime C: type) C {
             const sparse_set = self.getSparseSetPtr(C);
             return sparse_set.get(entity).?;
         }
 
-        /// Get mutable component for an entity (works for both owned and free components)
+        /// Retrieve a mutable component pointer for an entity; works for both owned (direct index) and free (sparse lookup) components; panics if entity lacks the component.
         pub fn getComponentMut(self: Self, entity: Entity, comptime C: type) *C {
             const sparse_set = @constCast(self.getSparseSetPtr(C));
             return sparse_set.getPtrMut(entity).?;
@@ -576,6 +585,7 @@ pub fn Group(comptime GroupComponents: type) type {
     };
 }
 
+/// Tag-only iterator over entities that carry `TagComponent`; order follows the tag storage's swap-remove packed array and carries no component payload.
 pub fn SingleTag(comptime TagComponent: type) type {
     return struct {
         const Self = @This();
@@ -585,6 +595,7 @@ pub fn SingleTag(comptime TagComponent: type) type {
 
         entities: []const Entity,
 
+        /// Bind directly to a tag storage's packed entity array; exposes every entity carrying the tag in swap-remove order without additional filtering.
         pub fn init(tag_storage: *TagStorage(Component)) Self {
             return .{
                 .entities = tag_storage.packed_array.items,
@@ -674,6 +685,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
         entities: []const Entity,
         entity_registry: *const EntityRegistry,
 
+        /// Builds a runtime tag query anchored to the smallest tag storage to minimize iterations; callers must still invoke `filter(entity)` before processing.
         pub fn init(world: anytype) Self {
             // Find the smallest tag storage to minimize iterations
             var min_size: usize = std.math.maxInt(usize);
@@ -702,6 +714,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
             };
         }
 
+        /// Maps a tag type to its compile-time index within this tag query's tag tuple; the position in the struct field list becomes the stable ID.
         pub fn getTagId(comptime T: type) u16 {
             // The order of tags become the id
             return inline for (tag_fields, 0..) |field, i| {
@@ -715,7 +728,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
             return self.tag_pool[id];
         }
 
-        /// Filter entities based on required tags
+        /// Check whether an entity satisfies all required tags (respecting Optional/Exclude modifiers); returns false for destroyed entities in Debug/ReleaseSafe builds.
         pub fn filter(self: Self, entity: Entity) bool {
             // Early exit for destroyed entities (Debug/ReleaseSafe only)
             if (comptime builtin.mode != .ReleaseFast) {
@@ -730,7 +743,7 @@ pub fn TagQuery(comptime QueryTags: type) type {
             return filterWithModifiers(tag_fields, entity, self, GetStorage.call);
         }
 
-        /// Check if entity has a specific tag (for optional tags)
+        /// Check whether an entity carries a specific tag (useful for optional tags marked with `?Tag` to query presence after matching).
         pub fn hasTag(self: Self, entity: Entity, comptime T: type) bool {
             return self.getTagStoragePtr(T).*.contains(entity);
         }
@@ -878,6 +891,7 @@ fn extractOptional(comptime T: type) type {
     };
 }
 
+/// Exclude wraps a component type to mark it as an exclusion filter in queries; entities possessing the excluded component will be filtered out.
 pub fn Exclude(comptime C: type) type {
     return struct {
         pub const Component = C;
@@ -924,8 +938,7 @@ fn extractFree(comptime T: type) type {
     return T;
 }
 
-/// Generic filter implementation for handling optional and exclude modifiers.
-/// This helper reduces code duplication between Query.filter and TagQuery.filter.
+/// Shared filter logic for Query and TagQuery that processes Optional/Exclude modifiers; iterates all required components/tags and returns true only if the entity satisfies all constraints.
 ///
 /// Parameters:
 ///   - fields: The comptime field array to iterate over
