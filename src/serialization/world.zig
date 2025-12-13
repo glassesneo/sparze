@@ -20,16 +20,63 @@ pub fn serialize(
     comptime EventTypes: type,
     writer: anytype,
 ) !void {
+    const WriterType = @TypeOf(writer);
+    var old_adapter: ?writer_mod.OldWriterAdapter(WriterType) = null;
+
+    const io_writer: *std.Io.Writer = blk: {
+        switch (@typeInfo(WriterType)) {
+            .pointer => |ptr| {
+                if (ptr.child == std.Io.Writer) break :blk writer;
+            },
+            else => {},
+        }
+
+        if (comptime @hasField(WriterType, "interface")) {
+            break :blk &writer.interface;
+        }
+
+        if (comptime writer_mod.hasOldWriterApi(WriterType)) {
+            old_adapter = writer_mod.initOldWriterAdapter(writer);
+            break :blk old_adapter.?.writer();
+        }
+
+        @compileError("serialize expects a std.Io.Writer or a type exposing an .interface field");
+    };
+
+    // Create buffered checksum writer
+    var checksum_writer = writer_mod.bufferedChecksumWriter(io_writer);
+    const w = checksum_writer.writer();
+
+    // Write header
+    try writeHeader(world, ComponentTypes, ResourceTypes, EventTypes, w);
+
+    // Serialize EntityRegistry
+    try entity_registry_ser.serialize(&world.entity_registry, w);
+
+    // Serialize components, resources, and events
+    try serializeComponents(world, ComponentTypes, w);
+    try serializeResources(world, ResourceTypes, w);
+    try serializeEvents(world, EventTypes, w);
+
+    // Write CRC32 checksum footer
+    const crc = try checksum_writer.finish();
+    try checksum_writer.underlying_writer.writeInt(u32, crc, .little);
+}
+
+/// Write serialization header with type metadata
+fn writeHeader(
+    world: anytype,
+    comptime ComponentTypes: type,
+    comptime ResourceTypes: type,
+    comptime EventTypes: type,
+    writer: anytype,
+) !void {
     const component_info = @typeInfo(ComponentTypes);
     const component_fields = component_info.@"struct".fields;
     const resource_info = @typeInfo(ResourceTypes);
     const resource_fields = resource_info.@"struct".fields;
     const event_info = @typeInfo(EventTypes);
     const event_fields = event_info.@"struct".fields;
-
-    // Create buffered checksum writer
-    var checksum_writer = writer_mod.bufferedChecksumWriter(writer);
-    const w = checksum_writer.writer();
 
     // Compute type metadata hash
     const type_hash = format.computeWorldHash(ComponentTypes, ResourceTypes, EventTypes);
@@ -44,12 +91,18 @@ pub fn serialize(
         .resource_type_count = @intCast(resource_fields.len),
         .event_type_count = @intCast(event_fields.len),
     };
-    try header.write(w);
+    try header.write(writer);
+}
 
-    // Serialize EntityRegistry
-    try entity_registry_ser.serialize(&world.entity_registry, w);
+/// Serialize all component pools
+fn serializeComponents(
+    world: anytype,
+    comptime ComponentTypes: type,
+    writer: anytype,
+) !void {
+    const component_info = @typeInfo(ComponentTypes);
+    const component_fields = component_info.@"struct".fields;
 
-    // Serialize component pools
     inline for (component_fields, 0..) |field, i| {
         const Component = field.type;
 
@@ -62,18 +115,27 @@ pub fn serialize(
         const type_name_hash = format.hashTypeName(Component);
 
         // Write component metadata
-        try w.writeInt(u16, component_id, .little);
-        try w.writeInt(u64, type_name_hash, .little);
+        try writer.writeInt(u16, component_id, .little);
+        try writer.writeInt(u64, type_name_hash, .little);
 
         // Serialize component storage (tag or sparse set)
         if (comptime isTagComponent(Component)) {
-            try tag_storage_ser.serialize(Component, &world.component_pool[i], w);
+            try tag_storage_ser.serialize(Component, &world.component_pool[i], writer);
         } else {
-            try sparse_set_ser.serialize(Component, &world.component_pool[i], w);
+            try sparse_set_ser.serialize(Component, &world.component_pool[i], writer);
         }
     }
+}
 
-    // Serialize resources
+/// Serialize all resources
+fn serializeResources(
+    world: anytype,
+    comptime ResourceTypes: type,
+    writer: anytype,
+) !void {
+    const resource_info = @typeInfo(ResourceTypes);
+    const resource_fields = resource_info.@"struct".fields;
+
     inline for (resource_fields, 0..) |field, i| {
         const Resource = field.type;
 
@@ -86,8 +148,8 @@ pub fn serialize(
         const type_name_hash = format.hashTypeName(Resource);
 
         // Write resource metadata
-        try w.writeInt(u16, resource_id, .little);
-        try w.writeInt(u64, type_name_hash, .little);
+        try writer.writeInt(u16, resource_id, .little);
+        try writer.writeInt(u64, type_name_hash, .little);
 
         // Check if resource is initialized
         const is_initialized = blk: {
@@ -102,14 +164,23 @@ pub fn serialize(
         }
 
         // Serialize as initialized
-        try w.writeInt(u8, 1, .little);
+        try writer.writeInt(u8, 1, .little);
 
         // Serialize resource data
         const Serializer = traits.getSerializer(Resource);
-        try Serializer.serialize(world.resource_pool[i], w);
+        try Serializer.serialize(world.resource_pool[i], writer);
     }
+}
 
-    // Serialize events (read buffer only)
+/// Serialize all events (read buffer only)
+fn serializeEvents(
+    world: anytype,
+    comptime EventTypes: type,
+    writer: anytype,
+) !void {
+    const event_info = @typeInfo(EventTypes);
+    const event_fields = event_info.@"struct".fields;
+
     inline for (event_fields, 0..) |field, i| {
         const Event = field.type;
 
@@ -122,28 +193,190 @@ pub fn serialize(
         const type_name_hash = format.hashTypeName(Event);
 
         // Write event metadata
-        try w.writeInt(u16, event_id, .little);
-        try w.writeInt(u64, type_name_hash, .little);
+        try writer.writeInt(u16, event_id, .little);
+        try writer.writeInt(u64, type_name_hash, .little);
 
         // Write read buffer only
         const read_buffer = world.event_pool[i].read_buffer.items;
         const read_count: u32 = @intCast(read_buffer.len);
-        try w.writeInt(u32, read_count, .little);
+        try writer.writeInt(u32, read_count, .little);
 
         // Serialize events
         const Serializer = traits.getSerializer(Event);
         for (read_buffer) |event| {
-            try Serializer.serialize(event, w);
+            try Serializer.serialize(event, writer);
         }
     }
-
-    // Write CRC32 checksum footer
-    const crc = try checksum_writer.finish();
-    try writer.writeInt(u32, crc, .little);
 }
 
 /// Deserialize World from reader
 pub fn deserialize(
+    world: anytype,
+    comptime ComponentTypes: type,
+    comptime ResourceTypes: type,
+    comptime EventTypes: type,
+    reader: anytype,
+) !void {
+    // Read all data into memory to validate checksum before mutating world state
+    // This prevents leaving the world in a corrupted state if checksum validation fails
+    var data_list = std.ArrayList(u8).init(world.allocator);
+    defer data_list.deinit();
+
+    // Read data in chunks until EOF
+    const chunk_size = 64 * 1024; // 64 KB chunks
+    while (true) {
+        const start_len = data_list.items.len;
+        try data_list.resize(start_len + chunk_size);
+
+        var vec = [_][]u8{data_list.items[start_len..]};
+        const bytes_read = reader.readVec(&vec) catch |err| switch (err) {
+            error.EndOfStream => 0,
+            else => return err,
+        };
+
+        if (bytes_read == 0) {
+            try data_list.resize(start_len);
+            break;
+        }
+        try data_list.resize(start_len + bytes_read);
+    }
+
+    const data = data_list.items;
+
+    // Verify we have at least enough data for a checksum footer
+    if (data.len < 4) {
+        return error.EndOfStream;
+    }
+
+    // Split data and checksum footer
+    const payload = data[0 .. data.len - 4];
+    const footer_bytes = data[data.len - 4 ..];
+    const expected_crc = std.mem.readInt(u32, footer_bytes[0..4], .little);
+
+    // Validate checksum before deserializing
+    var crc = std.hash.Crc32.init();
+    crc.update(payload);
+    const actual_crc = crc.final();
+    if (actual_crc != expected_crc) {
+        return error.ChecksumMismatch;
+    }
+
+    // Checksum valid - now safe to deserialize into world
+    var payload_stream = std.io.fixedBufferStream(payload);
+    const payload_reader = payload_stream.reader();
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, payload_reader);
+
+    // Ensure entire payload was consumed (detect trailing data before checksum)
+    if (payload_stream.pos != payload.len) {
+        return error.TrailingDataAfterChecksum;
+    }
+}
+
+/// Convenience method to serialize World to file
+pub fn serializeToFile(
+    world: anytype,
+    comptime ComponentTypes: type,
+    comptime ResourceTypes: type,
+    comptime EventTypes: type,
+    path: []const u8,
+) !void {
+    // Write to temporary file first for atomic operation
+    const tmp_path = try std.fmt.allocPrint(world.allocator, "{s}.tmp", .{path});
+    defer world.allocator.free(tmp_path);
+
+    // Ensure temp file is cleaned up on error
+    errdefer std.fs.cwd().deleteFile(tmp_path) catch {};
+
+    // Open file for writing
+    const file = try std.fs.cwd().createFile(tmp_path, .{});
+    var file_open = true;
+    errdefer if (file_open) file.close(); // Close file on error (guarded to prevent double-close)
+
+    // Use zero-length buffer to fully disable file-level buffering
+    var no_buffer: [0]u8 = .{};
+    var file_writer = file.writer(&no_buffer);
+
+    // Serialize directly to file (serialize() uses BufferedChecksumWriter internally)
+    try serialize(world, ComponentTypes, ResourceTypes, EventTypes, &file_writer.interface);
+
+    // Flush buffered data and sync to disk for crash safety
+    try file_writer.interface.flush();
+    try file.sync();
+
+    // Close file before renaming (required on some platforms)
+    file.close();
+    file_open = false; // Prevent errdefer from double-closing
+
+    // Atomically replace the target file
+    try std.fs.cwd().rename(tmp_path, path);
+
+    // Note: Full crash safety would require syncing the directory after rename
+    // to ensure the directory entry is durable, but Dir.sync() is not available
+    // in Zig 0.15.1. The file data is synced above, so only the rename metadata
+    // may be lost on crash.
+}
+
+/// Convenience method to deserialize World from file
+pub fn deserializeFromFile(
+    world: anytype,
+    comptime ComponentTypes: type,
+    comptime ResourceTypes: type,
+    comptime EventTypes: type,
+    path: []const u8,
+) !void {
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    // Get file size to know how much to checksum (everything except 4-byte footer)
+    const file_size = try file.getEndPos();
+    if (file_size < 4) {
+        return error.ChecksumMismatch; // File too short
+    }
+    try file.seekTo(0); // Rewind after getEndPos
+
+    // Phase 1: Stream through file to validate checksum without buffering
+    // Create zero-length buffer to disable file-level buffering
+    var no_buffer: [0]u8 = .{};
+    var file_reader = file.reader(&no_buffer);
+    var checksum_reader = reader_mod.bufferedChecksumReader(&file_reader.interface);
+
+    // Stream through payload (all but last 4 bytes) to compute CRC
+    const payload_size = file_size - 4;
+    const discarded = try checksum_reader.reader().discard(@enumFromInt(payload_size));
+    if (discarded != payload_size) {
+        return error.EndOfStream; // Unexpected EOF
+    }
+
+    // Read and validate checksum footer
+    const expected_crc = try checksum_reader.readChecksumFooter();
+    try checksum_reader.validateChecksum(expected_crc);
+
+    // Phase 2: Checksum valid - rewind and deserialize
+    try file.seekTo(0);
+
+    // Create new buffered reader for deserialization
+    var deserialize_buffer: [std.io.default_buffer_size]u8 = undefined;
+    var deserialize_file_reader = file.reader(&deserialize_buffer);
+    var deserialize_checksum_reader = reader_mod.bufferedChecksumReader(&deserialize_file_reader.interface);
+
+    // Deserialize using the buffered checksum reader (provides proper buffering)
+    try deserializeCore(world, ComponentTypes, ResourceTypes, EventTypes, deserialize_checksum_reader.reader());
+
+    // Ensure the payload was fully consumed and validate checksum like the in-memory path
+    const expected_crc2 = try deserialize_checksum_reader.readChecksumFooter();
+    try deserialize_checksum_reader.validateChecksum(expected_crc2);
+
+    // Detect any trailing data after the checksum footer
+    const trailing_byte = deserialize_checksum_reader.reader().readByte() catch |err| switch (err) {
+        error.EndOfStream => return,
+        else => return err,
+    };
+    _ = trailing_byte;
+    return error.TrailingDataAfterChecksum;
+}
+
+/// Core deserialization logic shared by deserialize and file I/O
+fn deserializeCore(
     world: anytype,
     comptime ComponentTypes: type,
     comptime ResourceTypes: type,
@@ -157,12 +390,8 @@ pub fn deserialize(
     const event_info = @typeInfo(EventTypes);
     const event_fields = event_info.@"struct".fields;
 
-    // Create buffered checksum reader (excluding footer)
-    var checksum_reader = reader_mod.bufferedChecksumReader(reader);
-    const r = checksum_reader.reader();
-
     // Read and validate header
-    const header = try format.Header.read(r);
+    const header = try format.Header.read(reader);
 
     // Validate type metadata hash
     const expected_hash = format.computeWorldHash(ComponentTypes, ResourceTypes, EventTypes);
@@ -182,7 +411,7 @@ pub fn deserialize(
     }
 
     // Deserialize EntityRegistry
-    world.entity_registry = try entity_registry_ser.deserialize(r);
+    world.entity_registry = try entity_registry_ser.deserialize(reader);
 
     // Deserialize component pools
     inline for (component_fields, 0..) |field, i| {
@@ -197,10 +426,10 @@ pub fn deserialize(
         }
 
         // Read component metadata
-        const component_id = try compat.readInt(r, u16, .little);
+        const component_id = try compat.readInt(reader, u16, .little);
         if (component_id != i) return error.ComponentIdMismatch;
 
-        const type_name_hash = try compat.readInt(r, u64, .little);
+        const type_name_hash = try compat.readInt(reader, u64, .little);
         const expected_type_hash = format.hashTypeName(Component);
         if (type_name_hash != expected_type_hash) {
             return error.ComponentTypeMismatch;
@@ -214,13 +443,13 @@ pub fn deserialize(
             world.component_pool[i] = try tag_storage_ser.deserialize(
                 Component,
                 world.allocator,
-                r,
+                reader,
             );
         } else {
             world.component_pool[i] = try sparse_set_ser.deserialize(
                 Component,
                 world.allocator,
-                r,
+                reader,
                 header.format_version,
             );
         }
@@ -238,24 +467,24 @@ pub fn deserialize(
         }
 
         // Read resource metadata
-        const resource_id = try compat.readInt(r, u16, .little);
+        const resource_id = try compat.readInt(reader, u16, .little);
         if (resource_id != i) return error.ResourceIdMismatch;
 
-        const type_name_hash = try compat.readInt(r, u64, .little);
+        const type_name_hash = try compat.readInt(reader, u64, .little);
         const expected_type_hash = format.hashTypeName(Resource);
         if (type_name_hash != expected_type_hash) {
             return error.ResourceTypeMismatch;
         }
 
         // Read initialized flag
-        const is_initialized = try compat.readInt(r, u8, .little);
+        const is_initialized = try compat.readInt(reader, u8, .little);
         if (is_initialized == 0) {
             return error.UninitializedResource;
         }
 
         // Deserialize resource data
         const Serializer = traits.getSerializer(Resource);
-        world.resource_pool[i] = try Serializer.deserialize(r);
+        world.resource_pool[i] = try Serializer.deserialize(reader);
 
         // Mark resource as initialized
         if (comptime resource_fields.len > 0) {
@@ -276,10 +505,10 @@ pub fn deserialize(
         }
 
         // Read event metadata
-        const event_id = try compat.readInt(r, u16, .little);
+        const event_id = try compat.readInt(reader, u16, .little);
         if (event_id != i) return error.EventIdMismatch;
 
-        const type_name_hash = try compat.readInt(r, u64, .little);
+        const type_name_hash = try compat.readInt(reader, u64, .little);
         const expected_type_hash = format.hashTypeName(Event);
         if (type_name_hash != expected_type_hash) {
             return error.EventTypeMismatch;
@@ -289,7 +518,7 @@ pub fn deserialize(
         world.event_pool[i].read_buffer.clearRetainingCapacity();
 
         // Read read buffer count
-        const read_count = try compat.readInt(r, u32, .little);
+        const read_count = try compat.readInt(reader, u32, .little);
 
         // Reserve capacity
         try world.event_pool[i].read_buffer.ensureTotalCapacity(world.allocator, read_count);
@@ -297,216 +526,11 @@ pub fn deserialize(
         // Deserialize events
         const Serializer = traits.getSerializer(Event);
         for (0..read_count) |_| {
-            const event = try Serializer.deserialize(r);
+            const event = try Serializer.deserialize(reader);
             world.event_pool[i].read_buffer.appendAssumeCapacity(event);
         }
 
         // Clear write buffer
         world.event_pool[i].write_buffer.clearRetainingCapacity();
     }
-
-    // Read and validate CRC32 checksum
-    const expected_crc = try checksum_reader.readChecksumFooter();
-    try checksum_reader.validateChecksum(expected_crc);
-}
-
-/// Convenience method to serialize World to file
-pub fn serializeToFile(
-    world: anytype,
-    comptime ComponentTypes: type,
-    comptime ResourceTypes: type,
-    comptime EventTypes: type,
-    path: []const u8,
-) !void {
-    // Write to a buffer first, then write to file atomically
-    var buffer: std.ArrayList(u8) = .{};
-    defer buffer.deinit(world.allocator);
-
-    try serialize(world, ComponentTypes, ResourceTypes, EventTypes, buffer.writer(world.allocator));
-
-    // Write buffer to file
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try file.writeAll(buffer.items);
-}
-
-/// Convenience method to deserialize World from file
-pub fn deserializeFromFile(
-    world: anytype,
-    comptime ComponentTypes: type,
-    comptime ResourceTypes: type,
-    comptime EventTypes: type,
-    path: []const u8,
-) !void {
-    // Read entire file into buffer
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
-    const file_size = try file.getEndPos();
-    const file_size_usize = std.math.cast(usize, file_size) orelse
-        return error.FileTooLarge;
-
-    if (file_size_usize < 4) return error.FileTooSmall;
-
-    const buffer = try world.allocator.alloc(u8, file_size_usize);
-    defer world.allocator.free(buffer);
-
-    _ = try file.readAll(buffer);
-
-    // Validate CRC before deserializing (more reliable than tracking through VTable)
-    const data_size = file_size_usize - 4;
-    const expected_crc = std.mem.readInt(u32, buffer[data_size..][0..4], .little);
-
-    var crc = std.hash.Crc32.init();
-    crc.update(buffer[0..data_size]);
-    if (crc.final() != expected_crc) {
-        return error.ChecksumMismatch;
-    }
-
-    // Deserialize from data buffer (CRC already validated, so skip CRC reader wrapper)
-    var fbs = std.io.fixedBufferStream(buffer[0..data_size]);
-    try deserializeWithoutCRC(world, ComponentTypes, ResourceTypes, EventTypes, fbs.reader());
-}
-
-/// Internal helper: deserialize without CRC validation (for pre-validated streams)
-fn deserializeWithoutCRC(
-    world: anytype,
-    comptime ComponentTypes: type,
-    comptime ResourceTypes: type,
-    comptime EventTypes: type,
-    reader: anytype,
-) !void {
-    const component_info = @typeInfo(ComponentTypes);
-    const component_fields = component_info.@"struct".fields;
-    const resource_info = @typeInfo(ResourceTypes);
-    const resource_fields = resource_info.@"struct".fields;
-    const event_info = @typeInfo(EventTypes);
-    const event_fields = event_info.@"struct".fields;
-
-    // Use reader directly (no checksum tracking)
-    const r = reader;
-
-    // Read and validate header
-    const header = try format.Header.read(r);
-
-    // Validate type metadata hash
-    const expected_hash = format.computeWorldHash(ComponentTypes, ResourceTypes, EventTypes);
-    if (header.type_metadata_hash != expected_hash) {
-        return error.TypeMismatch;
-    }
-
-    // Validate component/resource/event counts
-    if (header.component_type_count != component_fields.len) {
-        return error.ComponentCountMismatch;
-    }
-    if (header.resource_type_count != resource_fields.len) {
-        return error.ResourceCountMismatch;
-    }
-    if (header.event_type_count != event_fields.len) {
-        return error.EventCountMismatch;
-    }
-
-    // Deserialize EntityRegistry
-    world.entity_registry = try entity_registry_ser.deserialize(r);
-
-    // Deserialize component pools
-    inline for (component_fields, 0..) |field, i| {
-        const Component = field.type;
-
-        if (comptime !traits.shouldSerialize(Component)) {
-            world.component_pool[i].deinit();
-            world.component_pool[i] = ComponentStorage(Component).init(world.allocator);
-            continue;
-        }
-
-        const component_id = try compat.readInt(r, u16, .little);
-        if (component_id != i) return error.ComponentIdMismatch;
-
-        const type_name_hash = try compat.readInt(r, u64, .little);
-        const expected_type_hash = format.hashTypeName(Component);
-        if (type_name_hash != expected_type_hash) {
-            return error.ComponentTypeMismatch;
-        }
-
-        world.component_pool[i].deinit();
-
-        if (comptime isTagComponent(Component)) {
-            world.component_pool[i] = try tag_storage_ser.deserialize(
-                Component,
-                world.allocator,
-                r,
-            );
-        } else {
-            world.component_pool[i] = try sparse_set_ser.deserialize(
-                Component,
-                world.allocator,
-                r,
-                header.format_version,
-            );
-        }
-    }
-
-    // Deserialize resources
-    inline for (resource_fields, 0..) |field, i| {
-        const Resource = field.type;
-
-        if (comptime !traits.shouldSerialize(Resource)) {
-            continue;
-        }
-
-        const resource_id = try compat.readInt(r, u16, .little);
-        if (resource_id != i) return error.ResourceIdMismatch;
-
-        const type_name_hash = try compat.readInt(r, u64, .little);
-        const expected_type_hash = format.hashTypeName(Resource);
-        if (type_name_hash != expected_type_hash) {
-            return error.ResourceTypeMismatch;
-        }
-
-        const is_initialized = try compat.readInt(r, u8, .little);
-        if (is_initialized == 0) {
-            return error.UninitializedResource;
-        }
-
-        const Serializer = traits.getSerializer(Resource);
-        world.resource_pool[i] = try Serializer.deserialize(r);
-
-        if (comptime resource_fields.len > 0) {
-            world.resource_initialized.set(i);
-        }
-    }
-
-    // Deserialize events
-    inline for (event_fields, 0..) |field, i| {
-        const Event = field.type;
-
-        if (comptime !traits.shouldSerialize(Event)) {
-            world.event_pool[i].read_buffer.clearRetainingCapacity();
-            world.event_pool[i].write_buffer.clearRetainingCapacity();
-            continue;
-        }
-
-        const event_id = try compat.readInt(r, u16, .little);
-        if (event_id != i) return error.EventIdMismatch;
-
-        const type_name_hash = try compat.readInt(r, u64, .little);
-        const expected_type_hash = format.hashTypeName(Event);
-        if (type_name_hash != expected_type_hash) {
-            return error.EventTypeMismatch;
-        }
-
-        world.event_pool[i].read_buffer.clearRetainingCapacity();
-
-        const read_count = try compat.readInt(r, u32, .little);
-        try world.event_pool[i].read_buffer.ensureTotalCapacity(world.allocator, read_count);
-
-        const Serializer = traits.getSerializer(Event);
-        for (0..read_count) |_| {
-            const event = try Serializer.deserialize(r);
-            world.event_pool[i].read_buffer.appendAssumeCapacity(event);
-        }
-
-        world.event_pool[i].write_buffer.clearRetainingCapacity();
-    }
-    // No CRC validation - already done upfront
 }

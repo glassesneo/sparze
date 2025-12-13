@@ -3,18 +3,18 @@ const compat = @import("compat.zig");
 const Io = std.Io;
 
 /// Buffered reader with CRC32 checksum validation
-pub fn BufferedChecksumReader(comptime ReaderType: type) type {
+pub fn BufferedChecksumReader(comptime _: type) type {
     return struct {
         const Self = @This();
         const buffer_size = 64 * 1024; // 64 KB buffer
 
-        underlying_reader: ReaderType,
+        underlying_reader: *Io.Reader,
         storage: [buffer_size]u8 = undefined,
         crc: std.hash.Crc32 = std.hash.Crc32.init(),
         interface: Io.Reader,
         last_crc_seek: usize = 0, // Track what we've checksummed so far
 
-        pub const Error = ReaderType.Error || Io.Reader.Error;
+        pub const Error = Io.Reader.Error;
 
         const vtable = Io.Reader.VTable{
             .stream = stream,
@@ -23,7 +23,7 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
             .rebase = rebase,
         };
 
-        pub fn init(underlying_reader: ReaderType) Self {
+        pub fn init(underlying_reader: *Io.Reader) Self {
             return .{
                 .underlying_reader = underlying_reader,
                 .interface = .{
@@ -39,26 +39,48 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
             return &self.interface;
         }
 
-        fn stream(io_r: *Io.Reader, w: *Io.Writer, limit: Io.Limit) Io.Reader.StreamError!usize {
-            const self: *Self = @alignCast(@fieldParentPtr("interface", io_r));
-
-            // First, checksum any consumed data since last checkpoint
+        /// Checksum any data consumed since last checkpoint
+        inline fn checksumPending(self: *Self, io_r: *Io.Reader) void {
             if (io_r.seek > self.last_crc_seek) {
                 const consumed = io_r.buffer[self.last_crc_seek..io_r.seek];
                 self.crc.update(consumed);
                 self.last_crc_seek = io_r.seek;
             }
+        }
+
+        /// Helper to read at least one byte using Io.Reader.readVec() primitive
+        fn readOnce(io_r: *Io.Reader, dest: []u8) Io.Reader.Error!usize {
+            if (dest.len == 0) return 0;
+            var vec = [_][]u8{dest};
+            return try io_r.readVec(vec[0..1]);
+        }
+
+        /// Refill internal buffer from underlying reader
+        inline fn refillBuffer(self: *Self, io_r: *Io.Reader) !bool {
+            io_r.seek = 0;
+            io_r.end = readOnce(self.underlying_reader, &self.storage) catch |err| switch (err) {
+                error.EndOfStream => 0,
+                else => return err,
+            };
+            io_r.buffer = self.storage[0..io_r.end];
+            self.last_crc_seek = 0;
+            return io_r.end > 0;
+        }
+
+        fn stream(io_r: *Io.Reader, w: *Io.Writer, limit: Io.Limit) Io.Reader.StreamError!usize {
+            const self: *Self = @alignCast(@fieldParentPtr("interface", io_r));
+
+            // Checksum any consumed data since last checkpoint
+            self.checksumPending(io_r);
 
             var written: usize = 0;
             var remaining = @intFromEnum(limit);
 
             while (remaining != 0) {
                 if (io_r.seek == io_r.end) {
-                    io_r.seek = 0;
-                    io_r.end = try self.underlying_reader.read(&self.storage);
-                    io_r.buffer = self.storage[0..io_r.end];
-                    self.last_crc_seek = 0;
-                    if (io_r.end == 0) return if (written == 0) error.EndOfStream else written;
+                    if (!try self.refillBuffer(io_r)) {
+                        return if (written == 0) error.EndOfStream else written;
+                    }
                 }
                 const chunk = io_r.buffer[io_r.seek..@min(io_r.end, io_r.seek + remaining)];
                 const n = try w.write(chunk);
@@ -76,12 +98,8 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
         fn readVec(io_r: *Io.Reader, data: [][]u8) Io.Reader.Error!usize {
             const self: *Self = @alignCast(@fieldParentPtr("interface", io_r));
 
-            // First, checksum any consumed data since last checkpoint
-            if (io_r.seek > self.last_crc_seek) {
-                const consumed = io_r.buffer[self.last_crc_seek..io_r.seek];
-                self.crc.update(consumed);
-                self.last_crc_seek = io_r.seek;
-            }
+            // Checksum any consumed data since last checkpoint
+            self.checksumPending(io_r);
 
             var total_read: usize = 0;
 
@@ -93,15 +111,11 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
                 while (filled < dest.len) {
                     // Refill internal buffer if empty
                     if (io_r.seek == io_r.end) {
-                        io_r.seek = 0;
-                        io_r.end = try self.underlying_reader.read(&self.storage);
-                        io_r.buffer = self.storage[0..io_r.end];
-                        self.last_crc_seek = 0;
-
-                        // If EOF and we've made some progress, return what we have
-                        if (io_r.end == 0) {
-                            if (total_read > 0 or filled > 0) {
-                                return total_read + filled;
+                        if (!try self.refillBuffer(io_r)) {
+                            // If EOF and we've made some progress, return what we have
+                            // Note: filled bytes are already included in total_read from line 121
+                            if (total_read > 0) {
+                                return total_read;
                             }
                             return error.EndOfStream;
                         }
@@ -134,13 +148,8 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
         fn rebase(io_r: *Io.Reader, capacity: usize) error{EndOfStream}!void {
             const self: *Self = @alignCast(@fieldParentPtr("interface", io_r));
 
-            // First, checksum any consumed data since last checkpoint
-            // This handles reads via takeInt/peek/take that bypass readVec
-            if (io_r.seek > self.last_crc_seek) {
-                const consumed = io_r.buffer[self.last_crc_seek..io_r.seek];
-                self.crc.update(consumed);
-                self.last_crc_seek = io_r.seek;
-            }
+            // Checksum any consumed data since last checkpoint
+            self.checksumPending(io_r);
 
             // If we already have enough buffered data, no need to refill
             const available = io_r.end - io_r.seek;
@@ -168,7 +177,10 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
 
             // Fill buffer to satisfy capacity requirement
             while (io_r.end < capacity) {
-                const n = try self.underlying_reader.read(self.storage[io_r.end..]);
+                const n = readOnce(self.underlying_reader, self.storage[io_r.end..]) catch {
+                    // Convert ReadFailed to EndOfStream
+                    return error.EndOfStream;
+                };
                 if (n == 0) {
                     // EOF reached before satisfying capacity
                     return error.EndOfStream;
@@ -182,22 +194,14 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
         fn discard(io_r: *Io.Reader, limit: Io.Limit) Io.Reader.Error!usize {
             const self: *Self = @alignCast(@fieldParentPtr("interface", io_r));
 
-            // First, checksum any consumed data since last checkpoint
-            if (io_r.seek > self.last_crc_seek) {
-                const consumed = io_r.buffer[self.last_crc_seek..io_r.seek];
-                self.crc.update(consumed);
-                self.last_crc_seek = io_r.seek;
-            }
+            // Checksum any consumed data since last checkpoint
+            self.checksumPending(io_r);
 
             var dropped: usize = 0;
             var remaining = @intFromEnum(limit);
             while (remaining != 0) {
                 if (io_r.seek == io_r.end) {
-                    io_r.seek = 0;
-                    io_r.end = try self.underlying_reader.read(&self.storage);
-                    io_r.buffer = self.storage[0..io_r.end];
-                    self.last_crc_seek = 0;
-                    if (io_r.end == 0) break;
+                    if (!try self.refillBuffer(io_r)) break;
                 }
                 const to_eat = @min(io_r.end - io_r.seek, remaining);
                 // Checksum the data before discarding it
@@ -230,14 +234,8 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
             var bytes: [4]u8 = undefined;
             var bytes_read: usize = 0;
 
-            // Hash any pending data that was consumed via takeInt/readInt before
-            // jumping to the checksum footer. Otherwise, the final field prior to
-            // the footer may be omitted from the CRC.
-            if (io_r.seek > self.last_crc_seek) {
-                const consumed = io_r.buffer[self.last_crc_seek..io_r.seek];
-                self.crc.update(consumed);
-                self.last_crc_seek = io_r.seek;
-            }
+            // Hash any pending data before reading footer
+            self.checksumPending(io_r);
 
             // First, try to get bytes from the internal buffer (if rebase already loaded them)
             const buffered = io_r.buffer[io_r.seek..io_r.end];
@@ -259,7 +257,7 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
 
             // Read the rest from underlying reader
             while (bytes_read < 4) {
-                const n = self.underlying_reader.read(bytes[bytes_read..]) catch |err| return err;
+                const n = readOnce(self.underlying_reader, bytes[bytes_read..]) catch |err| return err;
                 if (n == 0) {
                     return error.EndOfStream;
                 }
@@ -272,8 +270,8 @@ pub fn BufferedChecksumReader(comptime ReaderType: type) type {
 }
 
 /// Create a buffered checksum reader
-pub fn bufferedChecksumReader(reader: anytype) BufferedChecksumReader(@TypeOf(reader)) {
-    return BufferedChecksumReader(@TypeOf(reader)).init(reader);
+pub fn bufferedChecksumReader(reader: *Io.Reader) BufferedChecksumReader(void) {
+    return BufferedChecksumReader(void).init(reader);
 }
 
 test "BufferedChecksumReader basic" {
