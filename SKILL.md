@@ -19,17 +19,19 @@ const World = sparze.World(
 );
 ```
 
-**Entity**: 32-bit ID with generation versioning for safe entity references.
+**Entity**: Packed struct encoding 32-bit handle as `[version:16 | index:16]`. The lower 16 bits (`index`) select the dense slot; upper 16 bits (`version`) are a generation guard that invalidates stale handles after destruction. Access via `.index` and `.version` fields, or use helper functions `getIndex(entity)` / `getVersion(entity)`. Create with `Entity.init(index, version)`, serialize with `toInt()` / `fromInt(u32)`. **📖 Lifecycle details**: @docs/ENTITY_LIFECYCLE.md - Creation/destruction flows, version recycling, safety mechanisms
 
-**Components**: Data attached to entities. Tag components (empty structs) use 1 bit per entity.
+**Components**: Data attached to entities. Tag components (empty structs) use 1 bit per entity via bitset storage.
 
-**Resources**: Global singletons accessed via `Resource(T)` or `ResourceMut(T)` injection.
+**Resources**: Global singletons accessed via `Resource(T)` or `ResourceMut(T)` injection. **CRITICAL**: Must be initialized with `initResources()` at startup; uninitialized access panics in Debug/ReleaseSafe, causes undefined behavior in ReleaseFast.
 
-**Events**: Frame-delayed communication. Events written in frame N are readable in frame N+1 via double-buffering. **Why delayed?** Ensures deterministic execution order and prevents systems from reacting to events mid-frame, which would create unpredictable system dependencies.
+**Events**: Frame-delayed communication (1-frame latency by design). Events written in frame N are readable in frame N+1 via double-buffering. **Why delayed?** Ensures deterministic execution order and prevents circular dependencies between systems.
+
+**📖 Detailed architecture**: @docs/ARCHITECTURE.md - Core structures, World API, memory layout, CommandBuffer internals
 
 ## System Functions
 
-System functions receive injected parameters and **must use `commands: anytype` instead of accessing World directly**.
+System functions receive injected parameters and **must use `commands: anytype` instead of accessing World directly**. Return type can be `void` (no errors) or `!void` (can propagate errors with `try`).
 
 ```zig
 fn mySystem(
@@ -48,30 +50,43 @@ fn mySystem(
 
 ### Commands API
 
-Commands enable **deferred entity/component operations** that execute at frame end:
+Commands provide both **immediate** and **deferred** operations:
 
 ```zig
-// Create entities
-const entity = commands.createEntity();
+// === IMMEDIATE (execute now) ===
+const entity = commands.createEntity();  // Returns ID immediately
+
+// Hybrid: entity immediate, components deferred
 const entity2 = try commands.createEntityWith(.{
     Position{ .x = 10, .y = 20 },
     Velocity{ .x = 1, .y = 0 },
 });
 
-// Deferred component operations (execute at world.endFrame())
+try commands.createGroup(struct { Position, Velocity });
+
+// Resources
+commands.setResource(DeltaTime, .{ .dt = 0.016 });
+const dt = commands.getResource(DeltaTime);
+const score_ptr = commands.getResourcePtrMut(Score);
+try commands.initResources(.{ .delta_time = DeltaTime{ .dt = 0.016 } });
+
+// Serialization
+try commands.serializeToFile("save.dat");
+try commands.deserializeFromFile("save.dat");
+
+// === DEFERRED (execute at world.endFrame()) ===
 try commands.addComponent(entity, Position, .{ .x = 0, .y = 0 });
 try commands.removeComponent(entity, Velocity);
 try commands.addTag(entity, Dead);
 try commands.removeTag(entity, Enemy);
 try commands.destroyEntity(entity);
-
-// Immediate resource operations
-commands.setResource(DeltaTime, .{ .dt = 0.016 });
-const dt = commands.getResource(DeltaTime);
-const score_ptr = commands.getResourcePtrMut(Score);
 ```
 
+**Timing rules**: Entity creation, resources, groups, and serialization are immediate (need results now). Component/tag add/remove and entity destruction are deferred (safe during iteration).
+
 **Why Commands?** Prevents mid-iteration structural changes that could invalidate iterators and corrupt memory. Adding/removing components during query iteration would shift array indices, causing systems to skip entities or process the same entity twice.
+
+**📖 Detailed patterns**: @docs/SYSTEM_PATTERNS.md - Full system examples, Commands API reference, frame lifecycle, common pitfalls
 
 ## Query Filters
 
@@ -80,7 +95,9 @@ const score_ptr = commands.getResourcePtrMut(Score);
 - **Query**: Multiple components, occasional use → No setup, flexible
 - **Group**: Multiple components, every frame → Setup required, fastest
 
-Choose based on **access frequency** and **component count**:
+Choose based on **access frequency** and **component count**.
+
+**📖 Comprehensive guide**: @docs/QUERY_PATTERNS.md - Decision flowchart, filter comparison, performance characteristics, component sharing patterns
 
 ### SingleQuery(Component)
 
@@ -220,328 +237,22 @@ For partial-owning groups - marks component as not owned (accessed via indirecti
 
 ## System Organization
 
-Dividing game logic into well-organized systems is crucial for maintainable, performant ECS architecture.
+**Key principles**: One system, one responsibility. Systems that write data run before systems that read it. Use events for loose coupling between systems (1-frame latency enables clean causality chains). Group related systems by domain (physics, combat, rendering). Design for parallelization: systems accessing different components can run concurrently.
 
-### Single Responsibility Principle
-
-Each system should handle **one specific task** and operate only on relevant components:
-
+**Frame lifecycle**:
 ```zig
-// GOOD: Focused systems
-fn applyGravity(query: Query(struct { Velocity, Exclude(Grounded) })) !void {
-    for (query.entities) |entity| {
-        if (query.filter(entity)) {
-            const vel = query.getComponentMut(entity, Velocity);
-            vel.y += 9.8;
-        }
-    }
-}
-
-fn applyMovement(group: Group(struct { Position, Velocity })) !void {
-    const positions = group.getMutArrayOf(Position);
-    const velocities = group.getArrayOf(Velocity);
-    for (positions, velocities) |*pos, vel| {
-        pos.x += vel.x;
-        pos.y += vel.y;
-    }
-}
-
-// BAD: System doing too much
-fn physicsSystem(...) !void {
-    // Applies gravity, movement, collision, friction - too many responsibilities!
-}
-```
-
-**Benefits**: Reusable across projects, easier to debug, simpler to test, better parallel processing.
-
-### System Execution Order
-
-Order matters when systems have dependencies. Execute in logical sequence:
-
-```zig
-// Frame structure with clear dependencies
-world.beginFrame();
-
-// 1. Input - Gather user input
+world.beginFrame();    // Swaps event buffers, clears command buffer
 try world.runSystem(inputSystem);
-
-// 2. AI - Process AI decisions
-try world.runSystem(aiSystem);
-
-// 3. Physics - Update positions
-try world.runSystem(applyGravity);
-try world.runSystem(applyMovement);
-try world.runSystem(collisionDetection);
-
-// 4. Game Logic - Handle game rules
-try world.runSystem(healthSystem);
-try world.runSystem(scoreSystem);
-
-// 5. Rendering - Prepare visuals
-try world.runSystem(animationSystem);
-try world.runSystem(cameraSystem);
+try world.runSystem(physicsSystem);
 try world.runSystem(renderSystem);
-
-try world.endFrame();  // Flush commands, swap event buffers
+try world.endFrame();  // Flushes deferred commands
 ```
 
-**Rule**: Systems that **write** data must run before systems that **read** that data.
+**CRITICAL**: Always call `endFrame()` after systems run. Skipping `endFrame()` drops all queued commands.
 
-### Event-Driven System Chains
+**Common anti-patterns to avoid**: Systems storing state (use Resources), systems calling other systems directly (use events), systems checking entity "types" (use component queries), systems doing 3+ unrelated tasks (split them).
 
-Use events to create **loosely coupled** system chains with clear data flow:
-
-```zig
-// Chain: Detection → Response → Application → Cleanup
-
-// System 1: Detect collisions, write events
-fn collisionDetection(
-    query: Query(struct { Position, Collider }),
-    writer: EventWriter(CollisionEvent),
-) !void {
-    // Detect collisions
-    try writer.enqueue(.{ .a = entity1, .b = entity2 });
-}
-
-// System 2: Read collision events, write damage events
-fn collisionResponse(
-    reader: EventReader(CollisionEvent),
-    writer: EventWriter(DamageEvent),
-) !void {
-    for (reader.queue) |collision| {
-        try writer.enqueue(.{ .entity = collision.a, .amount = 10 });
-    }
-}
-
-// System 3: Read damage events, apply to health
-fn damageSystem(
-    reader: EventReader(DamageEvent),
-    health_query: Query(struct { Health }),
-    writer: EventWriter(DeathEvent),
-) !void {
-    for (reader.queue) |damage| {
-        if (health_query.getOptionalMut(damage.entity, Health)) |health| {
-            health.hp -= damage.amount;
-            if (health.hp <= 0) {
-                try writer.enqueue(.{ .entity = damage.entity });
-            }
-        }
-    }
-}
-
-// System 4: Cleanup destroyed entities
-fn deathSystem(
-    reader: EventReader(DeathEvent),
-    commands: anytype,
-) !void {
-    for (reader.queue) |death| {
-        try commands.destroyEntity(death.entity);
-    }
-}
-```
-
-**Execution across frames**:
-- Frame N: `collisionDetection` writes events
-- Frame N+1: `collisionResponse` reads collisions, writes damage
-- Frame N+2: `damageSystem` reads damage, writes deaths
-- Frame N+3: `deathSystem` reads deaths, destroys entities
-
-**Benefits**: No tight coupling, each system independently testable, clear causality.
-
-### Domain-Based Organization
-
-Group related systems by domain for better code organization:
-
-```zig
-// Physics domain
-fn physicsUpdate(world: *World) !void {
-    try world.runSystem(applyGravity);
-    try world.runSystem(applyVelocity);
-    try world.runSystem(collisionDetection);
-    try world.runSystem(collisionResolution);
-}
-
-// Combat domain
-fn combatUpdate(world: *World) !void {
-    try world.runSystem(weaponCooldown);
-    try world.runSystem(damageApplication);
-    try world.runSystem(healthRegeneration);
-}
-
-// Rendering domain
-fn renderUpdate(world: *World) !void {
-    try world.runSystem(updateAnimations);
-    try world.runSystem(updateCamera);
-    try world.runSystem(renderSprites);
-}
-
-// Main loop
-while (running) {
-    world.beginFrame();
-    try physicsUpdate(&world);
-    try combatUpdate(&world);
-    try renderUpdate(&world);
-    try world.endFrame();
-}
-```
-
-**Plugin Architecture**: Organize components and systems by feature:
-
-```zig
-const MovementPlugin = struct {
-    const Components = .{ Position, Velocity };
-
-    fn install(world: *World) !void {
-        try world.createGroup(struct { Position, Velocity });
-    }
-
-    fn update(world: *World) !void {
-        try world.runSystem(movementSystem);
-    }
-};
-```
-
-### Behavioral Chains with Components
-
-Split complex behaviors into sequential systems operating on different components:
-
-```zig
-// Behavior: Character follows mouse cursor
-
-// System 1: Capture mouse input
-fn inputSystem(
-    query: SingleQuery(InputComponent),
-    // Mouse input from external system
-) !void {
-    for (query.entities, query.components) |_, *input| {
-        input.mouse_x = getMouseX();
-        input.mouse_y = getMouseY();
-    }
-}
-
-// System 2: Calculate direction to cursor
-fn followCursorSystem(
-    query: Query(struct { InputComponent, Position, Direction }),
-) !void {
-    for (query.entities) |entity| {
-        if (query.filter(entity)) {
-            const input = query.getComponent(entity, InputComponent);
-            const pos = query.getComponent(entity, Position);
-            const dir = query.getComponentMut(entity, Direction);
-
-            const dx = input.mouse_x - pos.x;
-            const dy = input.mouse_y - pos.y;
-            const magnitude = @sqrt(dx * dx + dy * dy);
-
-            dir.x = dx / magnitude;
-            dir.y = dy / magnitude;
-        }
-    }
-}
-
-// System 3: Apply movement
-fn movementSystem(group: Group(struct { Position, Direction, Speed })) !void {
-    const positions = group.getMutArrayOf(Position);
-    const directions = group.getArrayOf(Direction);
-    const speeds = group.getArrayOf(Speed);
-
-    for (positions, directions, speeds) |*pos, dir, speed| {
-        pos.x += dir.x * speed.value;
-        pos.y += dir.y * speed.value;
-    }
-}
-```
-
-**Benefits**: Each system reusable independently. `movementSystem` works for AI, player input, pathfinding, etc.
-
-### System Granularity Guidelines
-
-**Too granular** (avoid):
-```zig
-fn updatePositionX(...) !void { }  // Only updates X
-fn updatePositionY(...) !void { }  // Only updates Y
-```
-
-**Too coarse** (avoid):
-```zig
-fn gameplaySystem(...) !void {
-    // Does movement, combat, inventory, dialogue, etc.
-}
-```
-
-**Just right**:
-```zig
-fn movementSystem(...) !void { }       // Updates position from velocity
-fn combatSystem(...) !void { }         // Handles damage application
-fn inventorySystem(...) !void { }      // Manages item pickup/use
-```
-
-**Rule of thumb**: If a system's name needs "and" or has 3+ responsibilities, split it.
-
-### Parallel Processing Considerations
-
-Design systems for potential parallelization:
-
-**Safe for parallel** (read-only or disjoint writes):
-```zig
-// Multiple systems can run in parallel if they access different components
-fn system1(query: Query(struct { Position, Velocity })) !void { }
-fn system2(query: Query(struct { Health, Armor })) !void { }  // Parallel-safe
-```
-
-**Not safe** (concurrent writes to same component):
-```zig
-fn system1(query: Query(struct { Position })) !void {
-    // Writes Position
-}
-fn system2(query: Query(struct { Position })) !void {
-    // Also writes Position - CONFLICT
-}
-```
-
-**Sparze is currently single-threaded**, but designing independent systems prepares for future parallelization.
-
-### Common Anti-Patterns
-
-**❌ Systems storing state**:
-```zig
-// BAD: System with state
-fn badSystem(query: ...) !void {
-    const accumulator = ...;  // State between frames
-}
-
-// GOOD: Use Resources for state
-fn goodSystem(query: ..., state: ResourceMut(SystemState)) !void {
-    state.value.accumulator += ...;
-}
-```
-
-**❌ Systems knowing about entity "types"**:
-```zig
-// BAD: Checking entity types
-if (isPlayer(entity)) { }
-
-// GOOD: Use components/tags
-fn playerSystem(query: Query(struct { Player, Position })) !void {
-    // Only processes entities with Player component
-}
-```
-
-**❌ Direct component access between systems**:
-```zig
-// BAD: System A calling System B
-fn systemA(...) !void {
-    systemB(...);  // Tight coupling
-}
-
-// GOOD: Use events or shared components
-fn systemA(..., writer: EventWriter(SomeEvent)) !void {
-    try writer.enqueue(...);
-}
-fn systemB(..., reader: EventReader(SomeEvent)) !void {
-    for (reader.queue) |event| { }
-}
-```
+**📖 Detailed organization patterns**: @docs/SYSTEM_PATTERNS.md - Event-driven chains, domain organization, behavioral composition, granularity guidelines
 
 ## Advanced Patterns
 
@@ -591,8 +302,14 @@ try world.initResources(.{
     .score = Score{ .points = 0 },
 });
 
-// Safe checked access (returns error if uninitialized)
-const dt = try world.tryGetResource(DeltaTime);
+// Check initialization status
+if (world.isResourceInitialized(OptionalConfig)) {
+    const config = world.getResource(OptionalConfig);
+}
+
+// Safe checked access (returns !*const R, dereference for value)
+const dt_ptr = try world.tryGetResource(DeltaTime);
+const dt = dt_ptr.*;
 
 // Unsafe direct access (zero-cost, assumes initialized)
 const dt = world.getResource(DeltaTime);
@@ -600,11 +317,15 @@ const dt = world.getResource(DeltaTime);
 
 ## Performance Guidelines
 
+**📖 Optimization strategies**: @docs/PERFORMANCE.md - Memory optimization, iteration performance, system organization, benchmarking, anti-patterns
+
 ### Memory
 
-- Tag components use 1 bit per entity
-- Pre-allocate with `sparse_set.reserve(capacity)`
-- Pagination: 4096 entities per page
+- Tag components use 1 bit per entity via TagStorage (98% memory reduction for sparse distributions)
+- Pre-allocate with `world.getSparseSetPtrMut(Component).reserve(capacity)` before bulk operations
+- Pagination: 4096 entities per page (cache-friendly, on-demand allocation)
+
+**📖 Storage details**: @docs/STORAGE_INTERNALS.md - SparseSet/TagStorage implementation, pagination, group layout, memory calculations
 
 ### Iteration Speed
 
@@ -634,106 +355,13 @@ World.validateGroups(.{ MovementGroup, RenderGroup });  // Compile-time check
 
 ## Common Patterns
 
-### Startup System
+**Startup**: Initialize resources with `initResources()`, create groups with `createGroup()`, spawn initial entities with `createEntityWith()`.
 
-```zig
-fn initSystem(commands: anytype) !void {
-    // Initialize resources
-    try commands.initResources(.{
-        .delta_time = DeltaTime{ .dt = 0.016 },
-        .score = Score{ .points = 0 },
-    });
+**Component design**: POD structs for data (auto-serializable), empty structs for tags (1-bit storage), custom `Serializer` for complex types, `pub const serialized = false` to exclude from saves.
 
-    // Create groups
-    try commands.createGroup(struct { Position, Velocity });
+**Serialization**: `commands.serializeToFile("save.dat")` / `deserializeFromFile("save.dat")`. Recreate groups after loading. Entities, components, resources, and read events are saved; groups and command buffers are not.
 
-    // Spawn initial entities
-    const player = try commands.createEntityWith(.{
-        Position{ .x = 0, .y = 0 },
-        Health{ .hp = 100 },
-    });
-    _ = player;
-}
-```
-
-### Conditional Entity Processing
-
-```zig
-fn damageSystem(
-    query: Query(struct { Health, Exclude(Invincible) }),
-    commands: anytype,
-) !void {
-    for (query.entities) |entity| {
-        if (query.filter(entity)) {
-            const health = query.getComponentMut(entity, Health);
-            health.hp -= 10;
-            if (health.hp <= 0) {
-                try commands.addTag(entity, Dead);
-            }
-        }
-    }
-}
-```
-
-## Architecture Patterns
-
-### Component Design
-
-```zig
-// POD components (auto-serializable)
-const Position = struct { x: f32, y: f32 };
-
-// Tag components (zero-sized markers)
-const Enemy = struct {};
-const Dead = struct {};
-
-// Components with custom serialization
-const CustomComponent = struct {
-    data: []u8,
-    pub const Serializer = struct {
-        pub fn serialize(component: CustomComponent, writer: anytype) !void { }
-        pub fn deserialize(reader: anytype, allocator: Allocator) !CustomComponent { }
-    };
-};
-
-// Exclude from serialization
-const TransientData = struct {
-    cache: []u8,
-    pub const serialized = false;
-};
-```
-
-## Serialization
-
-Serialize world state to files:
-
-```zig
-// Save
-try commands.serializeToFile("save.dat");
-
-// Load
-try commands.deserializeFromFile("save.dat");
-
-// Recreate groups after deserialization
-try world.createGroup(struct { Position, Velocity });
-```
-
-**What's serialized**: Entities, components, resources, events (read buffer only)
-**Not serialized**: Groups, command buffers, event write buffer, types with `serialized = false`
-
-## Comparison to Other ECS
-
-**vs Bevy (Rust)**:
-- Sparze: Compile-time types, `?T` optional, `Exclude(T)`
-- Bevy: `With<T>`, `Without<T>`, `Added<T>`, `Changed<T>`, query builder
-
-**vs Flecs (C/C++)**:
-- Sparze: Sparse set + groups (hybrid)
-- Flecs: Pure archetype with query terms, component inheritance
-
-**vs EnTT (C++)**:
-- Sparze: Explicit group setup for performance
-- EnTT: Pure sparse set with reactive views
+**📖 Full examples**: @docs/SYSTEM_PATTERNS.md - Startup systems, conditional processing, state machines, event chains
 
 ## Quick Reference
 
@@ -753,3 +381,14 @@ try world.createGroup(struct { Position, Velocity });
 | Tag iteration | `SingleTag(Enemy)` |
 | Cross product | `query1.crossProduct(&query2)` |
 | Unique pairs | `query.combinations()` |
+
+## Documentation Index
+
+📚 **Comprehensive documentation** for deep dives:
+
+- **@docs/ARCHITECTURE.md** - Core structures, World API, memory layout, CommandBuffer internals
+- **@docs/QUERY_PATTERNS.md** - Decision flowchart, filter comparison, performance characteristics, component sharing
+- **@docs/ENTITY_LIFECYCLE.md** - Creation/destruction flows, version recycling, safety mechanisms
+- **@docs/STORAGE_INTERNALS.md** - SparseSet/TagStorage implementation, pagination, group layout, memory calculations
+- **@docs/SYSTEM_PATTERNS.md** - Full system examples, Commands API reference, frame lifecycle, common pitfalls
+- **@docs/PERFORMANCE.md** - Memory optimization, iteration performance, system organization, benchmarking, anti-patterns
