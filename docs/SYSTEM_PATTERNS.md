@@ -269,38 +269,32 @@ fn conditionalSystem(commands: anytype) !void {
 
 ### Group Operations (Immediate)
 
-#### createGroup(GroupType) !void
-
-```zig
-fn setupSystem(commands: anytype) !void {
-    try commands.createGroup(struct { Position, Velocity });
-    try commands.createGroup(struct { Sprite, Layer });
-}
-```
-
-**Timing**: Immediate
-
-**Best practice**: Create all groups at startup, validate with `World.validateGroups()`
+Groups are defined at compile-time in the `World` signature. Declare required groups in the `.groups` parameter and validate with `World.validateGroups()` if needed.
 
 ### Serialization Operations (Immediate)
 
 #### serializeToFile(path) !void / deserializeFromFile(path) !void
 
 ```zig
+const World = sparze.World(
+    struct { Position, Velocity },
+    struct { DeltaTime },
+    struct {},
+    .{ struct { Position, Velocity } }, // Groups
+);
+
 fn saveSystem(commands: anytype) !void {
     try commands.serializeToFile("save.dat");
 }
 
 fn loadSystem(commands: anytype) !void {
     try commands.deserializeFromFile("save.dat");
-    // Recreate groups after deserialization
-    try commands.createGroup(struct { Position, Velocity });
 }
 ```
 
 **Timing**: Immediate
 
-**Important**: Recreate groups after deserialization
+**Important**: Groups are defined at compile-time in the `World` signature; ensure save/load use the same signature across builds
 
 ## Frame Lifecycle
 
@@ -348,12 +342,18 @@ fn loadSystem(commands: anytype) !void {
 ### Typical Game Loop
 
 ```zig
+const World = sparze.World(
+    struct { Position, Velocity },
+    struct { DeltaTime },
+    struct {},
+    .{ struct { Position, Velocity }, struct { Sprite, Layer } },  // Groups
+);
+
 pub fn main() !void {
-    var world = try World(...).init(allocator);
+    var world = try World.init(allocator);
     defer world.deinit();
 
     // Setup
-    try world.createGroup(struct { Position, Velocity });
     try world.setResource(DeltaTime, .{ .value = 0.016 });
 
     // Game loop
@@ -655,13 +655,23 @@ fn flush(self: *CommandBuffer, world: *World) !void {
    }
    ```
 
-2. **Forgetting to create groups**:
+2. **Forgetting to declare groups in the World signature**:
    ```zig
-   // BAD: Will panic if group not created
-   fn system(group: Group(struct { A, B })) !void { }
+   // BAD: Will panic if group missing from signature
+   const WorldWithoutGroups = sparze.World(
+       struct { A, B },
+       struct {},
+       struct {},
+       .{}, // No groups defined
+   );
 
-   // GOOD: Create at startup
-   try world.createGroup(struct { A, B });
+   // GOOD: Declare groups at compile-time in the World signature
+   const World = sparze.World(
+       struct { A, B },
+       struct {},
+       struct {},
+       .{ struct { A, B } },
+   );
    ```
 
 3. **Using wrong resource access method**:

@@ -11,7 +11,7 @@
 | `SingleTag(T)` | No | No | Direct array | Fastest |
 | `Query(struct {...})` | No | Optional, Exclude | Sparse lookup + filter | Good |
 | `TagQuery(struct {...})` | No | Optional, Exclude | Bitset lookup | Good |
-| `Group(struct {...})` | Yes | Free | Direct (owned), sparse (free) | Fastest |
+| `Group(struct {...})` | Compile-time | Free | Direct (owned), sparse (free) | Fastest |
 
 **Entity Liveness Validation**:
 - **Debug/ReleaseSafe**: Automatic validation (`isAlive()` check) prevents iteration over destroyed entities
@@ -30,7 +30,7 @@
 - `combinations()`: Unique pairs (i < j) for collision detection
 - `crossProduct(&other)`: N×M pairs for asymmetric interactions
 
-**CRITICAL**: Groups require `createGroup()` before use, panic if not created. Validate ownership conflicts with `World.validateGroups()`.
+**CRITICAL**: Groups are defined at compile-time in World signature. Ownership conflicts detected at compile-time via `World.validateGroups()`.
 
 **Best Practices**: Use Group for hot paths, Query for flexibility, SingleQuery for single components.
 

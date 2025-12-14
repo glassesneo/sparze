@@ -25,6 +25,7 @@ const World = sparze.World(
     struct { Position, Velocity, Health, Shield, Invulnerable },
     struct {},
     struct {},
+    .{},
 );
 
 // =============================================================================

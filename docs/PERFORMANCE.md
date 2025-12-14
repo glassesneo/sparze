@@ -122,7 +122,13 @@ fn physicsSystem(physics: Group(struct { Position, Velocity })) !void {
 
 **Setup**:
 ```zig
-try world.createGroup(struct { Position, Velocity });
+const World = sparze.World(
+    struct { Position, Velocity },
+    struct {},
+    struct {},
+    .{ struct { Position, Velocity } }, // Groups
+);
+var world = try World.init(allocator);
 ```
 
 **Speedup**: 2-3× for tight loops (depends on component size and filter complexity)
@@ -132,8 +138,15 @@ try world.createGroup(struct { Position, Velocity });
 Use partial-owning groups when some components are accessed frequently, others rarely:
 
 ```zig
+const PhysicsGroup = struct { Position, Velocity, Free(Health) };
+
+const World = sparze.World(
+    struct { Position, Velocity, Health },
+    struct {},
+    struct {},
+    .{ PhysicsGroup },
+);
 // Own Position/Velocity (hot path), access Health occasionally
-try world.createGroup(struct { Position, Velocity, Free(Health) });
 
 fn physicsWithDamage(
     physics: Group(struct { Position, Velocity, Free(Health) })
@@ -170,7 +183,14 @@ const RenderGroup = struct { Position, Sprite, Layer };  // Error! Position owne
 // Instead:
 const RenderGroup = struct { Sprite, Layer, Free(Position) };  // OK
 
-// Validate at compile time
+const World = sparze.World(
+    Components,
+    Resources,
+    Events,
+    .{ PhysicsGroup, RenderGroup }, // Define groups in signature
+);
+
+// Compile-time validation
 World.validateGroups(.{ PhysicsGroup, RenderGroup });
 ```
 
@@ -200,14 +220,24 @@ try world.runSystem(renderSystem);    // Sprite, Layer
 
 **BAD** (large group):
 ```zig
-try world.createGroup(struct { A, B, C, D, E, F });
+const World = sparze.World(
+    struct { A, B, C, D, E, F },
+    struct {},
+    struct {},
+    .{ struct { A, B, C, D, E, F } },
+);
 // Entity must have ALL 6 components to be in group
 // Small group size, high invalidation cost
 ```
 
 **GOOD** (focused group):
 ```zig
-try world.createGroup(struct { A, B, Free(C), Free(D) });
+const World = sparze.World(
+    struct { A, B, C, D },
+    struct {},
+    struct {},
+    .{ struct { A, B, Free(C), Free(D) } },
+);
 // Owns A, B (hot path), accesses C, D (cold path)
 // Larger group size, lower overhead
 ```
@@ -385,7 +415,7 @@ zig build run-benchmark-sparse_vs_dense
 - [ ] Use Groups for hot-path multi-component iteration
 - [ ] Use SingleQuery for single-component iteration
 - [ ] Use partial-owning Groups for mixed access patterns
-- [ ] Validate groups at startup with `validateGroups()`
+- [ ] Define groups in World signature and use `validateGroups()` for compile-time validation
 
 **System organization**:
 - [ ] Order systems to maximize cache locality

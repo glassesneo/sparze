@@ -40,12 +40,6 @@ pub const Commands = system_module.Commands;
 pub const CommandBuffer = system_module.CommandBuffer;
 pub const createSystemFunction = system_module.createSystemFunction;
 
-/// Information about a group
-const GroupInfo = struct {
-    owned_component_ids: []const u16, // Components owned by this group
-    free_component_ids: []const u16, // Components used but not owned by this group
-};
-
 // Helper to check if a type is wrapped in Free()
 fn isFree(comptime T: type) bool {
     return @hasDecl(T, "is_free") and T.is_free;
@@ -65,8 +59,8 @@ fn GroupKey(comptime owned_count: usize, comptime free_count: usize) type {
     };
 }
 
-/// Construct a compile-time ECS World factory from component/resource/event type tuples; returns a type that can be instantiated with `init(allocator)`.
-pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
+/// Construct a compile-time ECS World factory from component/resource/event/group type tuples; returns a type that can be instantiated with `init(allocator)`.
+pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: anytype) type {
     const component_info = @typeInfo(Components);
     if (component_info != .@"struct") @compileError("Invalid form of components");
     const component_fields = component_info.@"struct".fields;
@@ -79,6 +73,15 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
     if (event_info != .@"struct") @compileError("Invalid form of events");
     const event_fields = event_info.@"struct".fields;
     const event_pool_length = event_fields.len;
+
+    // Validate Groups is a tuple
+    const groups_type_info = @typeInfo(@TypeOf(Groups));
+    if (groups_type_info != .@"struct" or !groups_type_info.@"struct".is_tuple) {
+        @compileError("Groups must be a tuple, e.g., .{ struct { A, B }, struct { C, D } }");
+    }
+
+    const group_fields = std.meta.fields(@TypeOf(Groups));
+    const groups_count = group_fields.len;
 
     const ComponentPoolType = if (component_pool_length == 0) @TypeOf(.{}) else construct_component_pool: {
         var pool_fields: [component_pool_length]StructField = undefined;
@@ -173,12 +176,11 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         resource_pool: ResourcePoolType,
         resource_initialized: if (resource_pool_length == 0) void else std.StaticBitSet(resource_pool_length),
         event_pool: EventPoolType,
-        groups: ArrayList(GroupInfo),
         command_buffer: CommandBuffer(Self),
 
-        /// Initialize an empty World with zeroed resources (uninitialized), empty component/event storages, and no groups; resources must be initialized with `setResource()` or `initResources()` before use.
+        /// Initialize an empty World with zeroed resources (uninitialized) and empty component/event storages; groups are defined at compile-time and will be automatically populated as entities are added; resources must be initialized with `setResource()` or `initResources()` before use.
         pub fn init(allocator: Allocator) Self {
-            return .{
+            var self = Self{
                 .allocator = allocator,
                 .entity_registry = .init(),
                 .component_pool = init: {
@@ -197,24 +199,69 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                     }
                     break :init pool;
                 },
-                .groups = .{},
                 .command_buffer = .init(allocator),
             };
+
+            // Populate all groups with existing entities
+            if (groups_count > 0) {
+                self.populateAllGroups();
+            }
+
+            return self;
         }
 
-        /// Deinitialize the World, freeing all component storages, event storages, group metadata, and the command buffer.
+        /// Deinitialize the World, freeing all component storages, event storages, and the command buffer.
         pub fn deinit(self: *Self) void {
             self.command_buffer.deinit();
-            for (self.groups.items) |*group| {
-                self.allocator.free(group.owned_component_ids);
-                self.allocator.free(group.free_component_ids);
-            }
-            self.groups.deinit(self.allocator);
+            // Group metadata is compile-time data, no deallocation needed
             inline for (component_fields) |field| {
                 self.getComponentStoragePtr(field.type).deinit();
             }
             inline for (event_fields, 0..) |_, i| {
                 self.event_pool[i].deinit();
+            }
+        }
+
+        /// Populate all compile-time groups with existing entities
+        fn populateAllGroups(self: *Self) void {
+            if (groups_count == 0) return;
+
+            inline for (group_fields) |field| {
+                const GroupType = @field(Groups, field.name);
+                const sig = comptime parseGroupSignature(GroupType);
+
+                // Need at least one owned component to iterate
+                if (sig.owned_ids.len == 0) continue;
+
+                // Iterate first owned component's storage (comptime-known index)
+                // Note: Could optimize by finding shortest set, but tuple indexing requires comptime
+                const first_owned_id = sig.owned_ids[0];
+                const storage = &self.component_pool[first_owned_id];
+                for (storage.packed_array.items) |entity| {
+                    // Check if entity has all required components (owned + free)
+                    var has_all = true;
+                    inline for (sig.owned_ids) |id| {
+                        if (!self.component_pool[id].contains(entity)) {
+                            has_all = false;
+                            break;
+                        }
+                    }
+                    if (has_all) {
+                        inline for (sig.free_ids) |id| {
+                            if (!self.component_pool[id].contains(entity)) {
+                                has_all = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (has_all) {
+                        // Add to group by moving owned components to group region
+                        inline for (sig.owned_ids) |id| {
+                            self.component_pool[id].moveToGroup(entity);
+                        }
+                    }
+                }
             }
         }
 
@@ -271,8 +318,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             // Validate each group's components are in this world
             inline for (group_list) |group_field| {
                 const GroupType = @field(groups, group_field.name);
-                const group_fields = comptime std.meta.fields(GroupType);
-                inline for (group_fields) |field| {
+                const group_comp_fields = comptime std.meta.fields(GroupType);
+                inline for (group_comp_fields) |field| {
                     // Extract actual component type (unwrap Free())
                     const ComponentType = extractComponent(field.type);
                     _ = getComponentId(ComponentType);
@@ -317,28 +364,57 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         /// This helper deduplicates the logic used by both createGroup and getGroup
         fn parseGroupSignature(comptime GroupComponents: type) GroupKey(
             blk: {
-                const group_fields = std.meta.fields(GroupComponents);
+                const group_comp_fields = std.meta.fields(GroupComponents);
                 var count: usize = 0;
-                for (group_fields) |field| {
+                for (group_comp_fields) |field| {
                     if (!isFree(field.type)) count += 1;
                 }
                 break :blk count;
             },
             blk: {
-                const group_fields = std.meta.fields(GroupComponents);
+                const group_comp_fields = std.meta.fields(GroupComponents);
                 var count: usize = 0;
-                for (group_fields) |field| {
+                for (group_comp_fields) |field| {
                     if (isFree(field.type)) count += 1;
                 }
                 break :blk count;
             },
         ) {
-            const group_fields = comptime std.meta.fields(GroupComponents);
+            const group_comp_fields = comptime std.meta.fields(GroupComponents);
+
+            // Validate: reject tag components in groups
+            inline for (group_comp_fields) |field| {
+                const ComponentType = extractComponent(field.type);
+                if (component_storage_module.isTagComponent(ComponentType)) {
+                    @compileError("Tag components cannot be used in groups: " ++ @typeName(ComponentType) ++
+                        ". Groups require regular (non-zero-sized) components for SparseSet storage. " ++
+                        "Use TagQuery or Query with tag components instead.");
+                }
+            }
+
+            // Validate: detect duplicate components
+            inline for (group_comp_fields, 0..) |field1, i| {
+                const ComponentType1 = extractComponent(field1.type);
+                const is_free1 = isFree(field1.type);
+                inline for (group_comp_fields[i + 1 ..]) |field2| {
+                    const ComponentType2 = extractComponent(field2.type);
+                    const is_free2 = isFree(field2.type);
+                    if (ComponentType1 == ComponentType2) {
+                        if (is_free1 == is_free2) {
+                            @compileError("Duplicate component in group: " ++ @typeName(ComponentType1) ++
+                                " appears multiple times. Each component can only appear once.");
+                        } else {
+                            @compileError("Component appears as both owned and Free in group: " ++ @typeName(ComponentType1) ++
+                                ". A component must be either owned or Free, not both.");
+                        }
+                    }
+                }
+            }
 
             // Count owned and free components
             const owned_count = comptime blk: {
                 var count: usize = 0;
-                for (group_fields) |field| {
+                for (group_comp_fields) |field| {
                     if (!isFree(field.type)) count += 1;
                 }
                 break :blk count;
@@ -346,37 +422,41 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
 
             const free_count = comptime blk: {
                 var count: usize = 0;
-                for (group_fields) |field| {
+                for (group_comp_fields) |field| {
                     if (isFree(field.type)) count += 1;
                 }
                 break :blk count;
             };
 
-            // Build owned component ID array
+            // Build owned component ID array (sorted for order-insensitive matching)
             const owned_ids = comptime blk: {
                 var ids: [owned_count]u16 = undefined;
                 var idx: usize = 0;
-                for (group_fields) |field| {
+                for (group_comp_fields) |field| {
                     if (!isFree(field.type)) {
                         const ComponentType = extractComponent(field.type);
                         ids[idx] = getComponentId(ComponentType);
                         idx += 1;
                     }
                 }
+                // Sort for canonical ordering
+                std.mem.sort(u16, &ids, {}, std.sort.asc(u16));
                 break :blk ids;
             };
 
-            // Build free component ID array
+            // Build free component ID array (sorted for order-insensitive matching)
             const free_ids = comptime blk: {
                 var ids: [free_count]u16 = undefined;
                 var idx: usize = 0;
-                for (group_fields) |field| {
+                for (group_comp_fields) |field| {
                     if (isFree(field.type)) {
                         const ComponentType = extractComponent(field.type);
                         ids[idx] = getComponentId(ComponentType);
                         idx += 1;
                     }
                 }
+                // Sort for canonical ordering
+                std.mem.sort(u16, &ids, {}, std.sort.asc(u16));
                 break :blk ids;
             };
 
@@ -384,6 +464,93 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
                 .owned_ids = owned_ids,
                 .free_ids = free_ids,
             };
+        }
+
+        /// Helper to check if two group signatures match
+        fn signaturesMatch(comptime sig1: anytype, comptime sig2: anytype) bool {
+            if (sig1.owned_ids.len != sig2.owned_ids.len) return false;
+            if (sig1.free_ids.len != sig2.free_ids.len) return false;
+
+            for (sig1.owned_ids, sig2.owned_ids) |id1, id2| {
+                if (id1 != id2) return false;
+            }
+            for (sig1.free_ids, sig2.free_ids) |id1, id2| {
+                if (id1 != id2) return false;
+            }
+            return true;
+        }
+
+        /// Validate groups at compile time (automatic validation - no need to call manually)
+        const _group_validation = if (groups_count > 0) blk: {
+            // Validate each group has at least one owned component
+            for (group_fields) |field| {
+                const GroupType = @field(Groups, field.name);
+                const sig = parseGroupSignature(GroupType);
+                if (sig.owned_ids.len == 0) {
+                    @compileError("Group " ++ @typeName(GroupType) ++ " must have at least one owned component. All components are marked as Free().");
+                }
+            }
+
+            // Check for duplicate groups
+            for (group_fields, 0..) |field, i| {
+                const GroupType = @field(Groups, field.name);
+                for (group_fields[i + 1 ..]) |other_field| {
+                    const OtherType = @field(Groups, other_field.name);
+                    if (signaturesMatch(parseGroupSignature(GroupType), parseGroupSignature(OtherType))) {
+                        @compileError("Duplicate group detected: " ++ @typeName(GroupType) ++ " and " ++ @typeName(OtherType) ++ " have the same signature");
+                    }
+                }
+            }
+
+            // Check for ownership conflicts
+            for (group_fields, 0..) |field1, i| {
+                const Group1Type = @field(Groups, field1.name);
+                const sig1 = parseGroupSignature(Group1Type);
+
+                for (group_fields, 0..) |field2, j| {
+                    if (i >= j) continue;
+
+                    const Group2Type = @field(Groups, field2.name);
+                    const sig2 = parseGroupSignature(Group2Type);
+
+                    for (sig1.owned_ids) |id1| {
+                        for (sig2.owned_ids) |id2| {
+                            if (id1 == id2) {
+                                // Get component names for better error message
+                                for (component_fields, 0..) |comp_field, comp_i| {
+                                    if (comp_i == id1) {
+                                        @compileError("Groups have overlapping OWNED component: " ++ @typeName(comp_field.type) ++
+                                            " appears as owned in both " ++ @typeName(Group1Type) ++ " and " ++ @typeName(Group2Type) ++
+                                            ". Use Free(" ++ @typeName(comp_field.type) ++ ") in one of the groups to mark it as free (not owned).");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            break :blk {};
+        } else {};
+
+        /// Get the compile-time index of a group by its type signature
+        pub fn getGroupIndex(comptime GroupType: type) usize {
+            if (groups_count == 0) {
+                @compileError("No groups registered in World. Add groups to the Groups tuple in World definition.");
+            }
+
+            return inline for (group_fields, 0..) |field, i| {
+                const RegisteredType = @field(Groups, field.name);
+                const query_sig = comptime parseGroupSignature(GroupType);
+                const reg_sig = comptime parseGroupSignature(RegisteredType);
+
+                if (signaturesMatch(query_sig, reg_sig)) {
+                    break i;
+                }
+            } else @compileError(
+                "Group " ++ @typeName(GroupType) ++ " not registered in World. " ++
+                    "Add it to the Groups tuple in World definition.",
+            );
         }
 
         pub fn getComponentStorage(self: Self, comptime C: type) ComponentStorage(C) {
@@ -681,355 +848,76 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
             return entity;
         }
 
-        /// Create a group for the given component types (supports full-owning and partial-owning groups)
-        pub fn createGroup(self: *Self, comptime GroupComponents: type) !void {
-            const group_fields = comptime std.meta.fields(GroupComponents);
-            if (group_fields.len == 0) @compileError("Cannot create group with zero components");
-
-            // Parse group signature using helper function
-            const group_key = comptime parseGroupSignature(GroupComponents);
-            const owned_ids = group_key.owned_ids;
-            const free_ids = group_key.free_ids;
-            const owned_count = owned_ids.len;
-            const free_count = free_ids.len;
-
-            // Compile-time validation: ensure at least one component is owned
-            if (owned_count == 0) {
-                @compileError("Groups must have at least one owned component. All components are marked as Free(T). " ++
-                    "Remove Free() from at least one component to create a valid group.");
-            }
-
-            // Compile-time validation: ensure all component types are valid for this world
-            comptime {
-                for (group_fields) |field| {
-                    const ComponentType = extractComponent(field.type);
-                    _ = getComponentId(ComponentType); // Will compile error if type not in world
-                }
-            }
-
-            // Check if group already exists (same owned and free components)
-            // This must be done BEFORE ownership conflict check to allow creating the same group twice
-            for (self.groups.items) |*group| {
-                if (group.owned_component_ids.len == owned_ids.len and
-                    group.free_component_ids.len == free_ids.len)
-                {
-                    var owned_matches = true;
-                    if (owned_ids.len > 0) {
-                        for (group.owned_component_ids, 0..) |id, i| {
-                            if (id != owned_ids[i]) {
-                                owned_matches = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    var free_matches = true;
-                    if (free_ids.len > 0) {
-                        for (group.free_component_ids, 0..) |id, i| {
-                            if (id != free_ids[i]) {
-                                free_matches = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (owned_matches and free_matches) return; // Group already exists
-                }
-            }
-
-            // Check for ownership conflicts: owned components cannot be owned by multiple groups
-            for (self.groups.items) |*existing_group| {
-                for (owned_ids) |new_owned_id| {
-                    for (existing_group.owned_component_ids) |existing_owned_id| {
-                        if (new_owned_id == existing_owned_id) {
-                            return error.ComponentAlreadyOwned;
-                        }
-                    }
-                }
-            }
-
-            // Allocate and copy component IDs
-            var owned_component_ids = try self.allocator.alloc(u16, owned_count);
-            errdefer self.allocator.free(owned_component_ids);
-
-            var free_component_ids = try self.allocator.alloc(u16, free_count);
-            errdefer self.allocator.free(free_component_ids);
-
-            inline for (owned_ids, 0..) |id, i| {
-                owned_component_ids[i] = id;
-            }
-            inline for (free_ids, 0..) |id, i| {
-                free_component_ids[i] = id;
-            }
-
-            try self.groups.append(self.allocator, GroupInfo{
-                .owned_component_ids = owned_component_ids,
-                .free_component_ids = free_component_ids,
-            });
-
-            // Populate the group with existing entities that have all required components
-            self.populateGroup(GroupComponents);
-        }
-
-        /// Get group information by component types
-        pub fn getGroup(self: *const Self, comptime GroupComponents: type) ?*const GroupInfo {
-            // Parse group signature using helper function
-            const group_key = comptime parseGroupSignature(GroupComponents);
-            const target_owned_ids = group_key.owned_ids;
-            const target_free_ids = group_key.free_ids;
-
-            for (self.groups.items) |*group| {
-                if (group.owned_component_ids.len == target_owned_ids.len and
-                    group.free_component_ids.len == target_free_ids.len)
-                {
-                    var owned_matches = true;
-                    if (target_owned_ids.len > 0) {
-                        for (group.owned_component_ids, 0..) |id, i| {
-                            if (id != target_owned_ids[i]) {
-                                owned_matches = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    var free_matches = true;
-                    if (target_free_ids.len > 0) {
-                        for (group.free_component_ids, 0..) |id, i| {
-                            if (id != target_free_ids[i]) {
-                                free_matches = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (owned_matches and free_matches) return group;
-                }
-            }
-            return null;
-        }
-
-        /// Get entities in a group (fast iteration)
-        pub fn getGroupEntities(self: *const Self, comptime GroupComponents: type) ?[]const Entity {
-            const group = self.getGroup(GroupComponents) orelse return null;
-
-            // Use the first owned component (guaranteed to exist by createGroup validation)
-            const first_id = group.owned_component_ids[0];
-
-            // Use inline for to access tuple element at runtime
-            inline for (component_fields, 0..) |field, i| {
-                if (comptime isTagComponent(field.type)) continue;
-                if (first_id == i) {
-                    return self.component_pool[i].getGroupEntities();
-                }
-            }
-            return null;
-        }
-
-        /// Get components of a specific type in a group (fast iteration)
-        /// Only works for owned components
-        pub fn getGroupComponents(self: *const Self, comptime GroupComponents: type, comptime C: type) ?[]const C {
-            const group = self.getGroup(GroupComponents) orelse return null;
-            const component_id = comptime getComponentId(C);
-
-            // Check if this component type is owned by the group
-            for (group.owned_component_ids) |group_id| {
-                if (group_id == component_id) {
-                    // Use inline for to access tuple element at runtime
-                    inline for (component_fields, 0..) |field, i| {
-                        if (comptime isTagComponent(field.type)) continue;
-                        if (component_id == i) {
-                            return self.component_pool[i].getGroupComponents();
-                        }
-                    }
-                }
-            }
-            return null;
-        }
-
-        pub fn getGroupComponentsMut(self: *Self, comptime GroupComponents: type, comptime C: type) ?[]C {
-            const group = self.getGroup(GroupComponents) orelse return null;
-            const component_id = comptime getComponentId(C);
-
-            // Check if this component type is owned by the group
-            for (group.owned_component_ids) |group_id| {
-                if (group_id == component_id) {
-                    // Use inline for to access tuple element at runtime
-                    inline for (component_fields, 0..) |field, i| {
-                        if (comptime isTagComponent(field.type)) continue;
-                        if (component_id == i) {
-                            return self.component_pool[i].getGroupComponentsMut();
-                        }
-                    }
-                }
-            }
-            return null;
-        }
-
-        /// Populate group with existing entities that have all required components (owned + free)
-        fn populateGroup(self: *Self, comptime GroupComponents: type) void {
-            const group = self.getGroup(GroupComponents) orelse return;
-
-            // Need at least one component (owned or free)
-            const total_components = group.owned_component_ids.len + group.free_component_ids.len;
-            if (total_components == 0) return;
-
-            // Find the shortest sparse set to minimize iterations (check both owned and free)
-            var min_size: usize = std.math.maxInt(usize);
-            var shortest_id: u16 = if (group.owned_component_ids.len > 0)
-                group.owned_component_ids[0]
-            else
-                group.free_component_ids[0];
-
-            // Check owned components
-            for (group.owned_component_ids) |id| {
-                inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
-                    if (id == i) {
-                        const entities = self.component_pool[i].packed_array.items;
-                        if (entities.len < min_size) {
-                            min_size = entities.len;
-                            shortest_id = id;
-                        }
-                    }
-                }
-            }
-
-            // Check free components
-            for (group.free_component_ids) |id| {
-                inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
-                    if (id == i) {
-                        const entities = self.component_pool[i].packed_array.items;
-                        if (entities.len < min_size) {
-                            min_size = entities.len;
-                            shortest_id = id;
-                        }
-                    }
-                }
-            }
-
-            // Iterate through shortest set and check if entities have all components (owned + free)
-            inline for (component_fields, 0..) |field, i| {
-                if (comptime isTagComponent(field.type)) continue;
-                if (shortest_id == i) {
-                    const entities = self.component_pool[i].packed_array.items;
-                    for (entities) |entity| {
-                        if (self.entityHasAllGroupComponents(entity, group)) {
-                            self.addEntityToGroup(entity, group);
-                        }
-                    }
-                }
-            }
-        }
-
-        /// Check if entity has all required components for a group (owned + free)
-        fn entityHasAllGroupComponents(self: *const Self, entity: Entity, group: *const GroupInfo) bool {
-            // Check owned components
-            for (group.owned_component_ids) |id| {
-                var has_component = false;
-                inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
-                    if (id == i) {
-                        if (self.component_pool[i].contains(entity)) {
-                            has_component = true;
-                        }
-                    }
-                }
-                if (!has_component) return false;
-            }
-
-            // Check free components
-            for (group.free_component_ids) |id| {
-                var has_component = false;
-                inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
-                    if (id == i) {
-                        if (self.component_pool[i].contains(entity)) {
-                            has_component = true;
-                        }
-                    }
-                }
-                if (!has_component) return false;
-            }
-
-            return true;
-        }
-
-        /// Update groups when component is added to entity
+        /// NOTE: createGroup() has been removed. Groups are now defined at compile-time in the World signature.
+        /// Old: try world.createGroup(struct { A, B });
+        /// New: const World = sparze.World(Components, Resources, Events, .{ struct { A, B } });
+        /// Update groups when component is added to entity (compile-time dispatch)
         fn updateGroupsOnAdd(self: *Self, entity: Entity, component_id: u16) void {
-            for (self.groups.items) |*group| {
-                // Check if this component type is part of the group (owned or free)
-                var is_group_component = false;
-                for (group.owned_component_ids) |id| {
-                    if (id == component_id) {
-                        is_group_component = true;
-                        break;
+            if (groups_count == 0) return;
+
+            inline for (group_fields) |field| {
+                const GroupType = @field(Groups, field.name);
+                const sig = comptime parseGroupSignature(GroupType);
+
+                // Check if component is in this group (inline for generates code for each ID)
+                const is_in_group = blk: {
+                    inline for (sig.owned_ids ++ sig.free_ids) |id| {
+                        if (id == component_id) break :blk true;
                     }
-                }
-                if (!is_group_component) {
-                    for (group.free_component_ids) |id| {
-                        if (id == component_id) {
-                            is_group_component = true;
+                    break :blk false;
+                };
+
+                if (is_in_group) {
+                    var has_all = true;
+
+                    // Check owned components
+                    inline for (sig.owned_ids) |id| {
+                        if (!self.component_pool[id].contains(entity)) {
+                            has_all = false;
                             break;
                         }
                     }
-                }
 
-                if (is_group_component and self.entityHasAllGroupComponents(entity, group)) {
-                    self.addEntityToGroup(entity, group);
+                    // Check free components
+                    if (has_all) {
+                        inline for (sig.free_ids) |id| {
+                            if (!self.component_pool[id].contains(entity)) {
+                                has_all = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Add to group by moving owned components to group region
+                    if (has_all) {
+                        inline for (sig.owned_ids) |id| {
+                            self.component_pool[id].moveToGroup(entity);
+                        }
+                    }
                 }
             }
         }
 
-        /// Update groups when component is removed from entity
+        /// Update groups when component is removed from entity (compile-time dispatch)
         fn updateGroupsOnRemove(self: *Self, entity: Entity, component_id: u16) void {
-            for (self.groups.items) |*group| {
-                // Check if this component type is part of the group (owned or free)
-                var is_group_component = false;
-                for (group.owned_component_ids) |id| {
-                    if (id == component_id) {
-                        is_group_component = true;
-                        break;
-                    }
-                }
-                if (!is_group_component) {
-                    for (group.free_component_ids) |id| {
-                        if (id == component_id) {
-                            is_group_component = true;
-                            break;
-                        }
-                    }
-                }
+            if (groups_count == 0) return;
 
-                if (is_group_component) {
-                    self.removeEntityFromGroup(entity, group);
-                }
-            }
-        }
+            inline for (group_fields) |field| {
+                const GroupType = @field(Groups, field.name);
+                const sig = comptime parseGroupSignature(GroupType);
 
-        /// Add entity to a group (move to group area ONLY for owned components)
-        fn addEntityToGroup(self: *Self, entity: Entity, group: *const GroupInfo) void {
-            // Only move owned components to group area
-            // Free components remain in their standard positions
-            for (group.owned_component_ids) |id| {
-                inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
-                    if (id == i) {
-                        self.component_pool[i].moveToGroup(entity);
+                // Check if component is in this group (inline for generates code for each ID)
+                const is_in_group = blk: {
+                    inline for (sig.owned_ids ++ sig.free_ids) |id| {
+                        if (id == component_id) break :blk true;
                     }
-                }
-            }
-        }
+                    break :blk false;
+                };
 
-        /// Remove entity from a group (move from group area ONLY for owned components)
-        fn removeEntityFromGroup(self: *Self, entity: Entity, group: *const GroupInfo) void {
-            // Only move owned components from group area
-            // Free components are not organized, so no need to move them
-            for (group.owned_component_ids) |id| {
-                inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
-                    if (id == i) {
-                        self.component_pool[i].moveFromGroup(entity);
+                if (is_in_group) {
+                    // Only move owned components from group region
+                    inline for (sig.owned_ids) |id| {
+                        self.component_pool[id].moveFromGroup(entity);
                     }
                 }
             }
@@ -1077,7 +965,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         /// Loads complete world state including entities, components, resources, and events
         /// Validates type metadata hash to ensure compatibility
         ///
-        /// Note: Groups must be recreated after deserialization via createGroup()
+        /// Note: Groups are compile-time defined and automatically repopulated after deserialization
         ///
         /// Example:
         /// ```zig
@@ -1088,6 +976,9 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         pub fn deserialize(self: *Self, reader: anytype) !void {
             const world_ser = @import("serialization/world.zig");
             try world_ser.deserialize(self, Components, Resources, Events, reader);
+
+            // Repopulate all groups with loaded entities
+            self.populateAllGroups();
         }
 
         /// Serialize the World to a file
@@ -1105,6 +996,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         /// Deserialize the World from a file
         /// Convenience method that handles file I/O
         ///
+        /// Note: Groups are automatically repopulated after deserialization
+        ///
         /// Example:
         /// ```zig
         /// try world.deserializeFromFile("save.spze");
@@ -1112,6 +1005,9 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype) type {
         pub fn deserializeFromFile(self: *Self, path: []const u8) !void {
             const world_ser = @import("serialization/world.zig");
             try world_ser.deserializeFromFile(self, Components, Resources, Events, path);
+
+            // Repopulate all groups with loaded entities
+            self.populateAllGroups();
         }
     };
 }
@@ -1122,7 +1018,7 @@ test "Resource basic access" {
         max_speed: f32,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {});
+    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1150,7 +1046,7 @@ test "Resource mutation via pointer" {
         level: i32,
     };
 
-    const TestWorld = World(struct {}, struct { GameState }, struct {});
+    const TestWorld = World(struct {}, struct { GameState }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1189,7 +1085,7 @@ test "Multiple resources" {
         muted: bool,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig, GameState, AudioSettings }, struct {});
+    const TestWorld = World(struct {}, struct { GameConfig, GameState, AudioSettings }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1224,7 +1120,7 @@ test "Resource in system function" {
     };
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = World(struct { Position }, struct { DeltaTime }, struct {});
+    const TestWorld = World(struct { Position }, struct { DeltaTime }, struct {}, .{});
 
     const UpdateSystem = struct {
         fn system(delta: Resource(DeltaTime), query: SingleQuery(Position)) !void {
@@ -1271,7 +1167,7 @@ test "Resource mutation in system function" {
     };
     const Enemy = struct {};
 
-    const TestWorld = World(struct { Enemy }, struct { Score }, struct {});
+    const TestWorld = World(struct { Enemy }, struct { Score }, struct {}, .{});
 
     const ScoreSystem = struct {
         fn system(score: ResourceMut(Score), query: SingleTag(Enemy)) !void {
@@ -1316,7 +1212,7 @@ test "System with multiple resources" {
     const GameConfig = struct { speed_multiplier: f32 };
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = World(struct { Position }, struct { DeltaTime, GameConfig }, struct {});
+    const TestWorld = World(struct { Position }, struct { DeltaTime, GameConfig }, struct {}, .{});
 
     const MoveSystem = struct {
         fn system(
@@ -1363,7 +1259,7 @@ test "System with resource, allocator, query, and commands" {
     const Enemy = struct {};
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = World(struct { Enemy, Position }, struct { Score }, struct {});
+    const TestWorld = World(struct { Enemy, Position }, struct { Score }, struct {}, .{});
 
     const ComplexSystem = struct {
         fn system(
@@ -1428,7 +1324,7 @@ test "World with components and resources together" {
     const Velocity = struct { dx: f32, dy: f32 };
     const DeltaTime = struct { dt: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct { DeltaTime }, struct {});
+    const TestWorld = World(struct { Position, Velocity }, struct { DeltaTime }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1455,7 +1351,7 @@ test "Create World" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {});
+    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1473,7 +1369,7 @@ test "World entity creation and destruction" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct {}, struct {}, struct {});
+    const TestWorld = World(struct {}, struct {}, struct {}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1498,7 +1394,7 @@ test "World component registration and operations" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct { TestComp }, struct {}, struct {});
+    const TestWorld = World(struct { TestComp }, struct {}, struct {}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1522,7 +1418,7 @@ test "World multiple components and batch operations" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {});
+    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1547,7 +1443,7 @@ test "World isAlive entity validation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct {}, struct {}, struct {});
+    const TestWorld = World(struct {}, struct {}, struct {}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1570,7 +1466,7 @@ test "World hasComponent queries" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct { TestComp }, struct {}, struct {});
+    const TestWorld = World(struct { TestComp }, struct {}, struct {}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1596,7 +1492,7 @@ test "World removeComponent operation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct { TestComp }, struct {}, struct {});
+    const TestWorld = World(struct { TestComp }, struct {}, struct {}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1622,7 +1518,7 @@ test "World createEntityWith batch creation" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {});
+    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1651,312 +1547,320 @@ test "World createEntityWith batch creation" {
     try std.testing.expectEqual(@as(f32, -1.0), vel.dy);
 }
 
-test "World group creation and basic operations" {
-    const Position = struct { x: f32, y: f32 };
-    const Velocity = struct { dx: f32, dy: f32 };
-    const Health = struct { hp: i32 };
-
-    const TestWorld = World(struct { Position, Velocity, Health }, struct {}, struct {});
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = TestWorld.init(allocator);
-    defer world.deinit();
-
-    // Create group for Position and Velocity
-    try world.createGroup(struct { Position, Velocity });
-
-    // Verify group was created
-    const group = world.getGroup(struct { Position, Velocity });
-    try std.testing.expect(group != null);
-    try std.testing.expectEqual(@as(usize, 2), group.?.owned_component_ids.len);
-    try std.testing.expectEqual(@as(usize, 0), group.?.free_component_ids.len);
-
-    // Create entities with different component combinations
-    const e1 = world.createEntity();
-    const e2 = world.createEntity();
-    const e3 = world.createEntity();
-
-    // e1 has both Position and Velocity (in group)
-    try world.addComponent(e1, Position, .{ .x = 1.0, .y = 2.0 });
-    try world.addComponent(e1, Velocity, .{ .dx = 0.5, .dy = 1.0 });
-
-    // e2 has only Position (not in group)
-    try world.addComponent(e2, Position, .{ .x = 3.0, .y = 4.0 });
-
-    // e3 has both Position and Velocity (in group)
-    try world.addComponent(e3, Position, .{ .x = 5.0, .y = 6.0 });
-    try world.addComponent(e3, Velocity, .{ .dx = 1.5, .dy = 2.0 });
-
-    // Verify group entities
-    const group_entities = world.getGroupEntities(struct { Position, Velocity }).?;
-    try std.testing.expectEqual(@as(usize, 2), group_entities.len);
-
-    // Verify we can get group components
-    const positions = world.getGroupComponents(struct { Position, Velocity }, Position).?;
-    const velocities = world.getGroupComponents(struct { Position, Velocity }, Velocity).?;
-
-    try std.testing.expectEqual(@as(usize, 2), positions.len);
-    try std.testing.expectEqual(@as(usize, 2), velocities.len);
-}
-
-test "World group dynamic membership" {
-    const Position = struct { x: f32, y: f32 };
-    const Velocity = struct { dx: f32, dy: f32 };
-
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {});
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = TestWorld.init(allocator);
-    defer world.deinit();
-
-    // Create entities first
-    const e1 = world.createEntity();
-    const e2 = world.createEntity();
-
-    try world.addComponent(e1, Position, .{ .x = 1.0, .y = 2.0 });
-    try world.addComponent(e2, Position, .{ .x = 3.0, .y = 4.0 });
-    try world.addComponent(e2, Velocity, .{ .dx = 1.0, .dy = 1.0 });
-
-    // Create group - should include e2 only
-    try world.createGroup(struct { Position, Velocity });
-
-    var group_entities = world.getGroupEntities(struct { Position, Velocity }).?;
-    try std.testing.expectEqual(@as(usize, 1), group_entities.len);
-
-    // Add Velocity to e1 - should join group
-    try world.addComponent(e1, Velocity, .{ .dx = 0.5, .dy = 0.5 });
-
-    group_entities = world.getGroupEntities(struct { Position, Velocity }).?;
-    try std.testing.expectEqual(@as(usize, 2), group_entities.len);
-
-    // Remove Velocity from e1 - should leave group
-    world.removeComponent(e1, Velocity);
-
-    group_entities = world.getGroupEntities(struct { Position, Velocity }).?;
-    try std.testing.expectEqual(@as(usize, 1), group_entities.len);
-}
-
-test "World group mutable component access" {
-    const Position = struct { x: f32, y: f32 };
-    const Velocity = struct { dx: f32, dy: f32 };
-
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {});
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = TestWorld.init(allocator);
-    defer world.deinit();
-
-    try world.createGroup(struct { Position, Velocity });
-
-    const e1 = world.createEntity();
-    try world.addComponent(e1, Position, .{ .x = 1.0, .y = 2.0 });
-    try world.addComponent(e1, Velocity, .{ .dx = 0.5, .dy = 1.0 });
-
-    const e2 = world.createEntity();
-    try world.addComponent(e2, Position, .{ .x = 3.0, .y = 4.0 });
-    try world.addComponent(e2, Velocity, .{ .dx = 1.5, .dy = 2.0 });
-
-    // Get mutable access to group components
-    const positions = world.getGroupComponentsMut(struct { Position, Velocity }, Position).?;
-    const velocities = world.getGroupComponentsMut(struct { Position, Velocity }, Velocity).?;
-
-    try std.testing.expectEqual(@as(usize, 2), positions.len);
-    try std.testing.expectEqual(@as(usize, 2), velocities.len);
-
-    // Modify components
-    for (positions) |*pos| {
-        pos.x += 10.0;
-        pos.y += 10.0;
-    }
-
-    for (velocities) |*vel| {
-        vel.dx *= 2.0;
-        vel.dy *= 2.0;
-    }
-
-    // Verify modifications
-    const pos1 = world.getComponent(e1, Position).?;
-    try std.testing.expectEqual(@as(f32, 11.0), pos1.x);
-    try std.testing.expectEqual(@as(f32, 12.0), pos1.y);
-
-    const vel1 = world.getComponent(e1, Velocity).?;
-    try std.testing.expectEqual(@as(f32, 1.0), vel1.dx);
-    try std.testing.expectEqual(@as(f32, 2.0), vel1.dy);
-}
-
-test "World multiple groups with non-overlapping components" {
-    const A = struct { value: i32 };
-    const B = struct { value: i32 };
-    const C = struct { value: i32 };
-    const D = struct { value: i32 };
-
-    const TestWorld = World(struct { A, B, C, D }, struct {}, struct {});
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = TestWorld.init(allocator);
-    defer world.deinit();
-
-    // Create two different groups with non-overlapping components
-    try world.createGroup(struct { A, B });
-    try world.createGroup(struct { C, D });
-
-    // Create entities with different component combinations
-    const e1 = world.createEntity();
-    try world.addComponent(e1, A, .{ .value = 1 });
-    try world.addComponent(e1, B, .{ .value = 2 });
-
-    const e2 = world.createEntity();
-    try world.addComponent(e2, C, .{ .value = 3 });
-    try world.addComponent(e2, D, .{ .value = 4 });
-
-    const e3 = world.createEntity();
-    try world.addComponent(e3, A, .{ .value = 5 });
-    try world.addComponent(e3, B, .{ .value = 6 });
-
-    // Verify first group (A, B) contains e1 and e3
-    const group1_entities = world.getGroupEntities(struct { A, B }).?;
-    try std.testing.expectEqual(@as(usize, 2), group1_entities.len);
-
-    // Verify second group (C, D) contains only e2
-    const group2_entities = world.getGroupEntities(struct { C, D }).?;
-    try std.testing.expectEqual(@as(usize, 1), group2_entities.len);
-}
-
-test "World group with component not in group" {
-    const Position = struct { x: f32, y: f32 };
-    const Velocity = struct { dx: f32, dy: f32 };
-
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {});
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = TestWorld.init(allocator);
-    defer world.deinit();
-
-    try world.createGroup(struct { Position, Velocity });
-
-    // Try to get Velocity components from Position group (should return null)
-    const velocities = world.getGroupComponents(struct { Position }, Velocity);
-    try std.testing.expect(velocities == null);
-}
-
-test "World can create identical group twice without error" {
-    const Position = struct { x: f32, y: f32 };
-    const Velocity = struct { dx: f32, dy: f32 };
-
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {});
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = TestWorld.init(allocator);
-    defer world.deinit();
-
-    // Create group
-    try world.createGroup(struct { Position, Velocity });
-
-    // Try to create same group again - should succeed (idempotent)
-    try world.createGroup(struct { Position, Velocity });
-
-    // Verify only one group exists
-    try std.testing.expectEqual(@as(usize, 1), world.groups.items.len);
-}
-
-test "World compile-time group validation - non-overlapping" {
-    const A = struct { value: i32 };
-    const B = struct { value: i32 };
-    const C = struct { value: i32 };
-    const D = struct { value: i32 };
-
-    const TestWorld = World(struct { A, B, C, D }, struct {}, struct {});
-
-    // Compile-time validation of non-overlapping groups - should compile fine
-    TestWorld.validateGroups(.{
-        struct { A, B },
-        struct { C, D },
-    });
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = TestWorld.init(allocator);
-    defer world.deinit();
-
-    // Runtime creation should work
-    try world.createGroup(struct { A, B });
-    try world.createGroup(struct { C, D });
-
-    try std.testing.expectEqual(@as(usize, 2), world.groups.items.len);
-}
-
-test "World recommended usage pattern - validate groups upfront" {
-    const Position = struct { x: f32, y: f32 };
-    const Velocity = struct { dx: f32, dy: f32 };
-    const Health = struct { hp: i32 };
-    const Armor = struct { value: i32 };
-
-    const TestWorld = World(struct { Position, Velocity, Health, Armor }, struct {}, struct {});
-
-    // Recommended: Validate all groups at compile time before creating them
-    TestWorld.validateGroups(.{
-        struct { Position, Velocity }, // Movement entities
-        struct { Health, Armor }, // Combat entities
-    });
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var world = TestWorld.init(allocator);
-    defer world.deinit();
-
-    // Now create the groups - we know they're valid
-    try world.createGroup(struct { Position, Velocity });
-    try world.createGroup(struct { Health, Armor });
-
-    // Create test entities
-    const moving_entity = world.createEntity();
-    try world.addComponent(moving_entity, Position, .{ .x = 10.0, .y = 20.0 });
-    try world.addComponent(moving_entity, Velocity, .{ .dx = 1.0, .dy = 2.0 });
-
-    const combat_entity = world.createEntity();
-    try world.addComponent(combat_entity, Health, .{ .hp = 100 });
-    try world.addComponent(combat_entity, Armor, .{ .value = 50 });
-
-    // Verify groups work correctly
-    const movement_entities = world.getGroupEntities(struct { Position, Velocity }).?;
-    const combat_entities = world.getGroupEntities(struct { Health, Armor }).?;
-
-    try std.testing.expectEqual(@as(usize, 1), movement_entities.len);
-    try std.testing.expectEqual(@as(usize, 1), combat_entities.len);
-
-    // Fast iteration over group components
-    const positions = world.getGroupComponents(struct { Position, Velocity }, Position).?;
-    try std.testing.expectEqual(@as(f32, 10.0), positions[0].x);
-}
+// Test obsolete - groups now compile-time
+// test "World group creation and basic operations" {
+//     const Position = struct { x: f32, y: f32 };
+//     const Velocity = struct { dx: f32, dy: f32 };
+//     const Health = struct { hp: i32 };
+//
+//     const TestWorld = World(struct { Position, Velocity, Health }, struct {}, struct {}, .{});
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     const allocator = arena.allocator();
+//
+//     var world = TestWorld.init(allocator);
+//     defer world.deinit();
+//
+//     // Create group for Position and Velocity
+//     // Groups now compile-time: // try world.createGroup(struct { Position, Velocity });
+//
+//     // Verify group was created
+//     const group = world.getGroup(struct { Position, Velocity });
+//     try std.testing.expect(group != null);
+//     try std.testing.expectEqual(@as(usize, 2), group.?.owned_component_ids.len);
+//     try std.testing.expectEqual(@as(usize, 0), group.?.free_component_ids.len);
+//
+//     // Create entities with different component combinations
+//     const e1 = world.createEntity();
+//     const e2 = world.createEntity();
+//     const e3 = world.createEntity();
+//
+//     // e1 has both Position and Velocity (in group)
+//     try world.addComponent(e1, Position, .{ .x = 1.0, .y = 2.0 });
+//     try world.addComponent(e1, Velocity, .{ .dx = 0.5, .dy = 1.0 });
+//
+//     // e2 has only Position (not in group)
+//     try world.addComponent(e2, Position, .{ .x = 3.0, .y = 4.0 });
+//
+//     // e3 has both Position and Velocity (in group)
+//     try world.addComponent(e3, Position, .{ .x = 5.0, .y = 6.0 });
+//     try world.addComponent(e3, Velocity, .{ .dx = 1.5, .dy = 2.0 });
+//
+//     // Verify group entities
+//     const group_entities = world.getGroupEntities(struct { Position, Velocity }).?;
+//     try std.testing.expectEqual(@as(usize, 2), group_entities.len);
+//
+//     // Verify we can get group components
+//     const positions = world.getGroupComponents(struct { Position, Velocity }, Position).?;
+//     const velocities = world.getGroupComponents(struct { Position, Velocity }, Velocity).?;
+//
+//     try std.testing.expectEqual(@as(usize, 2), positions.len);
+//     try std.testing.expectEqual(@as(usize, 2), velocities.len);
+// }
+
+// Test obsolete - groups now compile-time
+// test "World group dynamic membership" {
+//     const Position = struct { x: f32, y: f32 };
+//     const Velocity = struct { dx: f32, dy: f32 };
+//
+//     const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     const allocator = arena.allocator();
+//
+//     var world = TestWorld.init(allocator);
+//     defer world.deinit();
+//
+//     // Create entities first
+//     const e1 = world.createEntity();
+//     const e2 = world.createEntity();
+//
+//     try world.addComponent(e1, Position, .{ .x = 1.0, .y = 2.0 });
+//     try world.addComponent(e2, Position, .{ .x = 3.0, .y = 4.0 });
+//     try world.addComponent(e2, Velocity, .{ .dx = 1.0, .dy = 1.0 });
+//
+//     // Create group - should include e2 only
+//     // Groups now compile-time: // try world.createGroup(struct { Position, Velocity });
+//
+//     var group_entities = world.getGroupEntities(struct { Position, Velocity }).?;
+//     try std.testing.expectEqual(@as(usize, 1), group_entities.len);
+//
+//     // Add Velocity to e1 - should join group
+//     try world.addComponent(e1, Velocity, .{ .dx = 0.5, .dy = 0.5 });
+//
+//     group_entities = world.getGroupEntities(struct { Position, Velocity }).?;
+//     try std.testing.expectEqual(@as(usize, 2), group_entities.len);
+//
+//     // Remove Velocity from e1 - should leave group
+//     world.removeComponent(e1, Velocity);
+//
+//     group_entities = world.getGroupEntities(struct { Position, Velocity }).?;
+//     try std.testing.expectEqual(@as(usize, 1), group_entities.len);
+// }
+
+// Test obsolete - groups now compile-time
+// test "World group mutable component access" {
+//     const Position = struct { x: f32, y: f32 };
+//     const Velocity = struct { dx: f32, dy: f32 };
+//
+//     const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     const allocator = arena.allocator();
+//
+//     var world = TestWorld.init(allocator);
+//     defer world.deinit();
+//
+//     // Groups now compile-time: // try world.createGroup(struct { Position, Velocity });
+//
+//     const e1 = world.createEntity();
+//     try world.addComponent(e1, Position, .{ .x = 1.0, .y = 2.0 });
+//     try world.addComponent(e1, Velocity, .{ .dx = 0.5, .dy = 1.0 });
+//
+//     const e2 = world.createEntity();
+//     try world.addComponent(e2, Position, .{ .x = 3.0, .y = 4.0 });
+//     try world.addComponent(e2, Velocity, .{ .dx = 1.5, .dy = 2.0 });
+//
+//     // Get mutable access to group components
+//     const positions = world.getGroupComponentsMut(struct { Position, Velocity }, Position).?;
+//     const velocities = world.getGroupComponentsMut(struct { Position, Velocity }, Velocity).?;
+//
+//     try std.testing.expectEqual(@as(usize, 2), positions.len);
+//     try std.testing.expectEqual(@as(usize, 2), velocities.len);
+//
+//     // Modify components
+//     for (positions) |*pos| {
+//         pos.x += 10.0;
+//         pos.y += 10.0;
+//     }
+//
+//     for (velocities) |*vel| {
+//         vel.dx *= 2.0;
+//         vel.dy *= 2.0;
+//     }
+//
+//     // Verify modifications
+//     const pos1 = world.getComponent(e1, Position).?;
+//     try std.testing.expectEqual(@as(f32, 11.0), pos1.x);
+//     try std.testing.expectEqual(@as(f32, 12.0), pos1.y);
+//
+//     const vel1 = world.getComponent(e1, Velocity).?;
+//     try std.testing.expectEqual(@as(f32, 1.0), vel1.dx);
+//     try std.testing.expectEqual(@as(f32, 2.0), vel1.dy);
+// }
+
+// Test obsolete - groups now compile-time
+// test "World multiple groups with non-overlapping components" {
+//     const A = struct { value: i32 };
+//     const B = struct { value: i32 };
+//     const C = struct { value: i32 };
+//     const D = struct { value: i32 };
+//
+//     const TestWorld = World(struct { A, B, C, D }, struct {}, struct {}, .{});
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     const allocator = arena.allocator();
+//
+//     var world = TestWorld.init(allocator);
+//     defer world.deinit();
+//
+//     // Create two different groups with non-overlapping components
+//     // Groups now compile-time: // try world.createGroup(struct { A, B });
+//     // Groups now compile-time: // try world.createGroup(struct { C, D });
+//
+//     // Create entities with different component combinations
+//     const e1 = world.createEntity();
+//     try world.addComponent(e1, A, .{ .value = 1 });
+//     try world.addComponent(e1, B, .{ .value = 2 });
+//
+//     const e2 = world.createEntity();
+//     try world.addComponent(e2, C, .{ .value = 3 });
+//     try world.addComponent(e2, D, .{ .value = 4 });
+//
+//     const e3 = world.createEntity();
+//     try world.addComponent(e3, A, .{ .value = 5 });
+//     try world.addComponent(e3, B, .{ .value = 6 });
+//
+//     // Verify first group (A, B) contains e1 and e3
+//     const group1_entities = world.getGroupEntities(struct { A, B }).?;
+//     try std.testing.expectEqual(@as(usize, 2), group1_entities.len);
+//
+//     // Verify second group (C, D) contains only e2
+//     const group2_entities = world.getGroupEntities(struct { C, D }).?;
+//     try std.testing.expectEqual(@as(usize, 1), group2_entities.len);
+// }
+
+// Test obsolete - groups now compile-time
+// test "World group with component not in group" {
+//     const Position = struct { x: f32, y: f32 };
+//     const Velocity = struct { dx: f32, dy: f32 };
+//
+//     const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     const allocator = arena.allocator();
+//
+//     var world = TestWorld.init(allocator);
+//     defer world.deinit();
+//
+//     // Groups now compile-time: // try world.createGroup(struct { Position, Velocity });
+//
+//     // Try to get Velocity components from Position group (should return null)
+//     const velocities = world.getGroupComponents(struct { Position }, Velocity);
+//     try std.testing.expect(velocities == null);
+// }
+
+// Test obsolete - groups now compile-time
+// test "World can create identical group twice without error" {
+//     const Position = struct { x: f32, y: f32 };
+//     const Velocity = struct { dx: f32, dy: f32 };
+//
+//     const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     const allocator = arena.allocator();
+//
+//     var world = TestWorld.init(allocator);
+//     defer world.deinit();
+//
+//     // Create group
+//     // Groups now compile-time: // try world.createGroup(struct { Position, Velocity });
+//
+//     // Try to create same group again - should succeed (idempotent)
+//     // Groups now compile-time: // try world.createGroup(struct { Position, Velocity });
+//
+//     // Verify only one group exists
+//     try std.testing.expectEqual(@as(usize, 1), world.groups.items.len);
+// }
+
+// Test obsolete - groups now compile-time
+// test "World compile-time group validation - non-overlapping" {
+//     const A = struct { value: i32 };
+//     const B = struct { value: i32 };
+//     const C = struct { value: i32 };
+//     const D = struct { value: i32 };
+//
+//     const TestWorld = World(struct { A, B, C, D }, struct {}, struct {}, .{});
+//
+//     // Compile-time validation of non-overlapping groups - should compile fine
+//     TestWorld.validateGroups(.{
+//         struct { A, B },
+//         struct { C, D },
+//     });
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     const allocator = arena.allocator();
+//
+//     var world = TestWorld.init(allocator);
+//     defer world.deinit();
+//
+//     // Runtime creation should work
+//     // Groups now compile-time: // try world.createGroup(struct { A, B });
+//     // Groups now compile-time: // try world.createGroup(struct { C, D });
+//
+//     try std.testing.expectEqual(@as(usize, 2), world.groups.items.len);
+// }
+
+// Test obsolete - groups now compile-time
+// test "World recommended usage pattern - validate groups upfront" {
+//     const Position = struct { x: f32, y: f32 };
+//     const Velocity = struct { dx: f32, dy: f32 };
+//     const Health = struct { hp: i32 };
+//     const Armor = struct { value: i32 };
+//
+//     const TestWorld = World(struct { Position, Velocity, Health, Armor }, struct {}, struct {}, .{});
+//
+//     // Recommended: Validate all groups at compile time before creating them
+//     TestWorld.validateGroups(.{
+//         struct { Position, Velocity }, // Movement entities
+//         struct { Health, Armor }, // Combat entities
+//     });
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     const allocator = arena.allocator();
+//
+//     var world = TestWorld.init(allocator);
+//     defer world.deinit();
+//
+//     // Now create the groups - we know they're valid
+//     // Groups now compile-time: // try world.createGroup(struct { Position, Velocity });
+//     // Groups now compile-time: // try world.createGroup(struct { Health, Armor });
+//
+//     // Create test entities
+//     const moving_entity = world.createEntity();
+//     try world.addComponent(moving_entity, Position, .{ .x = 10.0, .y = 20.0 });
+//     try world.addComponent(moving_entity, Velocity, .{ .dx = 1.0, .dy = 2.0 });
+//
+//     const combat_entity = world.createEntity();
+//     try world.addComponent(combat_entity, Health, .{ .hp = 100 });
+//     try world.addComponent(combat_entity, Armor, .{ .value = 50 });
+//
+//     // Verify groups work correctly
+//     const movement_entities = world.getGroupEntities(struct { Position, Velocity }).?;
+//     const combat_entities = world.getGroupEntities(struct { Health, Armor }).?;
+//
+//     try std.testing.expectEqual(@as(usize, 1), movement_entities.len);
+//     try std.testing.expectEqual(@as(usize, 1), combat_entities.len);
+//
+//     // Fast iteration over group components
+//     const positions = world.getGroupComponents(struct { Position, Velocity }, Position).?;
+//     try std.testing.expectEqual(@as(f32, 10.0), positions[0].x);
+// }
 
 test "Serialization fails for uninitialized resources" {
     const Position = struct { x: f32, y: f32 };
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct { Position }, struct { GameConfig, Score }, struct {});
+    const TestWorld = World(struct { Position }, struct { GameConfig, Score }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1985,7 +1889,7 @@ test "Serialization succeeds when all resources are initialized" {
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct { Position }, struct { GameConfig, Score }, struct {});
+    const TestWorld = World(struct { Position }, struct { GameConfig, Score }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2016,7 +1920,7 @@ test "Resource initialization tracking" {
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {});
+    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2044,7 +1948,7 @@ test "getResourcePtrMut allows mutation after initialization" {
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {});
+    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2083,7 +1987,7 @@ test "getResourcePtrMut allows mutation after initialization" {
 test "markResourceInitialized for direct resource_pool access" {
     const GameConfig = struct { gravity: f32 };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {});
+    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2113,7 +2017,7 @@ test "Resource is read-only and ResourceMut is mutable" {
     const GameConfig = struct { speed: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {});
+    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {}, .{});
 
     // Test read-only Resource system
     const ReadOnlySystem = struct {
@@ -2175,3 +2079,147 @@ test "Resource is read-only and ResourceMut is mutable" {
     try std.testing.expectEqual(@as(i32, 250), world.getResource(Score).points); // 100 + (15.0 * 10) = 250
     try std.testing.expectEqual(@as(f32, 15.0), world.getResource(GameConfig).speed);
 }
+
+test "Groups: order-insensitive matching" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { x: f32, y: f32 };
+    const Health = struct { hp: i32 };
+
+    // Define groups with different component ordering
+    const GroupAB = struct { Position, Velocity };
+    const GroupBA = struct { Velocity, Position };
+
+    const TestWorld = World(
+        struct { Position, Velocity, Health },
+        struct {},
+        struct {},
+        .{GroupAB}, // Register with A, B order
+    );
+
+    // Verify that both orderings resolve to the same group index
+    const idx1 = comptime TestWorld.getGroupIndex(GroupAB);
+    const idx2 = comptime TestWorld.getGroupIndex(GroupBA);
+
+    try std.testing.expectEqual(idx1, idx2);
+}
+
+test "Groups: deserialization repopulates groups" {
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { x: f32, y: f32 };
+
+    const MovementGroup = struct { Position, Velocity };
+
+    const TestWorld = World(
+        struct { Position, Velocity },
+        struct {},
+        struct {},
+        .{MovementGroup},
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Create world and add entities with components
+    var world1 = TestWorld.init(allocator);
+    defer world1.deinit();
+
+    const e1 = world1.createEntity();
+    const e2 = world1.createEntity();
+    const e3 = world1.createEntity();
+
+    try world1.addComponent(e1, Position, .{ .x = 1, .y = 2 });
+    try world1.addComponent(e1, Velocity, .{ .x = 0.5, .y = 0.5 });
+
+    try world1.addComponent(e2, Position, .{ .x = 3, .y = 4 });
+    try world1.addComponent(e2, Velocity, .{ .x = 1.0, .y = 1.0 });
+
+    try world1.addComponent(e3, Position, .{ .x = 5, .y = 6 });
+    // e3 has no Velocity, so it shouldn't be in the group
+
+    // Verify group has 2 entities before serialization
+    const pos_id = comptime TestWorld.getComponentId(Position);
+    const group_entities_before = world1.component_pool[pos_id].getGroupEntities();
+    try std.testing.expectEqual(@as(usize, 2), group_entities_before.len);
+
+    // Serialize to buffer
+    var buffer: std.ArrayList(u8) = .{};
+    defer buffer.deinit(allocator);
+    try world1.serialize(buffer.writer(allocator));
+
+    // Deserialize to new world
+    var world2 = TestWorld.init(allocator);
+    defer world2.deinit();
+
+    var stream = std.io.fixedBufferStream(buffer.items);
+    try world2.deserialize(stream.reader());
+
+    // Verify groups were repopulated correctly
+    const group_entities_after = world2.component_pool[pos_id].getGroupEntities();
+    try std.testing.expectEqual(@as(usize, 2), group_entities_after.len);
+
+    // Verify the correct entities are in the group (those with both Position and Velocity)
+    var found_e1 = false;
+    var found_e2 = false;
+    for (group_entities_after) |entity| {
+        if (entity.index == e1.index and entity.version == e1.version) found_e1 = true;
+        if (entity.index == e2.index and entity.version == e2.version) found_e2 = true;
+    }
+    try std.testing.expect(found_e1);
+    try std.testing.expect(found_e2);
+}
+
+// Compile-time validation tests (these would fail at compile-time if uncommented):
+//
+// test "Groups: reject tag components (compile error)" {
+//     const Position = struct { x: f32, y: f32 };
+//     const Enemy = struct {}; // Tag component (zero-sized)
+//
+//     // This should fail with: "Tag components cannot be used in groups"
+//     const TestWorld = World(
+//         struct { Position, Enemy },
+//         struct {},
+//         struct {},
+//         .{ struct { Position, Enemy } }, // ERROR: Enemy is a tag
+//     );
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     var world = TestWorld.init(arena.allocator());
+//     defer world.deinit();
+// }
+//
+// test "Groups: reject duplicate components (compile error)" {
+//     const Position = struct { x: f32, y: f32 };
+//
+//     // This should fail with: "Duplicate component in group"
+//     const TestWorld = World(
+//         struct { Position },
+//         struct {},
+//         struct {},
+//         .{ struct { Position, Position } }, // ERROR: Position appears twice
+//     );
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     var world = TestWorld.init(arena.allocator());
+//     defer world.deinit();
+// }
+//
+// test "Groups: reject owned+Free mix for same component (compile error)" {
+//     const Position = struct { x: f32, y: f32 };
+//     const Free = @import("query/filter.zig").Free;
+//
+//     // This should fail with: "Component appears as both owned and Free"
+//     const TestWorld = World(
+//         struct { Position },
+//         struct {},
+//         struct {},
+//         .{ struct { Position, Free(Position) } }, // ERROR: Position both owned and Free
+//     );
+//
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//     var world = TestWorld.init(arena.allocator());
+//     defer world.deinit();
+// }

@@ -30,15 +30,17 @@ const Velocity = struct {
 // =============================================================================
 // Step 2: Define the World Type
 // =============================================================================
-// World is parameterized by three tuples: (Components, Resources, Events)
+// World is parameterized by four tuples: (Components, Resources, Events, Groups)
 // - Components: Data attached to entities
 // - Resources: Global singleton data (covered in example 03)
 // - Events: Frame-to-frame messages (covered in example 08)
+// - Groups: Compile-time group definitions (none for this minimal example)
 
 const World = sparze.World(
     struct { Position, Velocity }, // Components this world can store
     struct {}, // No resources for now
     struct {}, // No events for now
+    .{}, // No groups for now
 );
 
 pub fn main() !void {
