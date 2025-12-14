@@ -15,7 +15,8 @@ Expert guidance for building high-performance Entity Component System applicatio
 const World = sparze.World(
     struct { Position, Velocity, Health },  // Components
     struct { DeltaTime, Score },            // Resources
-    struct { CollisionEvent }               // Events
+    struct { CollisionEvent },              // Events
+    .{ struct { Position, Velocity } }      // Groups (compile-time)
 );
 ```
 
@@ -62,8 +63,6 @@ const entity2 = try commands.createEntityWith(.{
     Velocity{ .x = 1, .y = 0 },
 });
 
-try commands.createGroup(struct { Position, Velocity });
-
 // Resources
 commands.setResource(DeltaTime, .{ .dt = 0.016 });
 const dt = commands.getResource(DeltaTime);
@@ -82,7 +81,7 @@ try commands.removeTag(entity, Enemy);
 try commands.destroyEntity(entity);
 ```
 
-**Timing rules**: Entity creation, resources, groups, and serialization are immediate (need results now). Component/tag add/remove and entity destruction are deferred (safe during iteration).
+**Timing rules**: Entity creation, resources, and serialization are immediate (need results now). Component/tag add/remove and entity destruction are deferred (safe during iteration).
 
 **Why Commands?** Prevents mid-iteration structural changes that could invalidate iterators and corrupt memory. Adding/removing components during query iteration would shift array indices, causing systems to skip entities or process the same entity twice.
 
@@ -138,14 +137,19 @@ while (it.next()) |entity| {
 
 ### Group(struct { ... })
 
-**Fastest** multi-component iteration. Requires `world.createGroup()` setup. Entities organized at array start for cache-friendly access.
+**Fastest** multi-component iteration. Defined at compile-time in World signature. Entities organized at array start for cache-friendly access.
 
 **Why fastest?** CPU cache loads 64 bytes per memory access. Sequential array access keeps data in cache, while Query's scattered lookups cause cache misses (100x+ slower than cache hits). Critical for hot-path systems processing 1000s of entities per frame.
 
 ```zig
-// Setup (once, typically at startup)
+// Define groups in World signature
 const MovementGroup = struct { Position, Velocity };
-try world.createGroup(MovementGroup);
+const World = sparze.World(
+    struct { Position, Velocity },
+    struct {},
+    struct {},
+    .{ MovementGroup },  // Groups defined at compile-time
+);
 
 // System
 fn movementSystem(group: Group(MovementGroup)) !void {
@@ -161,10 +165,15 @@ fn movementSystem(group: Group(MovementGroup)) !void {
 **Partial-owning groups**: Use `Free(Component)` for components owned by other groups:
 
 ```zig
-// Group 1 owns Position, uses Health as free
-try world.createGroup(struct { Position, Free(Health) });
-// Group 2 can own Health
-try world.createGroup(struct { Health, Shield });
+// Define both groups in World signature
+const PhysicsGroup = struct { Position, Free(Health) };
+const CombatGroup = struct { Health, Shield };
+const World = sparze.World(
+    Components,
+    Resources,
+    Events,
+    .{ PhysicsGroup, CombatGroup },
+);
 ```
 
 Access free components via `group.getComponent(entity, T)` instead of array access.
@@ -346,20 +355,21 @@ const dt = world.getResource(DeltaTime);
 
 ```zig
 const MovementGroup = struct { Position, Velocity };
-const RenderGroup = struct { Position, Sprite };
+const RenderGroup = struct { Sprite, Layer, Free(Position) };
 
-World.validateGroups(.{ MovementGroup, RenderGroup });  // Compile-time check
+// Validate groups at compile-time (catches ownership conflicts)
+World.validateGroups(.{ MovementGroup, RenderGroup });
 ```
 
-- Create groups early (startup) to organize entity layout
+- Define groups in World signature for compile-time organization
 
 ## Common Patterns
 
-**Startup**: Initialize resources with `initResources()`, create groups with `createGroup()`, spawn initial entities with `createEntityWith()`.
+**Startup**: Define groups in World signature, initialize resources with `initResources()`, spawn initial entities with `createEntityWith()`.
 
 **Component design**: POD structs for data (auto-serializable), empty structs for tags (1-bit storage), custom `Serializer` for complex types, `pub const serialized = false` to exclude from saves.
 
-**Serialization**: `commands.serializeToFile("save.dat")` / `deserializeFromFile("save.dat")`. Recreate groups after loading. Entities, components, resources, and read events are saved; groups and command buffers are not.
+**Serialization**: `commands.serializeToFile("save.dat")` / `deserializeFromFile("save.dat")`. Entities, components, resources, and read events are saved; command buffers are not. Groups are compile-time defined and automatically populated on deserialization.
 
 **📖 Full examples**: @docs/SYSTEM_PATTERNS.md - Startup systems, conditional processing, state machines, event chains
 

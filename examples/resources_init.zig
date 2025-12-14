@@ -56,6 +56,7 @@ const World = sparze.World(
     struct { Position, Velocity }, // Components
     struct { DeltaTime, GameTime, GameConfig, GameState }, // Resources
     struct {}, // Events
+    .{}, // Groups
 );
 
 // =============================================================================

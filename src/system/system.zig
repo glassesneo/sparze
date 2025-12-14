@@ -262,7 +262,6 @@ pub fn Commands(comptime World: type) type {
         ///
         /// Note: Pending commands in the command buffer are NOT serialized.
         /// Best practice: serialize between frames (after endFrame(), before beginFrame()).
-        /// Groups must be recreated after deserialization.
         pub fn serialize(self: Self, writer: anytype) !void {
             return self.world.serialize(writer);
         }
@@ -270,7 +269,7 @@ pub fn Commands(comptime World: type) type {
         /// Deserialize World state from reader
         ///
         /// Note: This replaces the current World state. Any pending commands are cleared.
-        /// Groups must be recreated after deserialization using world.createGroup().
+        /// Groups are compile-time defined and automatically populated on deserialization.
         pub fn deserialize(self: Self, reader: anytype) !void {
             return self.world.deserialize(reader);
         }
@@ -279,7 +278,6 @@ pub fn Commands(comptime World: type) type {
         ///
         /// Note: Pending commands in the command buffer are NOT serialized.
         /// Best practice: serialize between frames (after endFrame(), before beginFrame()).
-        /// Groups must be recreated after deserialization.
         pub fn serializeToFile(self: Self, path: []const u8) !void {
             return self.world.serializeToFile(path);
         }
@@ -287,27 +285,9 @@ pub fn Commands(comptime World: type) type {
         /// Deserialize World state from file (convenience wrapper)
         ///
         /// Note: This replaces the current World state. Any pending commands are cleared.
-        /// Groups must be recreated after deserialization using commands.createGroup().
+        /// Groups are compile-time defined and automatically populated on deserialization.
         pub fn deserializeFromFile(self: Self, path: []const u8) !void {
             return self.world.deserializeFromFile(path);
-        }
-
-        /// Create a full-owning group for the given component types (immediate execution)
-        ///
-        /// Groups optimize multi-component iteration by organizing entities with all
-        /// specified components at the start of packed arrays for cache-friendly access.
-        ///
-        /// Note: This operation executes immediately (not deferred like other Commands).
-        /// Safe to call multiple times - returns early if group already exists.
-        ///
-        /// Example:
-        /// ```zig
-        /// fn setupSystem(commands: anytype) !void {
-        ///     try commands.createGroup(struct { Position, Velocity });
-        /// }
-        /// ```
-        pub fn createGroup(self: Self, comptime GroupComponents: type) !void {
-            return self.world.createGroup(GroupComponents);
         }
 
         // ====================================================================

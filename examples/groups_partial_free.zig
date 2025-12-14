@@ -27,12 +27,6 @@ const Name = struct { value: [32]u8, len: u8 };
 const Sprite = struct { texture_id: u32, layer: i32 };
 const Color = struct { r: u8, g: u8, b: u8, a: u8 };
 
-const World = sparze.World(
-    struct { Position, Velocity, Health, Name, Sprite, Color },
-    struct {},
-    struct {},
-);
-
 // =============================================================================
 // Group Type Definitions
 // =============================================================================
@@ -50,6 +44,18 @@ const RenderGroup = struct { sparze.Free(Position), Sprite, Color };
 // Health management group: Owns Health, Position is free
 // - This allows Health to be in different groups with different ownership
 const HealthGroup = struct { Health, sparze.Free(Position) };
+
+// =============================================================================
+// World Definition with Compile-Time Groups
+// =============================================================================
+// Groups are defined in the World signature and automatically created!
+
+const World = sparze.World(
+    struct { Position, Velocity, Health, Name, Sprite, Color }, // Components
+    struct {}, // Resources
+    struct {}, // Events
+    .{ MovementGroup, RenderGroup, HealthGroup }, // Groups (compile-time!)
+);
 
 // =============================================================================
 // Systems Using Partial-Owning Groups
@@ -149,23 +155,13 @@ pub fn main() !void {
     defer world.deinit();
 
     // ==========================================================================
-    // Create Groups - Order Matters!
+    // Compile-Time Groups - Automatically Created!
     // ==========================================================================
-    std.debug.print("--- Creating partial-owning groups ---\n", .{});
-
-    // Group 1: Owns Position, Velocity; Health is Free
-    try world.createGroup(MovementGroup);
+    std.debug.print("--- Partial-owning groups (compile-time) ---\n", .{});
     std.debug.print("  MovementGroup: owns {{ Position, Velocity }}, free {{ Health }}\n", .{});
-
-    // Group 2: Owns Sprite, Color; Position is Free
-    // This works because Position is marked as Free (not owned)
-    try world.createGroup(RenderGroup);
     std.debug.print("  RenderGroup: owns {{ Sprite, Color }}, free {{ Position }}\n", .{});
-
-    // Group 3: Owns Health; Position is Free
-    // Health is free in MovementGroup, so HealthGroup can own it
-    try world.createGroup(HealthGroup);
-    std.debug.print("  HealthGroup: owns {{ Health }}, free {{ Position }}\n\n", .{});
+    std.debug.print("  HealthGroup: owns {{ Health }}, free {{ Position }}\n", .{});
+    std.debug.print("  All groups automatically created and validated at compile-time!\n\n", .{});
 
     // ==========================================================================
     // Create Entities
@@ -205,18 +201,8 @@ pub fn main() !void {
     // Check Group Membership
     // ==========================================================================
     std.debug.print("--- Group membership ---\n", .{});
-
-    if (world.getGroupEntities(MovementGroup)) |entities| {
-        std.debug.print("  MovementGroup: {} entities\n", .{entities.len});
-    }
-
-    if (world.getGroupEntities(RenderGroup)) |entities| {
-        std.debug.print("  RenderGroup: {} entities\n", .{entities.len});
-    }
-
-    if (world.getGroupEntities(HealthGroup)) |entities| {
-        std.debug.print("  HealthGroup: {} entities\n", .{entities.len});
-    }
+    // Group membership is now automatic - entities are in groups when they have all required components
+    // No runtime API needed to query group membership
     std.debug.print("\n", .{});
 
     // ==========================================================================

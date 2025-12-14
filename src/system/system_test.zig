@@ -12,7 +12,7 @@ const SingleTag = root.SingleTag;
 test "System function with Allocator parameter" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
 
     const AllocatorSystem = struct {
         fn system(allocator: std.mem.Allocator) !void {
@@ -40,7 +40,7 @@ test "System function with Allocator parameter" {
 test "System function with Allocator and query filter parameters" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
 
     const MixedSystem = struct {
         fn system(allocator: std.mem.Allocator, query: SingleQuery(Position)) !void {
@@ -79,7 +79,7 @@ test "System function with Allocator and query filter parameters" {
 test "System function with Allocator and Commands parameters" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
 
     const SpawnSystem = struct {
         fn system(allocator: std.mem.Allocator, commands: anytype) !void {
@@ -122,7 +122,12 @@ test "System function with Allocator, query filter, and Commands parameters" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(
+        struct { Position, Velocity },
+        struct {},
+        struct {},
+        .{struct { Position, Velocity }},
+    );
 
     const ComplexSystem = struct {
         fn system(
@@ -159,7 +164,7 @@ test "System function with Allocator, query filter, and Commands parameters" {
     var world = TestWorld.init(allocator);
     defer world.deinit();
 
-    try world.createGroup(struct { Position, Velocity });
+    // Groups now compile-time: // try world.createGroup(struct { Position, Velocity });
 
     // Create test entities
     const e1 = world.createEntity();
@@ -180,7 +185,7 @@ test "System function with Allocator, query filter, and Commands parameters" {
 }
 
 test "System function verifies allocator is world allocator" {
-    const TestWorld = @import("../world.zig").World(struct {}, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct {}, struct {}, struct {}, .{});
 
     const CheckAllocatorSystem = struct {
         var captured_allocator: ?std.mem.Allocator = null;
@@ -209,7 +214,7 @@ test "Commands with frame-based execution" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Enemy = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Enemy }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Enemy }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -263,7 +268,7 @@ test "Commands remove and destroy operations" {
     const Health = struct { hp: i32 };
     const Dead = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Health, Dead }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Health, Dead }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -320,7 +325,7 @@ test "Commands createEntityWith convenience method" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -355,7 +360,7 @@ test "Commands createEntityWith convenience method" {
 test "Commands destroyEntity handles multiple destroy commands for same entity" {
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Health }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Health }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -428,7 +433,7 @@ test "Commands prevent zombie entity: destroy then add component" {
     const Position = struct { x: f32, y: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Health }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Health }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -474,7 +479,7 @@ test "Commands prevent zombie entity: destroy then remove component" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -516,7 +521,7 @@ test "Commands prevent zombie entity: destroy then remove component" {
 test "Commands handle entity recycling with version validation" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {});
+    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

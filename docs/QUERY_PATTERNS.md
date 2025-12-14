@@ -36,7 +36,7 @@ START: Need to iterate entities with components?
 | `SingleTag(T)` | No | No | Direct array | Fastest | Single tag iteration |
 | `Query(struct {...})` | No | Optional, Exclude | Sparse set lookup | Good | Flexible multi-component queries |
 | `TagQuery(struct {...})` | No | Optional, Exclude | Bitset lookup | Good | Tag-only queries |
-| `Group(struct {...})` | Yes (`createGroup`) | Free | Direct array (owned) | Fastest | Hot path multi-component |
+| `Group(struct {...})` | Compile-time | Free | Direct array (owned) | Fastest | Hot path multi-component |
 
 ## Filter Types in Detail
 
@@ -149,7 +149,15 @@ fn activeEnemySystem(
 
 #### Full-Owning Groups
 
-**Setup required**: `try world.createGroup(struct { Position, Velocity });`
+**Defined in World signature**:
+```zig
+const World = sparze.World(
+    struct { Position, Velocity },
+    struct { DeltaTime },
+    struct {},
+    .{ struct { Position, Velocity } },
+);
+```
 
 ```zig
 fn physicsSystem(physics: Group(struct { Position, Velocity })) !void {
@@ -169,11 +177,19 @@ fn physicsSystem(physics: Group(struct { Position, Velocity })) !void {
 - Perfect cache locality, direct array access
 - Components cannot be owned by multiple groups
 - Fastest iteration possible
-- Must call `world.createGroup()` before use
+- Group membership determined at compile time
 
 #### Partial-Owning Groups
 
-**Setup required**: `try world.createGroup(struct { Position, Velocity, Free(Health) });`
+**Defined in World signature**:
+```zig
+const World = sparze.World(
+    struct { Position, Velocity, Health },
+    struct {},
+    struct {},
+    .{ struct { Position, Velocity, Free(Health) } },
+);
+```
 
 ```zig
 fn physicsSystem(
@@ -213,11 +229,17 @@ fn physicsSystem(
 ### Pattern 1: Shared Read-Only Component
 
 ```zig
-// Group 1: Physics system owns Position, Velocity; reads Health
-try world.createGroup(struct { Position, Velocity, Free(Health) });
-
-// Group 2: Combat system owns Health, Armor
-try world.createGroup(struct { Health, Armor });
+const World = sparze.World(
+    struct { Position, Velocity, Health, Armor },
+    struct {},
+    struct {},
+    .{
+        // Group 1: Physics system owns Position, Velocity; reads Health
+        struct { Position, Velocity, Free(Health) },
+        // Group 2: Combat system owns Health, Armor
+        struct { Health, Armor },
+    },
+);
 
 // Health is owned by Group 2, free in Group 1
 ```
@@ -227,12 +249,17 @@ try world.createGroup(struct { Health, Armor });
 ### Pattern 2: Disjoint Hot Paths
 
 ```zig
-// Group 1: Rendering
-try world.createGroup(struct { Position, Sprite, Layer });
-
-// Group 2: Physics (can't own Position - already owned by Group 1)
-try world.createGroup(struct { Velocity, Mass, Free(Position) });
-
+const World = sparze.World(
+    struct { Position, Sprite, Layer, Velocity, Mass },
+    struct {},
+    struct {},
+    .{
+        // Group 1: Rendering
+        struct { Position, Sprite, Layer },
+        // Group 2: Physics (can't own Position - already owned by Group 1)
+        struct { Velocity, Mass, Free(Position) },
+    },
+);
 // This works! Position owned by Group 1, free in Group 2
 ```
 
@@ -241,12 +268,17 @@ try world.createGroup(struct { Velocity, Mass, Free(Position) });
 ### Pattern 3: Multi-Stage Processing
 
 ```zig
-// Stage 1: AI decision making
-try world.createGroup(struct { AIState, Target });
-
-// Stage 2: Movement execution
-try world.createGroup(struct { Position, Velocity, Free(AIState) });
-
+const World = sparze.World(
+    struct { AIState, Target, Position, Velocity },
+    struct {},
+    struct {},
+    .{
+        // Stage 1: AI decision making
+        struct { AIState, Target },
+        // Stage 2: Movement execution
+        struct { Position, Velocity, Free(AIState) },
+    },
+);
 // AIState drives both groups but owned by AI system
 ```
 
@@ -256,8 +288,8 @@ try world.createGroup(struct { Position, Velocity, Free(AIState) });
 |---------|------------------------|----------------------|------------------|------------|
 | SingleQuery | N/A | O(1) direct | Excellent | None |
 | Query | N/A | O(1) indirect + filter | Good | None |
-| Full-owning Group | O(1) direct | N/A | Excellent | createGroup() |
-| Partial-owning Group | O(1) direct | O(1) indirect | Very Good | createGroup() |
+| Full-owning Group | O(1) direct | N/A | Excellent | World signature |
+| Partial-owning Group | O(1) direct | O(1) indirect | Very Good | World signature |
 
 **Iteration speed** (entities/second, approximate):
 - SingleQuery: 100M+ (memory bound)
@@ -336,12 +368,19 @@ Group(struct { Position, Velocity, Free(Health) })
 
 ## Common Pitfalls
 
-1. **Forgetting to create groups**: Groups panic if not created with `createGroup()`
+1. **Forgetting to declare groups**: Groups must be listed in the `sparze.World` signature; omitting them means systems expecting a Group parameter won't compile.
 
 2. **Ownership conflicts**: Two groups can't own the same component
    ```zig
-   try world.createGroup(struct { A, B });
-   try world.createGroup(struct { B, C }); // Error! B already owned
+   const World = sparze.World(
+       struct { A, B, C },
+       struct {},
+       struct {},
+       .{
+           struct { A, B },
+           struct { B, C }, // Error! B already owned
+       },
+   );
    ```
 
 3. **Accessing optional components wrong**:

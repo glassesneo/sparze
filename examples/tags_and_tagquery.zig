@@ -34,6 +34,7 @@ const World = sparze.World(
     struct { Position, Health, Player, Enemy, Boss, Active, Poisoned },
     struct {},
     struct {},
+    .{},
 );
 
 // =============================================================================

@@ -83,14 +83,16 @@ First `group_size` elements reserved for group entities, enabling direct array i
 World(
     Components: struct { Position, Velocity, Health, ... },
     Resources: struct { DeltaTime, GameState, ... },
-    Events: struct { Collision, SpawnEvent, ... }
+    Events: struct { Collision, SpawnEvent, ... },
+    Groups: .{ struct { Position, Velocity }, struct { Sprite, Layer } }
 )
 ```
 
-The World type is parameterized by three compile-time struct types:
+The World type is parameterized by four compile-time parameters:
 - **Components**: All component types in the ECS
 - **Resources**: Global singleton types
 - **Events**: Event types for frame-delayed communication
+- **Groups**: Tuple of group types (compile-time entity organization)
 
 ### World Key Methods
 
@@ -115,7 +117,6 @@ The World type is parameterized by three compile-time struct types:
 - `isResourceInitialized(type) bool` - Check initialization status
 
 **Group management**:
-- `createGroup(type) !void` - Create entity group (immediate)
 - `validateGroups(anytype) void` - Compile-time group validation
 
 **Frame management**:
@@ -140,7 +141,7 @@ Sparze optimizes for cache efficiency through three mechanisms:
 **Storage**: InlineStorage ([World.max_component_size]u8 buffer) stores components ≤ World.max_component_size inline.
 
 **Execution timing**:
-- Immediate: `createEntity()`, `createGroup()`, resource operations, `removeComponent/removeTag`, `destroyEntity()`
+- Immediate: `createEntity()`, resource operations, `removeComponent/removeTag`, `destroyEntity()`
 - Deferred: Component add/remove and destruction when invoked via Commands
 
 **Safety guarantees**:

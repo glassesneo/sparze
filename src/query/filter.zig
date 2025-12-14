@@ -439,7 +439,7 @@ pub fn SimpleCrossProductIterator(comptime Query1: type, comptime Query2: type) 
 
 /// Group is a query filter that provides optimized iteration over entities with multiple components.
 ///
-/// Groups require upfront setup via `world.createGroup()` but provide the fastest iteration
+/// Groups are defined at compile-time in the World signature and provide the fastest iteration
 /// for multi-component queries. Entities in a group are stored at the beginning of all
 /// component arrays, enabling cache-friendly sequential access.
 ///
@@ -449,9 +449,12 @@ pub fn SimpleCrossProductIterator(comptime Query1: type, comptime Query2: type) 
 /// Example:
 /// ```zig
 /// const MovementGroup = struct { Position, Velocity };
-///
-/// // Setup (once)
-/// try world.createGroup(MovementGroup);
+/// const World = sparze.World(
+///     Components,
+///     Resources,
+///     Events,
+///     .{ MovementGroup },  // Groups defined at compile-time
+/// );
 ///
 /// // System function
 /// fn movementSystem(group: Group(MovementGroup)) !void {
@@ -500,8 +503,13 @@ pub fn Group(comptime GroupComponents: type) type {
 
         group_component_pool: GroupComponentPoolType,
 
-        /// Captures sparse-set pointers for all group components; assumes `world.createGroup(GroupComponents)` has been called so owned components are already packed at the group head.
+        /// Captures sparse-set pointers for all group components; validates that the group is registered in the World definition (compile-time check).
         pub fn init(world: anytype) Self {
+            // Compile-time validation: group must be registered in World
+            const WorldType = @TypeOf(world.*);
+            const group_idx = comptime WorldType.getGroupIndex(GroupComponents);
+            _ = group_idx; // Group index validated at compile time
+
             var component_pool: GroupComponentPoolType = undefined;
 
             // Extract sparse set pointers for all group components (owned + free)
@@ -540,7 +548,7 @@ pub fn Group(comptime GroupComponents: type) type {
         /// Returns the slice of entities in the group-owned prefix; all entities in this slice are guaranteed to possess all owned components contiguously.
         pub fn getEntities(self: Self) []const Entity {
             // Use the first owned component's sparse set to get group entities
-            // (At least one owned component is guaranteed by createGroup validation)
+            // (At least one owned component is guaranteed by compile-time validation)
             return inline for (component_fields, 0..) |field, i| {
                 if (!isFree(field.type)) break self.group_component_pool[i].getGroupEntities();
             } else unreachable;
@@ -905,14 +913,16 @@ pub fn Exclude(comptime C: type) type {
 ///
 /// Example:
 /// ```zig
-/// // Group 1 owns Position, Velocity; uses Health as free
-/// try world.createGroup(struct { Position, Velocity, Free(Health) });
+/// const PhysicsGroup = struct { Position, Velocity, Free(Health) };
+/// const CombatGroup = struct { Health, Shield };
+/// const FullFreeGroup = struct { Free(Position), Free(Velocity) };
 ///
-/// // Group 2 can own Health (since it's free in Group 1)
-/// try world.createGroup(struct { Health, Shield });
-///
-/// // Non-owning group: all components are free
-/// try world.createGroup(struct { Free(Position), Free(Velocity) });
+/// const World = sparze.World(
+///     Components,
+///     Resources,
+///     Events,
+///     .{ PhysicsGroup, CombatGroup, FullFreeGroup },
+/// );
 /// ```
 pub fn Free(comptime C: type) type {
     return struct {

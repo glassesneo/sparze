@@ -327,12 +327,12 @@ test "BufferedChecksumReader checksum validation" {
 test "BufferedChecksumReader hashes final takeInt before footer" {
     var data: [8]u8 = undefined;
     const final_value: u32 = 0;
-    std.mem.writeIntLittle(u32, data[0..4], final_value);
+    std.mem.writeInt(u32, data[0..4], final_value, .little);
 
     var crc = std.hash.Crc32.init();
     crc.update(data[0..4]);
     const expected_crc = crc.final();
-    std.mem.writeIntLittle(u32, data[4..8], expected_crc);
+    std.mem.writeInt(u32, data[4..8], expected_crc, .little);
 
     var fbs = std.io.fixedBufferStream(&data);
     var checksumReader = bufferedChecksumReader(fbs.reader());

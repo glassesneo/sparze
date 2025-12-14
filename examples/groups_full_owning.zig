@@ -1,10 +1,10 @@
 // groups_full_owning.zig - Fast Multi-Component Iteration with Groups
 //
 // This example demonstrates full-owning Groups for maximum performance:
-// - Creating groups with world.createGroup()
+// - Defining groups at compile-time in World signature
 // - Group iteration with getEntities(), getArrayOf(), getMutArrayOf()
 // - Why groups are faster than Query (cache locality)
-// - validateGroups() for compile-time overlap checking
+// - Automatic compile-time overlap checking
 // - When to use Groups vs Query
 //
 // Run with: zig build run-groups_full_owning
@@ -20,12 +20,6 @@ const Velocity = struct { dx: f32, dy: f32 };
 const Health = struct { hp: i32, max_hp: i32 };
 const Armor = struct { value: i32 };
 
-const World = sparze.World(
-    struct { Position, Velocity, Health, Armor },
-    struct {},
-    struct {},
-);
-
 // =============================================================================
 // Group Type Definitions
 // =============================================================================
@@ -33,6 +27,19 @@ const World = sparze.World(
 
 const MovementGroup = struct { Position, Velocity };
 const CombatGroup = struct { Health, Armor };
+
+// =============================================================================
+// World Definition with Compile-Time Groups
+// =============================================================================
+// Groups are now defined in the World signature (4th parameter)
+// They are automatically created and validated at compile-time!
+
+const World = sparze.World(
+    struct { Position, Velocity, Health, Armor }, // Components
+    struct {}, // Resources
+    struct {}, // Events
+    .{ MovementGroup, CombatGroup }, // Groups (compile-time!)
+);
 
 // =============================================================================
 // Systems Using Groups
@@ -101,39 +108,28 @@ pub fn main() !void {
     // ==========================================================================
     // Compile-Time Group Validation
     // ==========================================================================
-    // RECOMMENDED: Validate all groups at compile time before creating them.
-    // This catches component overlap errors at compile time!
+    // Groups are now AUTOMATICALLY validated at compile-time!
+    // The World definition above already ensures no component overlaps.
+    // If you tried to define overlapping groups in the World signature,
+    // you would get a compile error:
+    //
+    // const World = sparze.World(
+    //     struct { Position, Velocity, Health },
+    //     struct {},
+    //     struct {},
+    //     .{
+    //         struct { Position, Velocity },
+    //         struct { Position, Health },  // COMPILE ERROR: Position already owned!
+    //     }
+    // );
 
-    std.debug.print("--- Compile-time validation ---\n", .{});
-    World.validateGroups(.{
-        MovementGroup, // { Position, Velocity }
-        CombatGroup, // { Health, Armor }
-    });
-    std.debug.print("  Groups validated: no component overlaps\n\n", .{});
-
-    // If you tried to validate overlapping groups, you'd get a compile error:
-    // World.validateGroups(.{
-    //     struct { Position, Velocity },
-    //     struct { Position, Health },  // ERROR: Position already owned!
-    // });
+    std.debug.print("--- Compile-time groups ---\n", .{});
+    std.debug.print("  MovementGroup: {{ Position, Velocity }}\n", .{});
+    std.debug.print("  CombatGroup: {{ Health, Armor }}\n", .{});
+    std.debug.print("  Groups are automatically created and validated!\n\n", .{});
 
     var world = World.init(allocator);
     defer world.deinit();
-
-    // ==========================================================================
-    // Create Groups (Runtime)
-    // ==========================================================================
-    std.debug.print("--- Creating groups ---\n", .{});
-
-    try world.createGroup(MovementGroup);
-    std.debug.print("  Created MovementGroup: {{ Position, Velocity }}\n", .{});
-
-    try world.createGroup(CombatGroup);
-    std.debug.print("  Created CombatGroup: {{ Health, Armor }}\n", .{});
-
-    // Creating the same group twice is a no-op (idempotent)
-    try world.createGroup(MovementGroup);
-    std.debug.print("  Duplicate createGroup is safe (no-op)\n\n", .{});
 
     // ==========================================================================
     // Create Entities
@@ -169,12 +165,8 @@ pub fn main() !void {
     // Query Group Membership
     // ==========================================================================
     std.debug.print("--- Group membership ---\n", .{});
-
-    const movement_entities = world.getGroupEntities(MovementGroup).?;
-    std.debug.print("  MovementGroup entities: {}\n", .{movement_entities.len});
-
-    const combat_entities = world.getGroupEntities(CombatGroup).?;
-    std.debug.print("  CombatGroup entities: {}\n\n", .{combat_entities.len});
+    // Group membership is now automatic - entities are in groups when they have all required components
+    // No runtime API needed to query group membership
 
     // ==========================================================================
     // Run Systems
@@ -196,16 +188,14 @@ pub fn main() !void {
     // Adding velocity to turret adds it to MovementGroup
     std.debug.print("  Adding Velocity to turret...\n", .{});
     try world.addComponent(turret, Velocity, .{ .dx = 0.5, .dy = 0.0 });
-
-    const new_movement = world.getGroupEntities(MovementGroup).?;
-    std.debug.print("  MovementGroup now has {} entities\n", .{new_movement.len});
+    // Group membership is now automatic - entities are in groups when they have all required components
+    // No runtime API needed to query group membership
 
     // Removing velocity removes from group
     std.debug.print("  Removing Velocity from turret...\n", .{});
     world.removeComponent(turret, Velocity);
-
-    const after_remove = world.getGroupEntities(MovementGroup).?;
-    std.debug.print("  MovementGroup now has {} entities\n", .{after_remove.len});
+    // Group membership is now automatic - entities are in groups when they have all required components
+    // No runtime API needed to query group membership
 
     // ==========================================================================
     // Performance Comparison

@@ -19,7 +19,6 @@
 | Operation | Timing | Reason |
 |-----------|--------|--------|
 | `createEntity()` | Immediate | Need ID for subsequent commands |
-| `createGroup()` | Immediate | Group setup |
 | Resource ops | Immediate | Global state access |
 | Component ops | Deferred | Safe during iteration |
 | `destroyEntity()` | Deferred | Safe during iteration |
