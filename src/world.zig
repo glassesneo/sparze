@@ -178,7 +178,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         event_pool: EventPoolType,
         command_buffer: CommandBuffer(Self),
 
-        /// Initialize an empty World with zeroed resources (uninitialized), empty component/event storages, and groups populated with existing entities; resources must be initialized with `setResource()` or `initResources()` before use.
+        /// Initialize an empty World with zeroed resources (uninitialized) and empty component/event storages; groups are defined at compile-time and will be automatically populated as entities are added; resources must be initialized with `setResource()` or `initResources()` before use.
         pub fn init(allocator: Allocator) Self {
             var self = Self{
                 .allocator = allocator,
