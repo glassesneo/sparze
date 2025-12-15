@@ -188,7 +188,7 @@ Tag-specific query filters. Same patterns as Query but for zero-sized components
 fn enemySystem(query: TagQuery(struct { Enemy, ?Boss, Exclude(Dead) })) !void {
     for (query.entities) |entity| {
         if (query.filter(entity)) {
-            if (query.hasTag(entity, Boss)) {
+            if (query.hasOptional(entity, Boss)) {
                 // Special boss logic
             }
         }

@@ -30,13 +30,13 @@ START: Need to iterate entities with components?
 
 ## Filter Comparison
 
-| Filter | Setup Required | Modifiers | Access Pattern | Performance | Use Case |
+| Filter | Setup Required | Modifiers | Access Methods | Performance | Use Case |
 |--------|----------------|-----------|----------------|-------------|----------|
 | `SingleQuery(T)` | No | No | Direct array | Fastest | Single component iteration |
 | `SingleTag(T)` | No | No | Direct array | Fastest | Single tag iteration |
-| `Query(struct {...})` | No | Optional, Exclude | Sparse set lookup | Good | Flexible multi-component queries |
-| `TagQuery(struct {...})` | No | Optional, Exclude | Bitset lookup | Good | Tag-only queries |
-| `Group(struct {...})` | Compile-time | Free | Direct array (owned) | Fastest | Hot path multi-component |
+| `Query(struct {...})` | No | Optional, Exclude | `getComponent`, `getOptional` | Good | Flexible multi-component queries |
+| `TagQuery(struct {...})` | No | Optional, Exclude | `hasOptional` | Good | Tag-only queries |
+| `Group(struct {...})` | Compile-time | Free | `getArrayOf`, `getComponent` | Fastest | Hot path multi-component |
 
 ## Filter Types in Detail
 
@@ -132,7 +132,7 @@ fn activeEnemySystem(
 ) !void {
     var it = tags.iterator();
     while (it.next()) |entity| {
-        if (tags.hasTag(entity, Sleeping)) continue;
+        if (tags.hasOptional(entity, Sleeping)) continue;
         // Process active, non-sleeping enemies
     }
 }
@@ -141,7 +141,7 @@ fn activeEnemySystem(
 **Characteristics**:
 - Compile-time validates all fields are tag types
 - Same behavior as Query but for tags only
-- Use `hasTag(entity, Tag)` to check optional tags
+- Use `hasOptional(entity, Tag)` to check optional tags (returns `bool`)
 
 ### Group(struct { ... }) - Pre-Organized Iteration
 
@@ -301,18 +301,22 @@ const World = sparze.World(
 
 ### Optional (?T)
 
-**Purpose**: Match entities regardless of component presence.
+**Purpose**: Match entities regardless of component/tag presence.
 
 ```zig
 Query(struct { Position, ?Color })
 // Matches: entities with Position, with or without Color
+
+TagQuery(struct { Enemy, ?Boss })
+// Matches: entities with Enemy tag, with or without Boss tag
 ```
 
 **Access**:
-- Use `getOptional(entity, T)` → returns `?T` (value copy)
-- Use `getOptionalMut(entity, T)` → returns `?*T` (pointer)
+- **Query**: Use `getOptional(entity, T)` → returns `?T` (value copy)
+- **Query**: Use `getOptionalMut(entity, T)` → returns `?*T` (pointer)
+- **TagQuery**: Use `hasOptional(entity, T)` → returns `bool`
 
-**Iteration**: Optional components NOT used for iteration (iterates required components only)
+**Iteration**: Optional components/tags NOT used for iteration (iterates required components only)
 
 ### Exclude(T)
 
@@ -383,8 +387,9 @@ Group(struct { Position, Velocity, Free(Health) })
    );
    ```
 
-3. **Accessing optional components wrong**:
+3. **Accessing optional components/tags wrong**:
    ```zig
+   // Query with optional component
    // Wrong: getComponent panics on optional
    const color = query.getComponent(entity, Color); // PANIC
 
@@ -392,6 +397,12 @@ Group(struct { Position, Velocity, Free(Health) })
    const color = query.getOptional(entity, Color); // ?Color (value)
    // Or use getOptionalMut for pointer
    const color_ptr = query.getOptionalMut(entity, Color); // ?*Color
+   
+   // TagQuery with optional tag
+   // Right: use hasOptional
+   if (tag_query.hasOptional(entity, Boss)) {
+       // This entity is a boss
+   }
    ```
 
 4. **Using getArrayOf on Free components**:

@@ -210,11 +210,11 @@ fn enemyAISystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Elite })) !void 
             // Base enemy AI for all enemies
             
             // Check for optional tags
-            if (query.hasTag(entity, Boss)) {
+            if (query.hasOptional(entity, Boss)) {
                 // Enhanced boss AI
             }
             
-            if (query.hasTag(entity, Elite)) {
+            if (query.hasOptional(entity, Elite)) {
                 // Elite enemy behavior
             }
         }
@@ -452,13 +452,13 @@ fn enemyProcessingSystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Active }
     
     for (query.entities) |entity| {
         if (query.filter(entity)) {
-            if (query.hasTag(entity, Boss)) {
+            if (query.hasOptional(entity, Boss)) {
                 stats.boss += 1;
             } else {
                 stats.regular += 1;
             }
             
-            if (query.hasTag(entity, Active)) {
+            if (query.hasOptional(entity, Active)) {
                 stats.active += 1;
             }
         }
@@ -469,7 +469,7 @@ fn enemyProcessingSystem(query: sparze.TagQuery(struct { Enemy, ?Boss, ?Active }
 **Optional Component/Tag API**:
 - **Required components**: `getComponent()` / `getComponentMut()` - asserts component exists
 - **Optional components**: `getOptional()` / `getOptionalMut()` - returns `?C` or `?*C`
-- **Optional tags**: `hasTag(entity, Tag)` - returns `bool`
+- **Optional tags**: `hasOptional(entity, Tag)` - returns `bool`
 - **Filtering**: `filter()` only checks required (non-optional) fields
 
 **Benefits**:

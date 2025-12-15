@@ -22,8 +22,10 @@
 - **Partial-owning**: `struct { A, Free(B) }` - Some owned (organized), some free (sparse lookup), allows component sharing
 
 **Filter Modifiers**:
-- `?T` (Optional): Match entities with or without component, access via `getOptional()`
-- `Exclude(T)`: Filter out entities with component
+- `?T` (Optional): Match entities with or without component/tag
+  - Query: access via `getOptional(entity, T)`
+  - TagQuery: check presence via `hasOptional(entity, T)`
+- `Exclude(T)`: Filter out entities with component/tag
 - `Free(T)` (Group only): Mark component as free (not owned), required but not organized
 
 **Special Iterators**:

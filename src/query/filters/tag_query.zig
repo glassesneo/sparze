@@ -129,6 +129,11 @@ pub fn TagQuery(comptime QueryTags: type) type {
             return .{ .query = self };
         }
 
+        pub fn hasOptional(self: *const Self, entity: Entity, comptime T: type) bool {
+            const storage = self.getTagStoragePtr(T);
+            return storage.*.contains(entity);
+        }
+
         pub const Iterator = struct {
             index: usize,
             query: *const TagQuery(QueryTags),
