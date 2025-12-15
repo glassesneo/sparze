@@ -3,7 +3,6 @@ const std = @import("std");
 const FilterModule = @import("filter.zig");
 const Group = FilterModule.Group;
 
-
 test "Free() wrapper type compilation" {
     // Test that Free() wrapper compiles and has correct declarations
     const Position = struct { x: f32, y: f32 };

@@ -3,4 +3,3 @@ test {
     _ = @import("world_group_test.zig");
     _ = @import("world_resource_test.zig");
 }
-

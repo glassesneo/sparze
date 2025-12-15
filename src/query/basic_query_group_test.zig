@@ -5,7 +5,6 @@ const Query = FilterModule.Query;
 const Group = FilterModule.Group;
 const SingleQuery = FilterModule.SingleQuery;
 
-
 test "SingleQuery basic iteration" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };

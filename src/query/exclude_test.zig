@@ -5,7 +5,6 @@ const Query = FilterModule.Query;
 const TagQuery = FilterModule.TagQuery;
 const Exclude = FilterModule.Exclude;
 
-
 test "Query with Exclude modifier - basic usage" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };

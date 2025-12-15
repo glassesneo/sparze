@@ -3,4 +3,3 @@ test {
     _ = @import("sparse_set_test.zig");
     _ = @import("event_storage.zig");
 }
-

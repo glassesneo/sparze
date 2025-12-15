@@ -7,9 +7,6 @@ const SingleTag = FilterModule.SingleTag;
 const entity_module = @import("../entity/entity.zig");
 const Entity = entity_module.Entity;
 
-
-
-
 test "CrossProductIterator - Query × Query basic usage" {
     const Projectile = struct {};
     const Enemy = struct {};

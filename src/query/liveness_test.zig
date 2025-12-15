@@ -4,7 +4,6 @@ const FilterModule = @import("filter.zig");
 const Query = FilterModule.Query;
 const TagQuery = FilterModule.TagQuery;
 
-
 test "Tag storage - sequential entity destruction edge case" {
     // This test reproduces a bug where destroying entities with tags in sequence
     // would cause an index out of bounds error due to stale sparse_to_dense indices.

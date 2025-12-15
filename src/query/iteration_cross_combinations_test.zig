@@ -6,9 +6,6 @@ const Query = FilterModule.Query;
 const entity_module = @import("../entity/entity.zig");
 const Entity = entity_module.Entity;
 
-
-
-
 test "Query with optional components" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };

@@ -3,7 +3,6 @@ const std = @import("std");
 const FilterModule = @import("filter.zig");
 const TagQuery = FilterModule.TagQuery;
 
-
 test "TagQuery basic iteration with two tags" {
     const Player = struct {};
     const Active = struct {};

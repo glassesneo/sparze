@@ -3,7 +3,6 @@ const std = @import("std");
 const world_module = @import("world.zig");
 const World = world_module.World;
 
-
 test "Groups: order-insensitive matching" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { x: f32, y: f32 };
