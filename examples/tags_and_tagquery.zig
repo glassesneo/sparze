@@ -78,13 +78,20 @@ fn bossSystem(query: sparze.TagQuery(struct { Enemy, Boss })) !void {
 }
 
 /// TagQuery with Optional: All enemies, check if they're bosses
-fn enemyRenderSystem(query: sparze.TagQuery(struct { Enemy, ?Boss })) !void {
+fn enemyRenderSystem(query: sparze.TagQuery(struct { Enemy, ?Boss }), boss_tags: sparze.SingleTag(Boss)) !void {
     std.debug.print("  [enemyRenderSystem] Rendering enemies\n", .{});
 
     for (query.entities) |entity| {
         if (!query.filter(entity)) continue;
 
-        const is_boss = query.hasTag(entity, Boss);
+        // Check if entity is a boss by searching in SingleTag
+        var is_boss = false;
+        for (boss_tags.entities) |boss_entity| {
+            if (boss_entity == entity) {
+                is_boss = true;
+                break;
+            }
+        }
         const label = if (is_boss) "BOSS" else "enemy";
         std.debug.print("    Rendering {s} {any}\n", .{ label, entity });
     }

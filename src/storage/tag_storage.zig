@@ -3,12 +3,8 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const entity_module = @import("../entity/entity.zig");
 pub const max_entities = entity_module.max_entities;
-const EntityRegistry = entity_module.EntityRegistry;
 const Entity = entity_module.Entity;
-const EntityIndex = entity_module.EntityIndex;
-const EntityVersion = entity_module.EntityVersion;
 const getIndex = entity_module.getIndex;
-const getVersion = entity_module.getVersion;
 
 // Pagination configuration (same as SparseSet)
 pub const page_size: u16 = 4096; // Entities per page (2^12)

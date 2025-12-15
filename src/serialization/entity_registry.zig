@@ -2,7 +2,6 @@ const std = @import("std");
 const entity_mod = @import("../entity/entity.zig");
 const compat = @import("compat.zig");
 const Entity = entity_mod.Entity;
-const EntityIndex = entity_mod.EntityIndex;
 const EntityRegistry = entity_mod.EntityRegistry;
 
 /// Serialize EntityRegistry to writer

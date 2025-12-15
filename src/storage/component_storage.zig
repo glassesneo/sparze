@@ -1,9 +1,5 @@
-const std = @import("std");
-const Allocator = std.mem.Allocator;
-const ArrayList = std.ArrayList;
 const sparse_set_module = @import("sparse_set.zig");
 const SparseSet = sparse_set_module.SparseSet;
-const SparsePage = sparse_set_module.SparsePage;
 const tag_storage_module = @import("tag_storage.zig");
 const TagStorage = tag_storage_module.TagStorage;
 

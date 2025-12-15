@@ -195,7 +195,7 @@ test "TagStorage - sequential removal maintains consistency" {
     var storage = TagStorage(TestTag).init(allocator);
     defer storage.deinit();
 
-    // This test catches the swapRemove bug from filter_test.zig:1494
+    // This test catches the swapRemove bug from query_test.zig
     const e1 = makeEntity(0, 0);
     const e2 = makeEntity(1, 0);
     const e3 = makeEntity(2, 0);

@@ -1,6 +1,5 @@
 const std = @import("std");
 const World = @import("world.zig").World;
-const builtin = @import("builtin");
 
 // Note: Tests for debug assertions are commented out because Zig's test framework
 // doesn't provide a good way to catch assertions. The assertions are still in the code

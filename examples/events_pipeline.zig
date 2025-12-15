@@ -112,7 +112,7 @@ fn collisionResponseSystem(
     reader: sparze.EventReader(CollisionEvent),
     writer: sparze.EventWriter(DamageEvent),
 ) !void {
-    for (reader.queue) |collision| {
+    for (reader.read()) |collision| {
         // Both entities take damage based on overlap
         const damage: i32 = @intFromFloat(collision.overlap * 10.0);
 
@@ -138,7 +138,7 @@ fn damageSystem(
     health_query: sparze.SingleQuery(Health),
     pos_query: sparze.SingleQuery(Position),
 ) !void {
-    for (reader.queue) |damage| {
+    for (reader.read()) |damage| {
         // Find the health component for this entity
         for (health_query.entities, health_query.components) |entity, *health| {
             if (entity == damage.target) {
@@ -180,7 +180,7 @@ fn deathSystem(
     spawn_writer: sparze.EventWriter(SpawnEvent),
     commands: anytype,
 ) !void {
-    for (reader.queue) |death| {
+    for (reader.read()) |death| {
         std.debug.print("  [death] Processing death of {any} at ({d:.1}, {d:.1})\n", .{
             death.entity,
             death.position.x,
@@ -205,7 +205,7 @@ fn spawnSystem(
     reader: sparze.EventReader(SpawnEvent),
     commands: anytype,
 ) !void {
-    for (reader.queue) |spawn| {
+    for (reader.read()) |spawn| {
         const entity = commands.createEntity();
         try commands.addComponent(entity, Position, .{ .x = spawn.x, .y = spawn.y });
         try commands.addComponent(entity, Collider, .{ .radius = 5.0 });
