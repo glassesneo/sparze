@@ -9,7 +9,7 @@ test "TagQuery basic iteration with two tags" {
     const Active = struct {};
     const Enemy = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Player, Active, Enemy }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Player, Active, Enemy }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -54,7 +54,7 @@ test "TagQuery with three tags" {
     const Boss = struct {};
     const Enemy = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Player, Active, Boss, Enemy }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Player, Active, Boss, Enemy }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -100,7 +100,7 @@ test "TagQuery system function" {
     const Enemy = struct {};
     const Boss = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Player, Enemy, Boss }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Player, Enemy, Boss }, .{}, .{}, .{});
 
     const BossEnemySystem = struct {
         fn system(query: TagQuery(struct { Enemy, Boss })) !void {
@@ -147,7 +147,7 @@ test "TagQuery with empty result set" {
     const Enemy = struct {};
     const Boss = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Player, Enemy, Boss }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Player, Enemy, Boss }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -182,7 +182,7 @@ test "TagQuery with optional tags using hasOptional" {
     const Boss = struct {};
     const PowerUp = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Enemy, Flying, Boss, PowerUp }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Enemy, Flying, Boss, PowerUp }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -272,7 +272,7 @@ test "TagQuery hasOptional with Exclude modifier" {
     const Dead = struct {};
     const Shielded = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Enemy, Flying, Dead, Shielded }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Enemy, Flying, Dead, Shielded }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

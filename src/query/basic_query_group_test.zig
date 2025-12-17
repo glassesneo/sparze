@@ -10,9 +10,9 @@ test "SingleQuery basic iteration" {
     const Velocity = struct { dx: f32, dy: f32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Velocity },
-        struct {},
-        struct {},
+.{ Position, Velocity },
+.{},
+.{},
         .{struct { Position, Velocity }},
     );
 
@@ -51,7 +51,7 @@ test "Group query basic usage" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{struct { Position, Velocity }});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity }, .{}, .{}, .{struct { Position, Velocity }});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -91,7 +91,7 @@ test "Group query basic usage" {
 test "World system function with SingleQuery" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position }, .{}, .{}, .{});
 
     const UpdatePositions = struct {
         fn system(query: SingleQuery(Position)) void {
@@ -130,9 +130,9 @@ test "World system function with Group" {
     const Velocity = struct { dx: f32, dy: f32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Velocity },
-        struct {},
-        struct {},
+.{ Position, Velocity },
+.{},
+.{},
         .{struct { Position, Velocity }},
     );
 
@@ -182,9 +182,9 @@ test "World system with multiple queries" {
     const Health = struct { hp: i32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Velocity, Health },
-        struct {},
-        struct {},
+.{ Position, Velocity, Health },
+.{},
+.{},
         .{struct { Position, Velocity }},
     );
 
@@ -236,7 +236,7 @@ test "Query basic iteration" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Health }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity, Health }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -282,7 +282,7 @@ test "Query with mutable component access" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -326,7 +326,7 @@ test "World system function with Query" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Health }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity, Health }, .{}, .{}, .{});
 
     const CombatSystem = struct {
         fn system(query: Query(struct { Position, Health })) void {
@@ -376,7 +376,7 @@ test "Query three components" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Health }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity, Health }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

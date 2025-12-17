@@ -277,9 +277,9 @@ Groups are defined at compile-time in the `World` signature. Declare required gr
 
 ```zig
 const World = sparze.World(
-    struct { Position, Velocity },
-    struct { DeltaTime },
-    struct {},
+.{ Position, Velocity },
+.{ DeltaTime },
+.{},
     .{ struct { Position, Velocity } }, // Groups
 );
 
@@ -343,10 +343,10 @@ fn loadSystem(commands: anytype) !void {
 
 ```zig
 const World = sparze.World(
-    struct { Position, Velocity },
-    struct { DeltaTime },
-    struct {},
-    .{ struct { Position, Velocity }, struct { Sprite, Layer } },  // Groups
+.{ Position, Velocity },
+.{ DeltaTime },
+.{},
+    .{ struct { Position, Velocity }, .{ Sprite, Layer } },  // Groups
 );
 
 pub fn main() !void {
@@ -659,17 +659,17 @@ fn flush(self: *CommandBuffer, world: *World) !void {
    ```zig
    // BAD: Will panic if group missing from signature
    const WorldWithoutGroups = sparze.World(
-       struct { A, B },
-       struct {},
-       struct {},
+       .{ A, B },
+       .{},
+       .{},
        .{}, // No groups defined
    );
 
    // GOOD: Declare groups at compile-time in the World signature
    const World = sparze.World(
-       struct { A, B },
-       struct {},
-       struct {},
+       .{ A, B },
+       .{},
+       .{},
        .{ struct { A, B } },
    );
    ```

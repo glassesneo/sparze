@@ -24,9 +24,9 @@ const Projectile = struct {};
 const Pickup = struct {};
 
 const World = sparze.World(
-    struct { Position, Velocity, Collider, Player, Enemy, Projectile, Pickup },
-    struct {},
-    struct {},
+    .{ Position, Velocity, Collider, Player, Enemy, Projectile, Pickup },
+    .{},
+    .{},
     .{},
 );
 

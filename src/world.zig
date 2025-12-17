@@ -64,18 +64,58 @@ fn GroupKey(comptime owned_count: usize, comptime free_count: usize) type {
     };
 }
 
+/// Convert a tuple of types (e.g., .{ Position, Velocity }) into a struct type (e.g., struct { Position, Velocity })
+/// This is needed for serialization and other operations that require a type rather than a value.
+fn TupleToStructType(comptime tuple: anytype) type {
+    const info = @typeInfo(@TypeOf(tuple));
+    if (info != .@"struct" or !info.@"struct".is_tuple) {
+        @compileError("Expected a tuple of types");
+    }
+    const fields = info.@"struct".fields;
+    if (fields.len == 0) {
+        return struct {};
+    }
+
+    var struct_fields: [fields.len]StructField = undefined;
+    inline for (fields, 0..) |field, i| {
+        const T = @field(tuple, field.name);
+        struct_fields[i] = StructField{
+            .name = std.fmt.comptimePrint("{d}", .{i}),
+            .type = T,
+            .is_comptime = false,
+            .alignment = @alignOf(T),
+            .default_value_ptr = null,
+        };
+    }
+
+    return @Type(.{ .@"struct" = .{
+        .layout = .auto,
+        .is_tuple = true,
+        .decls = &.{},
+        .fields = &struct_fields,
+    } });
+}
+
 /// Construct a compile-time ECS World factory from component/resource/event type tuples; returns a type that can be instantiated with `init(allocator)`.
 pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: anytype) type {
-    const component_info = @typeInfo(Components);
-    if (component_info != .@"struct") @compileError("Invalid form of components");
+    const component_info = @typeInfo(@TypeOf(Components));
+    if (component_info != .@"struct" or !component_info.@"struct".is_tuple) {
+        @compileError("Invalid form of components; expected a tuple of types, e.g., .{ Position, Velocity }");
+    }
     const component_fields = component_info.@"struct".fields;
     const component_pool_length = component_fields.len;
-    const resource_info = @typeInfo(Resources);
-    if (resource_info != .@"struct") @compileError("Invalid form of resources");
+
+    const resource_info = @typeInfo(@TypeOf(Resources));
+    if (resource_info != .@"struct" or !resource_info.@"struct".is_tuple) {
+        @compileError("Invalid form of resources; expected a tuple of types, e.g., .{ DeltaTime }");
+    }
     const resource_fields = resource_info.@"struct".fields;
     const resource_pool_length = resource_fields.len;
-    const event_info = @typeInfo(Events);
-    if (event_info != .@"struct") @compileError("Invalid form of events");
+
+    const event_info = @typeInfo(@TypeOf(Events));
+    if (event_info != .@"struct" or !event_info.@"struct".is_tuple) {
+        @compileError("Invalid form of events; expected a tuple of types, e.g., .{ CollisionEvent }");
+    }
     const event_fields = event_info.@"struct".fields;
     const event_pool_length = event_fields.len;
 
@@ -86,10 +126,16 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
     const group_fields = groups_info.@"struct".fields;
     const groups_count = group_fields.len;
 
+    // Convert tuple of types to a struct type (for serialization and other type-based operations)
+    const ComponentsType = TupleToStructType(Components);
+    const ResourcesType = TupleToStructType(Resources);
+    const EventsType = TupleToStructType(Events);
+
     const ComponentPoolType = if (component_pool_length == 0) @TypeOf(.{}) else construct_component_pool: {
         var pool_fields: [component_pool_length]StructField = undefined;
         inline for (component_fields, 0..) |field, i| {
-            const FieldType = ComponentStorage(field.type);
+            const C = @field(Components, field.name);
+            const FieldType = ComponentStorage(C);
 
             pool_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
@@ -110,13 +156,13 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
     const ResourcePoolType = if (resource_pool_length == 0) @TypeOf(.{}) else construct_resource_pool: {
         var pool_fields: [resource_pool_length]StructField = undefined;
         inline for (resource_fields, 0..) |field, i| {
-            const FieldType = field.type;
+            const R = @field(Resources, field.name);
 
             pool_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
-                .type = FieldType,
+                .type = R,
                 .is_comptime = false,
-                .alignment = @alignOf(FieldType),
+                .alignment = @alignOf(R),
                 .default_value_ptr = null,
             };
         }
@@ -131,7 +177,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
     const EventPoolType = if (event_pool_length == 0) @TypeOf(.{}) else construct_event_pool: {
         var pool_fields: [event_pool_length]StructField = undefined;
         inline for (event_fields, 0..) |field, i| {
-            const FieldType = EventStorage(field.type);
+            const E = @field(Events, field.name);
+            const FieldType = EventStorage(E);
 
             pool_fields[i] = StructField{
                 .name = std.fmt.comptimePrint("{d}", .{i}),
@@ -157,7 +204,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             if (component_pool_length == 0) break :blk 1;
             var max_size: comptime_int = 1;
             for (component_fields) |field| {
-                const size = @sizeOf(field.type);
+                const C = @field(Components, field.name);
+                const size = @sizeOf(C);
                 if (size > max_size) max_size = size;
             }
             break :blk max_size;
@@ -167,7 +215,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             if (resource_pool_length == 0) break :blk 1;
             var max_size: comptime_int = 1;
             for (resource_fields) |field| {
-                const size = @sizeOf(field.type);
+                const R = @field(Resources, field.name);
+                const size = @sizeOf(R);
                 if (size > max_size) max_size = size;
             }
             break :blk max_size;
@@ -192,7 +241,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
                 .component_pool = init: {
                     var pool: ComponentPoolType = undefined;
                     inline for (component_fields, 0..) |field, i| {
-                        pool[i] = ComponentStorage(field.type).init(allocator);
+                        const C = @field(Components, field.name);
+                        pool[i] = ComponentStorage(C).init(allocator);
                     }
                     break :init pool;
                 },
@@ -201,7 +251,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
                 .event_pool = init: {
                     var pool: EventPoolType = undefined;
                     inline for (event_fields, 0..) |field, i| {
-                        pool[i] = EventStorage(field.type).init(allocator);
+                        const E = @field(Events, field.name);
+                        pool[i] = EventStorage(E).init(allocator);
                     }
                     break :init pool;
                 },
@@ -226,7 +277,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             }
             self.groups.deinit(self.allocator);
             inline for (component_fields) |field| {
-                self.getComponentStoragePtr(field.type).deinit();
+                const C = @field(Components, field.name);
+                self.getComponentStoragePtr(C).deinit();
             }
             inline for (event_fields, 0..) |_, i| {
                 self.event_pool[i].deinit();
@@ -237,7 +289,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         pub fn getComponentId(comptime C: type) u16 {
             // The order of components become the id
             return inline for (component_fields, 0..) |field, i| {
-                if (C == field.type) break i;
+                const ComponentType = @field(Components, field.name);
+                if (C == ComponentType) break i;
             } else @compileError("Unknown component type: " ++ @typeName(C));
         }
 
@@ -245,7 +298,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         pub fn getResourceId(comptime R: type) u16 {
             // The order of resources become the id
             return inline for (resource_fields, 0..) |field, i| {
-                if (R == field.type) break i;
+                const ResourceType = @field(Resources, field.name);
+                if (R == ResourceType) break i;
             } else @compileError("Unknown resource type: " ++ @typeName(R));
         }
 
@@ -253,7 +307,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         pub fn getEventId(comptime E: type) u16 {
             // The order of events become the id
             return inline for (event_fields, 0..) |field, i| {
-                if (E == field.type) break i;
+                const EventType = @field(Events, field.name);
+                if (E == EventType) break i;
             } else @compileError("Unknown event type: " ++ @typeName(E));
         }
 
@@ -265,7 +320,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         ///
         /// Usage:
         /// ```zig
-        /// const World = FixedWorld(struct { A, B, C, D });
+        /// const World = FixedWorld(.{ A, B, C, D });
         ///
         /// // Validate all groups upfront - compile error if overlapping
         /// World.validateGroups(.{
@@ -620,7 +675,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         pub fn destroyEntity(self: *Self, entity: Entity) void {
             self.entity_registry.destroy(entity);
             inline for (component_fields) |field| {
-                self.removeComponent(entity, field.type);
+                const C = @field(Components, field.name);
+                self.removeComponent(entity, C);
             }
         }
 
@@ -663,7 +719,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         pub fn addComponentFromBytes(self: *Self, entity: Entity, type_id: u16, bytes: []const u8) !void {
             inline for (component_fields, 0..) |field, i| {
                 if (i == type_id) {
-                    const C = field.type;
+                    const C = @field(Components, field.name);
                     if (isTagComponent(C)) {
                         try self.addTag(entity, C);
                         return;
@@ -719,7 +775,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         pub fn removeComponentById(self: *Self, entity: Entity, type_id: u16) void {
             inline for (component_fields, 0..) |field, i| {
                 if (i == type_id) {
-                    self.removeComponent(entity, field.type);
+                    const C = @field(Components, field.name);
+                    self.removeComponent(entity, C);
                     return;
                 }
             }
@@ -868,7 +925,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
 
             // Use inline for to access tuple element at runtime
             inline for (component_fields, 0..) |field, i| {
-                if (comptime isTagComponent(field.type)) continue;
+                const C = @field(Components, field.name);
+                if (comptime isTagComponent(C)) continue;
                 if (first_id == i) {
                     return self.component_pool[i].getGroupEntities();
                 }
@@ -887,7 +945,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
                 if (group_id == component_id) {
                     // Use inline for to access tuple element at runtime
                     inline for (component_fields, 0..) |field, i| {
-                        if (comptime isTagComponent(field.type)) continue;
+                        const ComponentType = @field(Components, field.name);
+                        if (comptime isTagComponent(ComponentType)) continue;
                         if (component_id == i) {
                             return self.component_pool[i].getGroupComponents();
                         }
@@ -906,7 +965,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
                 if (group_id == component_id) {
                     // Use inline for to access tuple element at runtime
                     inline for (component_fields, 0..) |field, i| {
-                        if (comptime isTagComponent(field.type)) continue;
+                        const ComponentType = @field(Components, field.name);
+                        if (comptime isTagComponent(ComponentType)) continue;
                         if (component_id == i) {
                             return self.component_pool[i].getGroupComponentsMut();
                         }
@@ -934,7 +994,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             // Check owned components
             for (group.owned_component_ids) |id| {
                 inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
+                    const C = @field(Components, field.name);
+                    if (comptime isTagComponent(C)) continue;
                     if (id == i) {
                         const entities = self.component_pool[i].packed_array.items;
                         if (entities.len < min_size) {
@@ -948,7 +1009,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             // Check free components
             for (group.free_component_ids) |id| {
                 inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
+                    const C = @field(Components, field.name);
+                    if (comptime isTagComponent(C)) continue;
                     if (id == i) {
                         const entities = self.component_pool[i].packed_array.items;
                         if (entities.len < min_size) {
@@ -961,7 +1023,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
 
             // Iterate through shortest set and check if entities have all components (owned + free)
             inline for (component_fields, 0..) |field, i| {
-                if (comptime isTagComponent(field.type)) continue;
+                const C = @field(Components, field.name);
+                if (comptime isTagComponent(C)) continue;
                 if (shortest_id == i) {
                     const entities = self.component_pool[i].packed_array.items;
                     for (entities) |entity| {
@@ -987,7 +1050,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             for (group.owned_component_ids) |id| {
                 var has_component = false;
                 inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
+                    const C = @field(Components, field.name);
+                    if (comptime isTagComponent(C)) continue;
                     if (id == i) {
                         if (self.component_pool[i].contains(entity)) {
                             has_component = true;
@@ -1001,7 +1065,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             for (group.free_component_ids) |id| {
                 var has_component = false;
                 inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
+                    const C = @field(Components, field.name);
+                    if (comptime isTagComponent(C)) continue;
                     if (id == i) {
                         if (self.component_pool[i].contains(entity)) {
                             has_component = true;
@@ -1072,7 +1137,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             // Free components remain in their standard positions
             for (group.owned_component_ids) |id| {
                 inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
+                    const C = @field(Components, field.name);
+                    if (comptime isTagComponent(C)) continue;
                     if (id == i) {
                         self.component_pool[i].moveToGroup(entity);
                     }
@@ -1086,7 +1152,8 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
             // Free components are not organized, so no need to move them
             for (group.owned_component_ids) |id| {
                 inline for (component_fields, 0..) |field, i| {
-                    if (comptime isTagComponent(field.type)) continue;
+                    const C = @field(Components, field.name);
+                    if (comptime isTagComponent(C)) continue;
                     if (id == i) {
                         self.component_pool[i].moveFromGroup(entity);
                     }
@@ -1129,7 +1196,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         /// ```
         pub fn serialize(self: *const Self, writer: anytype) !void {
             const world_ser = @import("serialization/world.zig");
-            try world_ser.serialize(self, Components, Resources, Events, writer);
+            try world_ser.serialize(self, ComponentsType, ResourcesType, EventsType, writer);
         }
 
         /// Deserialize the World from a reader
@@ -1144,7 +1211,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         /// ```
         pub fn deserialize(self: *Self, reader: anytype) !void {
             const world_ser = @import("serialization/world.zig");
-            try world_ser.deserialize(self, Components, Resources, Events, reader);
+            try world_ser.deserialize(self, ComponentsType, ResourcesType, EventsType, reader);
             self.populateAllGroups();
         }
 
@@ -1157,7 +1224,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         /// ```
         pub fn serializeToFile(self: *const Self, path: []const u8) !void {
             const world_ser = @import("serialization/world.zig");
-            try world_ser.serializeToFile(self, Components, Resources, Events, path);
+            try world_ser.serializeToFile(self, ComponentsType, ResourcesType, EventsType, path);
         }
 
         /// Deserialize the World from a file
@@ -1169,7 +1236,7 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
         /// ```
         pub fn deserializeFromFile(self: *Self, path: []const u8) !void {
             const world_ser = @import("serialization/world.zig");
-            try world_ser.deserializeFromFile(self, Components, Resources, Events, path);
+            try world_ser.deserializeFromFile(self, ComponentsType, ResourcesType, EventsType, path);
             self.populateAllGroups();
         }
     };
@@ -1181,7 +1248,7 @@ test "Resource basic access" {
         max_speed: f32,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1209,7 +1276,7 @@ test "Resource mutation via pointer" {
         level: i32,
     };
 
-    const TestWorld = World(struct {}, struct { GameState }, struct {}, .{});
+    const TestWorld = World(.{}, .{GameState}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1248,7 +1315,7 @@ test "Multiple resources" {
         muted: bool,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig, GameState, AudioSettings }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig, GameState, AudioSettings }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1283,7 +1350,7 @@ test "Resource in system function" {
     };
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = World(struct { Position }, struct { DeltaTime }, struct {}, .{});
+    const TestWorld = World(.{Position}, .{DeltaTime}, .{}, .{});
 
     const UpdateSystem = struct {
         fn system(delta: Resource(DeltaTime), query: SingleQuery(Position)) !void {
@@ -1330,7 +1397,7 @@ test "Resource mutation in system function" {
     };
     const Enemy = struct {};
 
-    const TestWorld = World(struct { Enemy }, struct { Score }, struct {}, .{});
+    const TestWorld = World(.{Enemy}, .{Score}, .{}, .{});
 
     const ScoreSystem = struct {
         fn system(score: ResourceMut(Score), query: SingleTag(Enemy)) !void {
@@ -1375,7 +1442,7 @@ test "System with multiple resources" {
     const GameConfig = struct { speed_multiplier: f32 };
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = World(struct { Position }, struct { DeltaTime, GameConfig }, struct {}, .{});
+    const TestWorld = World(.{Position}, .{ DeltaTime, GameConfig }, .{}, .{});
 
     const MoveSystem = struct {
         fn system(
@@ -1422,7 +1489,7 @@ test "System with resource, allocator, query, and commands" {
     const Enemy = struct {};
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = World(struct { Enemy, Position }, struct { Score }, struct {}, .{});
+    const TestWorld = World(.{ Enemy, Position }, .{Score}, .{}, .{});
 
     const ComplexSystem = struct {
         fn system(
@@ -1487,7 +1554,7 @@ test "World with components and resources together" {
     const Velocity = struct { dx: f32, dy: f32 };
     const DeltaTime = struct { dt: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct { DeltaTime }, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity }, .{DeltaTime}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1514,7 +1581,7 @@ test "Create World" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1532,7 +1599,7 @@ test "World entity creation and destruction" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct {}, struct {}, struct {}, .{});
+    const TestWorld = World(.{}, .{}, .{}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1557,7 +1624,7 @@ test "World component registration and operations" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct { TestComp }, struct {}, struct {}, .{});
+    const TestWorld = World(.{TestComp}, .{}, .{}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1581,7 +1648,7 @@ test "World multiple components and batch operations" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1606,7 +1673,7 @@ test "World isAlive entity validation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct {}, struct {}, struct {}, .{});
+    const TestWorld = World(.{}, .{}, .{}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1629,7 +1696,7 @@ test "World hasComponent queries" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct { TestComp }, struct {}, struct {}, .{});
+    const TestWorld = World(.{TestComp}, .{}, .{}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1655,7 +1722,7 @@ test "World removeComponent operation" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const TestWorld = World(struct { TestComp }, struct {}, struct {}, .{});
+    const TestWorld = World(.{TestComp}, .{}, .{}, .{});
 
     var world = TestWorld.init(allocator);
     defer world.deinit();
@@ -1681,7 +1748,7 @@ test "World createEntityWith batch creation" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1715,7 +1782,7 @@ test "World group creation and basic operations" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = World(struct { Position, Velocity, Health }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity, Health }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1765,7 +1832,7 @@ test "World group dynamic membership" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1805,7 +1872,7 @@ test "World group mutable component access" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1858,7 +1925,7 @@ test "World multiple groups with non-overlapping components" {
     const C = struct { value: i32 };
     const D = struct { value: i32 };
 
-    const TestWorld = World(struct { A, B, C, D }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ A, B, C, D }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1897,7 +1964,7 @@ test "World group with component not in group" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1917,7 +1984,7 @@ test "World can create identical group twice without error" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1942,7 +2009,7 @@ test "World compile-time group validation - non-overlapping" {
     const C = struct { value: i32 };
     const D = struct { value: i32 };
 
-    const TestWorld = World(struct { A, B, C, D }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ A, B, C, D }, .{}, .{}, .{});
 
     // Compile-time validation of non-overlapping groups - should compile fine
     TestWorld.validateGroups(.{
@@ -1970,7 +2037,7 @@ test "World recommended usage pattern - validate groups upfront" {
     const Health = struct { hp: i32 };
     const Armor = struct { value: i32 };
 
-    const TestWorld = World(struct { Position, Velocity, Health, Armor }, struct {}, struct {}, .{});
+    const TestWorld = World(.{ Position, Velocity, Health, Armor }, .{}, .{}, .{});
 
     // Recommended: Validate all groups at compile time before creating them
     TestWorld.validateGroups(.{
@@ -2015,7 +2082,7 @@ test "Serialization fails for uninitialized resources" {
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct { Position }, struct { GameConfig, Score }, struct {}, .{});
+    const TestWorld = World(.{Position}, .{ GameConfig, Score }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2044,7 +2111,7 @@ test "Serialization succeeds when all resources are initialized" {
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct { Position }, struct { GameConfig, Score }, struct {}, .{});
+    const TestWorld = World(.{Position}, .{ GameConfig, Score }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2075,7 +2142,7 @@ test "Resource initialization tracking" {
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig, Score }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2103,7 +2170,7 @@ test "getResourcePtrMut allows mutation after initialization" {
     const GameConfig = struct { gravity: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig, Score }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2142,7 +2209,7 @@ test "getResourcePtrMut allows mutation after initialization" {
 test "markResourceInitialized for direct resource_pool access" {
     const GameConfig = struct { gravity: f32 };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -2172,7 +2239,7 @@ test "Resource is read-only and ResourceMut is mutable" {
     const GameConfig = struct { speed: f32 };
     const Score = struct { points: i32 };
 
-    const TestWorld = World(struct {}, struct { GameConfig, Score }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig, Score }, .{}, .{});
 
     // Test read-only Resource system
     const ReadOnlySystem = struct {

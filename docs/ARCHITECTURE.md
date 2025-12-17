@@ -81,9 +81,9 @@ First `group_size` elements reserved for group entities, enabling direct array i
 
 ```zig
 World(
-    Components: struct { Position, Velocity, Health, ... },
-    Resources: struct { DeltaTime, GameState, ... },
-    Events: struct { Collision, SpawnEvent, ... },
+    Components: .{ Position, Velocity, Health, ... },
+    Resources: .{ DeltaTime, GameState, ... },
+    Events: .{ Collision, SpawnEvent, ... },
     Groups: .{ struct { Position, Velocity }, struct { Sprite, Layer } }
 )
 ```

@@ -152,9 +152,9 @@ fn activeEnemySystem(
 **Defined in World signature**:
 ```zig
 const World = sparze.World(
-    struct { Position, Velocity },
-    struct { DeltaTime },
-    struct {},
+    .{ Position, Velocity },
+    .{ DeltaTime },
+    .{},
     .{ struct { Position, Velocity } },
 );
 ```
@@ -184,9 +184,9 @@ fn physicsSystem(physics: Group(struct { Position, Velocity })) !void {
 **Defined in World signature**:
 ```zig
 const World = sparze.World(
-    struct { Position, Velocity, Health },
-    struct {},
-    struct {},
+.{ Position, Velocity, Health },
+.{},
+.{},
     .{ struct { Position, Velocity, Free(Health) } },
 );
 ```
@@ -230,9 +230,9 @@ fn physicsSystem(
 
 ```zig
 const World = sparze.World(
-    struct { Position, Velocity, Health, Armor },
-    struct {},
-    struct {},
+.{ Position, Velocity, Health, Armor },
+.{},
+.{},
     .{
         // Group 1: Physics system owns Position, Velocity; reads Health
         struct { Position, Velocity, Free(Health) },
@@ -250,9 +250,9 @@ const World = sparze.World(
 
 ```zig
 const World = sparze.World(
-    struct { Position, Sprite, Layer, Velocity, Mass },
-    struct {},
-    struct {},
+.{ Position, Sprite, Layer, Velocity, Mass },
+.{},
+.{},
     .{
         // Group 1: Rendering
         struct { Position, Sprite, Layer },
@@ -269,9 +269,9 @@ const World = sparze.World(
 
 ```zig
 const World = sparze.World(
-    struct { AIState, Target, Position, Velocity },
-    struct {},
-    struct {},
+.{ AIState, Target, Position, Velocity },
+.{},
+.{},
     .{
         // Stage 1: AI decision making
         struct { AIState, Target },
@@ -377,9 +377,9 @@ Group(struct { Position, Velocity, Free(Health) })
 2. **Ownership conflicts**: Two groups can't own the same component
    ```zig
    const World = sparze.World(
-       struct { A, B, C },
-       struct {},
-       struct {},
+       .{ A, B, C },
+       .{},
+       .{},
        .{
            struct { A, B },
            struct { B, C }, // Error! B already owned

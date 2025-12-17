@@ -11,7 +11,7 @@ test "Query with optional components" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Health }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity, Health }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -68,7 +68,7 @@ test "Query CombinationIterator - all unique pairs" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -128,7 +128,7 @@ test "Query CombinationIterator - with filtering" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -182,7 +182,7 @@ test "Query CombinationIterator - empty and single entity" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -220,7 +220,7 @@ test "Query optional components with mutation" {
     const Position = struct { x: f32, y: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Health }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Health }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

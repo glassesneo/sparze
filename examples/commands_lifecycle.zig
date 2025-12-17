@@ -18,9 +18,9 @@ const Health = struct { hp: i32 };
 const Expired = struct {}; // Marker for entities to be destroyed
 
 const World = sparze.World(
-    struct { Position, Velocity, Health, Expired },
-    struct {},
-    struct {},
+    .{ Position, Velocity, Health, Expired },
+    .{},
+    .{},
     .{},
 );
 

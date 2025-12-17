@@ -16,9 +16,9 @@ test "Tag storage - sequential entity destruction edge case" {
     const Position = struct { x: f32, y: f32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Enemy },
-        struct {},
-        struct {},
+.{ Position, Enemy },
+.{},
+.{},
         .{},
     );
 
@@ -57,7 +57,7 @@ test "Query filters out destroyed entities in Debug/ReleaseSafe" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -103,7 +103,7 @@ test "TagQuery filters out destroyed entities in Debug/ReleaseSafe" {
     const Enemy = struct {};
     const Active = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Enemy, Active }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Enemy, Active }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -150,7 +150,7 @@ test "Query combinations() skips destroyed entities" {
     const Position = struct { x: f32, y: f32 };
     const Collider = struct { radius: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Collider }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Collider }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -202,7 +202,7 @@ test "Query crossProduct() skips destroyed entities" {
     const Projectile = struct {};
     const Enemy = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Projectile, Enemy }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Projectile, Enemy }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

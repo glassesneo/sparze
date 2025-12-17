@@ -51,9 +51,9 @@ const HealthGroup = struct { Health, sparze.Free(Position) };
 // Groups are defined in the World signature and automatically created!
 
 const World = sparze.World(
-    struct { Position, Velocity, Health, Name, Sprite, Color }, // Components
-    struct {}, // Resources
-    struct {}, // Events
+    .{ Position, Velocity, Health, Name, Sprite, Color }, // Components
+    .{}, // Resources
+    .{}, // Events
     .{ MovementGroup, RenderGroup, HealthGroup }, // Groups (compile-time!)
 );
 

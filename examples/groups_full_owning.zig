@@ -35,9 +35,9 @@ const CombatGroup = struct { Health, Armor };
 // They are automatically created and validated at compile-time!
 
 const World = sparze.World(
-    struct { Position, Velocity, Health, Armor }, // Components
-    struct {}, // Resources
-    struct {}, // Events
+    .{ Position, Velocity, Health, Armor }, // Components
+    .{}, // Resources
+    .{}, // Events
     .{ MovementGroup, CombatGroup }, // Groups (compile-time!)
 );
 

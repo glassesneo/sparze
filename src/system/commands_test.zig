@@ -14,7 +14,7 @@ test "Commands with frame-based execution" {
     const Velocity = struct { dx: f32, dy: f32 };
     const Enemy = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity, Enemy }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity, Enemy }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -59,7 +59,7 @@ test "Commands remove and destroy operations" {
     const Health = struct { hp: i32 };
     const Dead = struct {};
 
-    const TestWorld = @import("../world.zig").World(struct { Health, Dead }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Health, Dead }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -108,7 +108,7 @@ test "Commands createEntityWith convenience method" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -142,7 +142,7 @@ test "Commands createEntityWith convenience method" {
 test "Commands destroyEntity handles multiple destroy commands for same entity" {
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Health }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Health }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -207,7 +207,7 @@ test "Commands prevent zombie entity: destroy then add component" {
     const Position = struct { x: f32, y: f32 };
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Health }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Health }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -248,7 +248,7 @@ test "Commands prevent zombie entity: destroy then remove component" {
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position, Velocity }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position, Velocity }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -286,7 +286,7 @@ test "Commands prevent zombie entity: destroy then remove component" {
 test "Commands handle entity recycling with version validation" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position }, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

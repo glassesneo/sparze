@@ -37,9 +37,9 @@ const Velocity = struct {
 // - Groups: Compile-time group definitions (none for this minimal example)
 
 const World = sparze.World(
-    struct { Position, Velocity }, // Components this world can store
-    struct {}, // No resources for now
-    struct {}, // No events for now
+    .{ Position, Velocity }, // Components this world can store
+    .{}, // No resources for now
+    .{}, // No events for now
     .{}, // No groups for now
 );
 

@@ -69,14 +69,16 @@ const sparze = @import("sparze");
 const Position = struct { x: f32, y: f32 };
 const Velocity = struct { x: f32, y: f32 };
 
-// Define World with component types and resources
-const World = sparze.World(
-    struct { Position, Velocity }, // Components
-    struct {}                       // Resources (none in this example)
-);
-
 // Declare group type constant (recommended best practice)
 const MovementGroup = struct { Position, Velocity };
+
+// Define World with component types, resources, events, and groups
+const World = sparze.World(
+    .{ Position, Velocity },      // Components
+    .{},                          // Resources (none in this example)
+    .{},                          // Events (none in this example)
+    .{ MovementGroup },           // Groups (compile-time)
+);
 
 // Define system as plain function
 fn movementSystem(group: sparze.Group(MovementGroup)) !void {
@@ -96,9 +98,6 @@ pub fn main() !void {
 
     var world = World.init(allocator);
     defer world.deinit();
-
-    // Create group for entities with both Position and Velocity
-    try world.createGroup(MovementGroup);
 
     // Create entities
     const entity = world.createEntity();
@@ -277,7 +276,7 @@ const Player = struct {};
 const Enemy = struct {};
 const Active = struct {};
 
-const World = sparze.World(struct { Position, Player, Enemy, Active }, struct {});
+const World = sparze.World(.{ Position, Player, Enemy, Active }, .{}, .{}, .{});
 
 var world = World.init(allocator);
 defer world.deinit();
@@ -351,8 +350,10 @@ const Velocity = struct { dx: f32, dy: f32 };
 
 // Create world with both components and resources
 const World = sparze.World(
-    struct { Position, Velocity },          // Components
-    struct { DeltaTime, Score, GameConfig } // Resources
+    .{ Position, Velocity },              // Components
+    .{ DeltaTime, Score, GameConfig },    // Resources
+    .{},                                   // Events
+    .{},                                   // Groups
 );
 
 pub fn main() !void {
@@ -498,9 +499,10 @@ const Velocity = struct { x: f32, y: f32 };
 const Score = struct { points: i32 };
 
 const World = sparze.World(
-    struct { Position, Velocity },
-    struct { Score },
-    struct {},
+    .{ Position, Velocity },
+    .{ Score },
+    .{},
+    .{},
 );
 
 pub fn main() !void {

@@ -9,7 +9,7 @@ const Group = root.Group;
 test "System function with Allocator parameter" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position }, .{}, .{}, .{});
 
     const AllocatorSystem = struct {
         fn system(allocator: std.mem.Allocator) !void {
@@ -35,7 +35,7 @@ test "System function with Allocator parameter" {
 test "System function with Allocator and query filter parameters" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position }, .{}, .{}, .{});
 
     const MixedSystem = struct {
         fn system(allocator: std.mem.Allocator, query: SingleQuery(Position)) !void {
@@ -69,7 +69,7 @@ test "System function with Allocator and query filter parameters" {
 test "System function with Allocator and Commands parameters" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(struct { Position }, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{ Position }, .{}, .{}, .{});
 
     const SpawnSystem = struct {
         fn system(allocator: std.mem.Allocator, commands: anytype) !void {
@@ -110,9 +110,9 @@ test "System function with Allocator, query filter, and Commands parameters" {
     const Velocity = struct { dx: f32, dy: f32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Velocity },
-        struct {},
-        struct {},
+.{ Position, Velocity },
+.{},
+.{},
         .{struct { Position, Velocity }},
     );
 
@@ -166,7 +166,7 @@ test "System function with Allocator, query filter, and Commands parameters" {
 }
 
 test "System function verifies allocator is world allocator" {
-    const TestWorld = @import("../world.zig").World(struct {}, struct {}, struct {}, .{});
+    const TestWorld = @import("../world.zig").World(.{}, .{}, .{}, .{});
 
     const CheckAllocatorSystem = struct {
         var captured_allocator: ?std.mem.Allocator = null;

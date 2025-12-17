@@ -123,9 +123,9 @@ fn physicsSystem(physics: Group(struct { Position, Velocity })) !void {
 **Setup**:
 ```zig
 const World = sparze.World(
-    struct { Position, Velocity },
-    struct {},
-    struct {},
+.{ Position, Velocity },
+.{},
+.{},
     .{ struct { Position, Velocity } }, // Groups
 );
 var world = try World.init(allocator);
@@ -141,9 +141,9 @@ Use partial-owning groups when some components are accessed frequently, others r
 const PhysicsGroup = struct { Position, Velocity, Free(Health) };
 
 const World = sparze.World(
-    struct { Position, Velocity, Health },
-    struct {},
-    struct {},
+.{ Position, Velocity, Health },
+.{},
+.{},
     .{ PhysicsGroup },
 );
 // Own Position/Velocity (hot path), access Health occasionally
@@ -221,9 +221,9 @@ try world.runSystem(renderSystem);    // Sprite, Layer
 **BAD** (large group):
 ```zig
 const World = sparze.World(
-    struct { A, B, C, D, E, F },
-    struct {},
-    struct {},
+.{ A, B, C, D, E, F },
+.{},
+.{},
     .{ struct { A, B, C, D, E, F } },
 );
 // Entity must have ALL 6 components to be in group
@@ -233,9 +233,9 @@ const World = sparze.World(
 **GOOD** (focused group):
 ```zig
 const World = sparze.World(
-    struct { A, B, C, D },
-    struct {},
-    struct {},
+.{ A, B, C, D },
+.{},
+.{},
     .{ struct { A, B, Free(C), Free(D) } },
 );
 // Owns A, B (hot path), accesses C, D (cold path)

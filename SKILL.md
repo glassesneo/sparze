@@ -13,10 +13,10 @@ Expert guidance for building high-performance Entity Component System applicatio
 
 ```zig
 const World = sparze.World(
-    struct { Position, Velocity, Health },  // Components
-    struct { DeltaTime, Score },            // Resources
-    struct { CollisionEvent },              // Events
-    .{ struct { Position, Velocity } }      // Groups (compile-time)
+    .{ Position, Velocity, Health },     // Components
+    .{ DeltaTime, Score },               // Resources
+    .{ CollisionEvent },                 // Events
+    .{ struct { Position, Velocity } },  // Groups (compile-time)
 );
 ```
 
@@ -145,9 +145,9 @@ while (it.next()) |entity| {
 // Define groups in World signature
 const MovementGroup = struct { Position, Velocity };
 const World = sparze.World(
-    struct { Position, Velocity },
-    struct {},
-    struct {},
+    .{ Position, Velocity },
+    .{},
+    .{},
     .{ MovementGroup },  // Groups defined at compile-time
 );
 

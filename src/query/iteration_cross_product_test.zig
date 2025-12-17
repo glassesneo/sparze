@@ -14,9 +14,9 @@ test "CrossProductIterator - Query × Query basic usage" {
     const Collider = struct { radius: f32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Projectile, Enemy, Transform, Collider },
-        struct {},
-        struct {},
+.{ Projectile, Enemy, Transform, Collider },
+.{},
+.{},
         .{},
     );
 
@@ -82,9 +82,9 @@ test "CrossProductIterator - Query × Query with filtering" {
     const Transform = struct { x: f32, y: f32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Projectile, Enemy, Active, Transform },
-        struct {},
-        struct {},
+.{ Projectile, Enemy, Active, Transform },
+.{},
+.{},
         .{},
     );
 
@@ -155,9 +155,9 @@ test "CrossProductIterator - SimpleCrossProductIterator with SingleTag" {
     const Enemy = struct {};
 
     const TestWorld = @import("../world.zig").World(
-        struct { Projectile, Enemy },
-        struct {},
-        struct {},
+.{ Projectile, Enemy },
+.{},
+.{},
         .{},
     );
 
@@ -207,9 +207,9 @@ test "CrossProductIterator - empty queries" {
     const Transform = struct { x: f32, y: f32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Projectile, Enemy, Transform },
-        struct {},
-        struct {},
+.{ Projectile, Enemy, Transform },
+.{},
+.{},
         .{},
     );
 
@@ -238,9 +238,9 @@ test "CrossProductIterator - asymmetric sizes" {
     const Enemy = struct {};
 
     const TestWorld = @import("../world.zig").World(
-        struct { Projectile, Enemy },
-        struct {},
-        struct {},
+.{ Projectile, Enemy },
+.{},
+.{},
         .{},
     );
 

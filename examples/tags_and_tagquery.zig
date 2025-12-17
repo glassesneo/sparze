@@ -31,9 +31,9 @@ const Active = struct {}; // Entity is active/enabled
 const Poisoned = struct {}; // Entity has poison status effect
 
 const World = sparze.World(
-    struct { Position, Health, Player, Enemy, Boss, Active, Poisoned },
-    struct {},
-    struct {},
+    .{ Position, Health, Player, Enemy, Boss, Active, Poisoned },
+    .{},
+    .{},
     .{},
 );
 

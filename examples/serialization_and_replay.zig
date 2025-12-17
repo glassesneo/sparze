@@ -150,7 +150,7 @@ const DamageEvent = struct {
 
 const World = sparze.World(
     // Components
-    struct {
+    .{
         Position,
         Velocity,
         Health,
@@ -160,12 +160,12 @@ const World = sparze.World(
         Enemy,
     },
     // Resources
-    struct {
+    .{
         GameConfig,
         GameState,
     },
     // Events
-    struct {
+    .{
         DamageEvent,
     },
     // Groups

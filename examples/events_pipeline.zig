@@ -53,9 +53,9 @@ const SpawnEvent = struct {
 };
 
 const World = sparze.World(
-    struct { Position, Velocity, Health, Collider },
-    struct {},
-    struct { CollisionEvent, DamageEvent, DeathEvent, SpawnEvent }, // Events!
+    .{ Position, Velocity, Health, Collider },
+    .{},
+    .{ CollisionEvent, DamageEvent, DeathEvent, SpawnEvent }, // Events!
     .{},
 );
 

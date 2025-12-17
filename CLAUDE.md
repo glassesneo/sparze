@@ -30,10 +30,10 @@ zig build run-{example-name}  # Run specific example
 **Quick Start**:
 ```zig
 const World = sparze.World(
-    struct { Position, Velocity },      // Components
-    struct { DeltaTime },                 // Resources
-    struct {},                            // Events
-    .{ struct { Position, Velocity } },  // Groups (compile-time)
+    .{ Position, Velocity },              // Components
+    .{ DeltaTime },                        // Resources
+    .{},                                   // Events
+    .{ struct { Position, Velocity } },   // Groups (compile-time)
 );
 var world = try World.init(allocator);
 try world.initResources(.{ .delta_time = DeltaTime{ .value = 0.016 } });

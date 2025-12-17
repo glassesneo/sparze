@@ -6,7 +6,7 @@ const ResourceMut = @import("../query/filter.zig").ResourceMut;
 // Test: Commands.setResource() marks resource as initialized
 test "Commands.setResource marks resource as initialized" {
     const GameConfig = struct { gravity: f32 };
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -37,7 +37,7 @@ test "Commands.setResource marks resource as initialized" {
 // Test: Commands.getResource() with initialized resource
 test "Commands.getResource with initialized resource" {
     const Score = struct { points: i32 };
-    const TestWorld = World(struct {}, struct { Score }, struct {}, .{});
+    const TestWorld = World(.{}, .{ Score }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -63,7 +63,7 @@ test "Commands.getResource with initialized resource" {
 // Test: Commands.getResourcePtr() and Commands.getResourcePtrMut()
 test "Commands.getResourcePtr and getResourcePtrMut" {
     const GameState = struct { level: i32, score: i32 };
-    const TestWorld = World(struct {}, struct { GameState }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameState }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -99,7 +99,7 @@ test "Commands.getResourcePtr and getResourcePtrMut" {
 // Test: Commands.tryGetResource() returns error when uninitialized
 test "Commands.tryGetResource returns error when uninitialized" {
     const GameConfig = struct { gravity: f32 };
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -121,7 +121,7 @@ test "Commands.tryGetResource returns error when uninitialized" {
 // Test: Commands.tryGetResource() succeeds when initialized
 test "Commands.tryGetResource succeeds when initialized" {
     const GameConfig = struct { gravity: f32 };
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -146,7 +146,7 @@ test "Commands.tryGetResource succeeds when initialized" {
 // Test: Commands.tryGetResourceMut() error handling
 test "Commands.tryGetResourceMut error handling" {
     const Score = struct { points: i32 };
-    const TestWorld = World(struct {}, struct { Score }, struct {}, .{});
+    const TestWorld = World(.{}, .{ Score }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -187,7 +187,7 @@ test "Commands.initResources bulk initialization" {
     const Score = struct { points: i32 };
     const GameConfig = struct { gravity: f32 };
 
-    const TestWorld = World(struct {}, struct { DeltaTime, Score, GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ DeltaTime, Score, GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -228,7 +228,7 @@ test "Commands.initResources bulk initialization" {
 // Test: Commands.isResourceInitialized()
 test "Commands.isResourceInitialized check" {
     const GameConfig = struct { gravity: f32 };
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -257,7 +257,7 @@ test "Commands.isResourceInitialized check" {
 test "Commands and Resource parameters work together" {
     const DeltaTime = struct { dt: f32 };
     const Score = struct { points: i32 };
-    const TestWorld = World(struct {}, struct { DeltaTime, Score }, struct {}, .{});
+    const TestWorld = World(.{}, .{ DeltaTime, Score }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -307,7 +307,7 @@ test "Commands and Resource parameters work together" {
 // Test: Commands resource operations are immediate (not deferred)
 test "Commands resource operations are immediate" {
     const Score = struct { points: i32 };
-    const TestWorld = World(struct {}, struct { Score }, struct {}, .{});
+    const TestWorld = World(.{}, .{ Score }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

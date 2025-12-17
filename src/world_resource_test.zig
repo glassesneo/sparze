@@ -12,7 +12,7 @@ const World = @import("world.zig").World;
 //         max_speed: f32,
 //     };
 //
-//     const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+//     const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 //
 //     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
 //     defer arena.deinit();
@@ -31,7 +31,7 @@ const World = @import("world.zig").World;
 //         max_speed: f32,
 //     };
 //
-//     const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+//     const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 //
 //     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
 //     defer arena.deinit();
@@ -50,7 +50,7 @@ const World = @import("world.zig").World;
 //         max_speed: f32,
 //     };
 //
-//     const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+//     const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 //
 //     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
 //     defer arena.deinit();
@@ -70,7 +70,7 @@ test "tryGetResource returns error when uninitialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -90,7 +90,7 @@ test "tryGetResource succeeds when initialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -115,7 +115,7 @@ test "tryGetResourceMut returns error when uninitialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -135,7 +135,7 @@ test "tryGetResourceMut succeeds when initialized" {
         level: i32,
     };
 
-    const TestWorld = World(struct {}, struct { GameState }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameState }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -165,7 +165,7 @@ test "getResourcePtrMut does not auto-mark as initialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -198,7 +198,7 @@ test "setResource marks resource as initialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -223,7 +223,7 @@ test "initResources initializes multiple resources" {
     const Score = struct { points: i32 };
     const GameConfig = struct { gravity: f32 };
 
-    const TestWorld = World(struct {}, struct { DeltaTime, Score, GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ DeltaTime, Score, GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -261,7 +261,7 @@ test "initResources can initialize subset of resources" {
     const Score = struct { points: i32 };
     const GameConfig = struct { gravity: f32 };
 
-    const TestWorld = World(struct {}, struct { DeltaTime, Score, GameConfig }, struct {}, .{});
+    const TestWorld = World(.{}, .{ DeltaTime, Score, GameConfig }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -299,7 +299,7 @@ test "initialized resources work normally with assertions" {
         level: i32,
     };
 
-    const TestWorld = World(struct {}, struct { GameConfig, GameState }, struct {}, .{});
+    const TestWorld = World(.{}, .{ GameConfig, GameState }, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

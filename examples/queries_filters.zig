@@ -22,9 +22,9 @@ const Shield = struct { value: i32 };
 const Invulnerable = struct {}; // Tag component - entities with this can't be damaged
 
 const World = sparze.World(
-    struct { Position, Velocity, Health, Shield, Invulnerable },
-    struct {},
-    struct {},
+    .{ Position, Velocity, Health, Shield, Invulnerable },
+    .{},
+    .{},
     .{},
 );
 

@@ -23,9 +23,9 @@ test "Partial-owning group - basic functionality" {
     const Free = FilterModule.Free;
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Velocity, Health },
-        struct {},
-        struct {},
+        .{ Position, Velocity, Health },
+        .{},
+        .{},
         .{struct { Position, Velocity, Free(Health) }},
     );
 
@@ -81,9 +81,9 @@ test "Partial-owning group - shared free component" {
     const Free = FilterModule.Free;
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Velocity, Health, Shield },
-        struct {},
-        struct {},
+        .{ Position, Velocity, Health, Shield },
+        .{},
+        .{},
         .{ struct { Position, Velocity, Free(Health) }, struct { Health, Shield } },
     );
 
@@ -121,9 +121,9 @@ test "Ownership conflict detection" {
     const Health = struct { hp: i32 };
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Velocity, Health },
-        struct {},
-        struct {},
+        .{ Position, Velocity, Health },
+        .{},
+        .{},
         .{},
     );
 
@@ -149,9 +149,9 @@ test "Partial-owning group - getComponent for free components" {
     const Free = FilterModule.Free;
 
     const TestWorld = @import("../world.zig").World(
-        struct { Position, Velocity, Health },
-        struct {},
-        struct {},
+        .{ Position, Velocity, Health },
+        .{},
+        .{},
         .{struct { Position, Velocity, Free(Health) }},
     );
 
