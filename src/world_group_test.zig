@@ -13,9 +13,9 @@ test "Groups: order-insensitive matching" {
     const GroupBA = struct { Velocity, Position };
 
     const TestWorld = World(
-.{ Position, Velocity, Health },
-.{},
-.{},
+        .{ Position, Velocity, Health },
+        .{},
+        .{},
         .{GroupAB}, // Register with A, B order
     );
 
@@ -33,9 +33,9 @@ test "Groups: deserialization repopulates groups" {
     const MovementGroup = struct { Position, Velocity };
 
     const TestWorld = World(
-.{ Position, Velocity },
-.{},
-.{},
+        .{ Position, Velocity },
+        .{},
+        .{},
         .{MovementGroup},
     );
 

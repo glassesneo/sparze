@@ -16,9 +16,9 @@ test "Tag storage - sequential entity destruction edge case" {
     const Position = struct { x: f32, y: f32 };
 
     const TestWorld = @import("../world.zig").World(
-.{ Position, Enemy },
-.{},
-.{},
+        .{ Position, Enemy },
+        .{},
+        .{},
         .{},
     );
 

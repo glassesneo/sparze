@@ -10,9 +10,9 @@ test "SingleQuery basic iteration" {
     const Velocity = struct { dx: f32, dy: f32 };
 
     const TestWorld = @import("../world.zig").World(
-.{ Position, Velocity },
-.{},
-.{},
+        .{ Position, Velocity },
+        .{},
+        .{},
         .{struct { Position, Velocity }},
     );
 
@@ -91,7 +91,7 @@ test "Group query basic usage" {
 test "World system function with SingleQuery" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(.{ Position }, .{}, .{}, .{});
+    const TestWorld = @import("../world.zig").World(.{Position}, .{}, .{}, .{});
 
     const UpdatePositions = struct {
         fn system(query: SingleQuery(Position)) void {
@@ -130,9 +130,9 @@ test "World system function with Group" {
     const Velocity = struct { dx: f32, dy: f32 };
 
     const TestWorld = @import("../world.zig").World(
-.{ Position, Velocity },
-.{},
-.{},
+        .{ Position, Velocity },
+        .{},
+        .{},
         .{struct { Position, Velocity }},
     );
 
@@ -182,9 +182,9 @@ test "World system with multiple queries" {
     const Health = struct { hp: i32 };
 
     const TestWorld = @import("../world.zig").World(
-.{ Position, Velocity, Health },
-.{},
-.{},
+        .{ Position, Velocity, Health },
+        .{},
+        .{},
         .{struct { Position, Velocity }},
     );
 

@@ -142,7 +142,7 @@ test "Commands createEntityWith convenience method" {
 test "Commands destroyEntity handles multiple destroy commands for same entity" {
     const Health = struct { hp: i32 };
 
-    const TestWorld = @import("../world.zig").World(.{ Health }, .{}, .{}, .{});
+    const TestWorld = @import("../world.zig").World(.{Health}, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -286,7 +286,7 @@ test "Commands prevent zombie entity: destroy then remove component" {
 test "Commands handle entity recycling with version validation" {
     const Position = struct { x: f32, y: f32 };
 
-    const TestWorld = @import("../world.zig").World(.{ Position }, .{}, .{}, .{});
+    const TestWorld = @import("../world.zig").World(.{Position}, .{}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

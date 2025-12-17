@@ -70,7 +70,7 @@ test "tryGetResource returns error when uninitialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
+    const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -90,7 +90,7 @@ test "tryGetResource succeeds when initialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
+    const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -115,7 +115,7 @@ test "tryGetResourceMut returns error when uninitialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
+    const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -135,7 +135,7 @@ test "tryGetResourceMut succeeds when initialized" {
         level: i32,
     };
 
-    const TestWorld = World(.{}, .{ GameState }, .{}, .{});
+    const TestWorld = World(.{}, .{GameState}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -165,7 +165,7 @@ test "getResourcePtrMut does not auto-mark as initialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
+    const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -198,7 +198,7 @@ test "setResource marks resource as initialized" {
         max_speed: f32,
     };
 
-    const TestWorld = World(.{}, .{ GameConfig }, .{}, .{});
+    const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
