@@ -53,6 +53,21 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                         args[i] = world.allocator;
                     } else if (ArgType == CommandsType) {
                         args[i] = CommandsType.init(world, &world.command_buffer);
+                    } else if (@typeInfo(ArgType) == .pointer) {
+                        // Handle resource pointer types: *const T for Resource(T), *T for ResourceMut(T)
+                        const ptr_info = @typeInfo(ArgType).pointer;
+                        if (ptr_info.size != .one) {
+                            @compileError("System parameter pointer must be single-item pointer, got slice or multi-pointer: " ++ @typeName(ArgType));
+                        }
+                        const ChildType = ptr_info.child;
+                        // Validate this is a registered resource type (triggers compile error if not)
+                        _ = World.getResourceId(ChildType);
+
+                        if (ptr_info.is_const) {
+                            args[i] = world.getResourcePtr(ChildType);
+                        } else {
+                            args[i] = world.getResourcePtrMut(ChildType);
+                        }
                     } else if (@hasDecl(ArgType, "filter_type")) {
                         const filter_type: FilterType = ArgType.filter_type;
                         switch (filter_type) {
@@ -70,12 +85,6 @@ pub fn createSystemFunction(comptime World: type, comptime system_fn: anytype) f
                             },
                             .tag_query => {
                                 args[i] = ArgType.init(world);
-                            },
-                            .resource => {
-                                args[i] = ArgType.init(world.getResourcePtr(ArgType.ResourceType));
-                            },
-                            .resource_mut => {
-                                args[i] = ArgType.init(world.getResourcePtrMut(ArgType.ResourceType));
                             },
                             .event_reader => {
                                 args[i] = ArgType.init(world.getEventStoragePtr(ArgType.EventType));

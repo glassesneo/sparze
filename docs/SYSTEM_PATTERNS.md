@@ -52,8 +52,8 @@ fn movementSystem(
 
     for (entities, positions, velocities) |entity, *pos, vel| {
         // Update position
-        pos.x += vel.x * delta.value.value;
-        pos.y += vel.y * delta.value.value;
+        pos.x += vel.x * delta.value;
+        pos.y += vel.y * delta.value;
 
         // Boundary check
         if (pos.x < 0 or pos.x > 800) {
@@ -462,13 +462,13 @@ fn gameLogicSystem(
     state: ResourceMut(GameState),   // Mutable via parameter
     commands: anytype,
 ) !void {
-    const dt = delta.value.value;
-    state.value.score += 10;
+    const dt = delta.value;
+    state.score += 10;
 
     // Can also access via Commands
     if (commands.isResourceInitialized(PowerUpState)) {
         const powerup = commands.getResource(PowerUpState);
-        state.value.score += powerup.multiplier * 10;
+        state.score += powerup.multiplier * 10;
     }
 }
 ```

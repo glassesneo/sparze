@@ -384,19 +384,19 @@ fn physicsSystem(
     config: sparze.Resource(GameConfig),
     query: sparze.SingleQuery(Position),
 ) !void {
-    const dt = delta.value.dt;
-    const max_speed = config.value.max_speed;
+    const dt = delta.dt;
+    const max_speed = config.max_speed;
     
     for (query.components) |*pos| {
         // Use resources in system logic
-        pos.y -= config.value.gravity * dt;
+        pos.y -= config.gravity * dt;
     }
 }
 
 // System that mutates resources
-fn scoreSystem(score: sparze.Resource(Score)) !void {
-    score.value.points += 100;
-    score.value.combo += 1;
+fn scoreSystem(score: sparze.ResourceMut(Score)) !void {
+    score.points += 100;
+    score.combo += 1;
 }
 ```
 
@@ -405,7 +405,8 @@ fn scoreSystem(score: sparze.Resource(Score)) !void {
 - `world.getResource(R)` - Get resource by value (copy)
 - `world.getResourcePtr(R)` - Get const pointer to resource
 - `world.getResourcePtrMut(R)` - Get mutable pointer to resource
-- `sparze.Resource(R)` - System parameter type for resource injection
+- `sparze.Resource(R)` - Read-only resource parameter (`*const R`)
+- `sparze.ResourceMut(R)` - Mutable resource parameter (`*R`)
 
 **Common Use Cases**:
 - **Time**: Delta time, total elapsed time, frame count

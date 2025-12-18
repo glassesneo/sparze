@@ -1354,7 +1354,7 @@ test "Resource in system function" {
 
     const UpdateSystem = struct {
         fn system(delta: Resource(DeltaTime), query: SingleQuery(Position)) !void {
-            const dt = delta.value.dt;
+            const dt = delta.dt;
             for (query.components) |*pos| {
                 pos.x += 10.0 * dt;
                 pos.y += 5.0 * dt;
@@ -1402,8 +1402,8 @@ test "Resource mutation in system function" {
     const ScoreSystem = struct {
         fn system(score: ResourceMut(Score), query: SingleTag(Enemy)) !void {
             for (query.entities) |_| {
-                score.value.points += 100;
-                score.value.combo += 1;
+                score.points += 100;
+                score.combo += 1;
             }
         }
     };
@@ -1450,8 +1450,8 @@ test "System with multiple resources" {
             config: Resource(GameConfig),
             query: SingleQuery(Position),
         ) !void {
-            const dt = delta.value.dt;
-            const multiplier = config.value.speed_multiplier;
+            const dt = delta.dt;
+            const multiplier = config.speed_multiplier;
 
             for (query.components) |*pos| {
                 pos.x += 100.0 * dt * multiplier;
@@ -1504,8 +1504,8 @@ test "System with resource, allocator, query, and commands" {
 
             // Process each enemy, tracking score
             for (enemies.entities) |_| {
-                score.value.value += 100;
-                try spawn_positions.append(allocator, @as(f32, @floatFromInt(score.value.value)));
+                score.value += 100;
+                try spawn_positions.append(allocator, @as(f32, @floatFromInt(score.value)));
             }
 
             // Spawn new entities at calculated positions
@@ -2245,9 +2245,9 @@ test "Resource is read-only and ResourceMut is mutable" {
     const ReadOnlySystem = struct {
         fn system(config: Resource(GameConfig)) !void {
             // Read access works
-            _ = config.value.speed;
+            _ = config.speed;
             // Mutation would fail at compile time:
-            // config.value.speed = 100.0; // ERROR: cannot assign to constant
+            // config.speed = 100.0; // ERROR: cannot assign to constant
         }
     };
 
@@ -2255,8 +2255,8 @@ test "Resource is read-only and ResourceMut is mutable" {
     const MutableSystem = struct {
         fn system(score: ResourceMut(Score), config: ResourceMut(GameConfig)) !void {
             // Read and write access work
-            score.value.points += 100;
-            config.value.speed *= 1.5;
+            score.points += 100;
+            config.speed *= 1.5;
         }
     };
 
@@ -2264,7 +2264,7 @@ test "Resource is read-only and ResourceMut is mutable" {
     const MixedSystem = struct {
         fn system(config: Resource(GameConfig), score: ResourceMut(Score)) !void {
             // Read from config, write to score
-            score.value.points += @as(i32, @intFromFloat(config.value.speed * 10.0));
+            score.points += @as(i32, @intFromFloat(config.speed * 10.0));
         }
     };
 

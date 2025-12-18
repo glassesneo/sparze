@@ -282,11 +282,11 @@ test "Commands and Resource parameters work together" {
     const UpdateSystem = struct {
         fn system(delta: Resource(DeltaTime), score_mut: ResourceMut(Score), commands: anytype) !void {
             // Access via Resource parameter
-            const dt = delta.value.dt;
+            const dt = delta.dt;
             try std.testing.expectEqual(@as(f32, 0.016), dt);
 
             // Mutate via ResourceMut parameter
-            score_mut.value.points = 100;
+            score_mut.points = 100;
 
             // Also access via Commands
             const delta_via_commands = commands.getResource(DeltaTime);

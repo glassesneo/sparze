@@ -10,8 +10,6 @@ pub const FilterType = enum {
     group,
     single_tag,
     tag_query,
-    resource,
-    resource_mut,
     event_reader,
     event_writer,
 };

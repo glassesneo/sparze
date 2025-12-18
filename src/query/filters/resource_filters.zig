@@ -1,28 +1,21 @@
-const common = @import("common.zig");
-const FilterType = common.FilterType;
-
+/// Resource filters provide compile-time type-safe access to global singleton resources.
+/// Resources are injected into system functions as pointer types, allowing direct field access.
+///
+/// Usage:
+/// ```zig
+/// fn mySystem(delta: sparze.Resource(DeltaTime), score: sparze.ResourceMut(Score)) !void {
+///     const dt = delta.dt;      // Direct field access (no .value needed)
+///     score.points += 100;      // Mutable access
+/// }
+/// ```
+/// Read-only resource access. Returns `*const T` directly.
+/// Zig allows field access through pointers, so `delta.dt` works without dereferencing.
 pub fn Resource(comptime T: type) type {
-    return struct {
-        pub const filter_type: FilterType = .resource;
-        pub const ResourceType = T;
-
-        value: *const T,
-
-        pub fn init(resource_ptr: *const T) @This() {
-            return .{ .value = resource_ptr };
-        }
-    };
+    return *const T;
 }
 
+/// Mutable resource access. Returns `*T` directly.
+/// Use this when you need to modify the resource value.
 pub fn ResourceMut(comptime T: type) type {
-    return struct {
-        pub const filter_type: FilterType = .resource_mut;
-        pub const ResourceType = T;
-
-        value: *T,
-
-        pub fn init(resource_ptr: *T) @This() {
-            return .{ .value = resource_ptr };
-        }
-    };
+    return *T;
 }

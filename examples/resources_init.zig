@@ -69,7 +69,7 @@ fn movementSystem(
     query: sparze.SingleQuery(Position),
     vel_query: sparze.SingleQuery(Velocity),
 ) !void {
-    const dt = delta.value.dt;
+    const dt = delta.dt;
 
     for (query.entities, query.components) |entity, *pos| {
         for (vel_query.entities, vel_query.components) |vel_entity, vel| {
@@ -88,8 +88,8 @@ fn gravitySystem(
     delta: sparze.Resource(DeltaTime),
     vel_query: sparze.SingleQuery(Velocity),
 ) !void {
-    const gravity = config.value.gravity;
-    const dt = delta.value.dt;
+    const gravity = config.gravity;
+    const dt = delta.dt;
 
     for (vel_query.components) |*vel| {
         vel.dy += gravity * dt;
@@ -101,8 +101,8 @@ fn timeSystem(
     delta: sparze.Resource(DeltaTime),
     time: sparze.ResourceMut(GameTime),
 ) !void {
-    time.value.elapsed += delta.value.dt;
-    time.value.frame_count += 1;
+    time.elapsed += delta.dt;
+    time.frame_count += 1;
 }
 
 /// Scoring system - adds points each frame (for demo)
@@ -111,10 +111,10 @@ fn scoreSystem(
     query: sparze.SingleQuery(Position),
 ) !void {
     // Skip if paused
-    if (state.value.is_paused) return;
+    if (state.is_paused) return;
 
     // Award points for each entity
-    state.value.score += @intCast(query.entities.len);
+    state.score += @intCast(query.entities.len);
 }
 
 /// Boundary check system
@@ -124,10 +124,10 @@ fn boundarySystem(
 ) !void {
     for (query.components) |*pos| {
         // Wrap around world boundaries
-        if (pos.x < 0) pos.x += config.value.world_width;
-        if (pos.x > config.value.world_width) pos.x -= config.value.world_width;
+        if (pos.x < 0) pos.x += config.world_width;
+        if (pos.x > config.world_width) pos.x -= config.world_width;
         if (pos.y < 0) pos.y = 0; // Floor
-        if (pos.y > config.value.world_height) pos.y = config.value.world_height;
+        if (pos.y > config.world_height) pos.y = config.world_height;
     }
 }
 
