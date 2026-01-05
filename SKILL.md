@@ -1,6 +1,6 @@
 ---
 name: sparze
-description: Expert guidance for building ECS apps with Sparze: systems, queries, components, resources, events, and performance trade-offs.
+description: Expert guidance for Sparze ECS apps including systems, queries, components, resources, events, and performance trade-offs.
 ---
 
 # Sparze ECS Skill
