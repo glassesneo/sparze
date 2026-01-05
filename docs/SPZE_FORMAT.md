@@ -357,7 +357,7 @@ const Name = struct {
 
 ## Examples
 
-See `examples/serialization.zig` and `examples/commands_serialization.zig` for complete usage examples.
+See `examples/serialization_and_replay.zig` for a complete usage example.
 
 ## License
 

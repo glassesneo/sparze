@@ -25,7 +25,7 @@ zig build run-{example-name}  # Run specific example
 - **System Patterns**: @docs/SYSTEM_PATTERNS.md - System examples, Commands API reference, frame lifecycle
 - **Performance**: @docs/PERFORMANCE.md - Optimization strategies, benchmarking, anti-patterns
 
-**Examples**: `examples/` directory contains `basic.zig`, `movement_example.zig`, `events.zig`, `resources.zig`, `tag_components.zig`, `multiple_groups.zig`, `serialization.zig`, and `benchmarks/`.
+**Examples**: `examples/` directory - run with `zig build run-{example-name}` (e.g., `run-world_bootstrap`, `run-events_pipeline`).
 
 **Quick Start**:
 ```zig

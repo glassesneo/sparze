@@ -107,7 +107,7 @@ The World type is parameterized by four compile-time parameters:
 - `removeTag(Entity, type) void` - Remove tag immediately
 
 **Resource management**:
-- `setResource(type, T) !void` - Set resource value
+- `setResource(type, T) void` - Set resource value
 - `getResource(type) T` - Get resource value (unchecked)
 - `getResourcePtr(type) *const T` - Get resource pointer
 - `getResourcePtrMut(type) *T` - Get mutable resource pointer

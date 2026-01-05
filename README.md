@@ -365,9 +365,9 @@ pub fn main() !void {
     defer world.deinit();
 
     // Initialize resources - MUST be done before use
-    try world.setResource(DeltaTime, .{ .dt = 0.016 }); // 60 FPS
-    try world.setResource(Score, .{ .points = 0, .combo = 0 });
-    try world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
+    world.setResource(DeltaTime, .{ .dt = 0.016 }); // 60 FPS
+    world.setResource(Score, .{ .points = 0, .combo = 0 });
+    world.setResource(GameConfig, .{ .gravity = 9.8, .max_speed = 100.0 });
 
     // Systems can access resources alongside queries
     try world.runSystem(physicsSystem);
@@ -420,7 +420,7 @@ fn scoreSystem(score: sparze.ResourceMut(Score)) !void {
 - Always initialize resources with `setResource()` before running systems that use them
 - Use resources for global data, components for per-entity data
 - Keep resources focused and single-purpose
-- Resources are passed to systems as mutable pointers via `Resource(T).value`
+- Resources are passed to systems as pointers: `Resource(T)` is `*const T`, `ResourceMut(T)` is `*T`
 
 ### Optional Components and Tags
 
@@ -515,7 +515,7 @@ pub fn main() !void {
     defer world.deinit();
 
     // ... populate world with entities and components ...
-    try world.setResource(Score, .{ .points = 100 });
+    world.setResource(Score, .{ .points = 100 });
 
     // Save world state
     const save_file = try std.fs.cwd().createFile("save.spze", .{});
@@ -607,7 +607,7 @@ const Name = struct {
 - **Hybrid approach**: Automatic POD serialization, custom serializers for complex types
 - **Binary format**: `.spze` files (Sparze serialization format)
 
-See `examples/serialization.zig` and `examples/commands_serialization.zig` for complete examples.
+See `examples/serialization_and_replay.zig` for a complete example.
 
 ## Core Concepts
 
@@ -619,7 +619,7 @@ See `examples/serialization.zig` and `examples/commands_serialization.zig` for c
 
 **Resources**: Global, singleton data accessible across all systems
 - Defined at World creation time alongside components
-- Must be initialized with `setResource()` before use
+- Resources auto-initialize to zero by default; use `initResources()` for explicit values or `setResource()` to update
 - Accessed in systems via `Resource(T)` parameter type
 
 **Systems**: Functions that operate on entities with specific component combinations and/or access global resources
@@ -636,44 +636,11 @@ Query filters are types that filter entities based on component composition, use
 
 ## Examples
 
-Explore the `examples/` directory for comprehensive demonstrations:
+Explore the `examples/` directory for comprehensive demonstrations. Run with `zig build run-{example-name}`:
 
-- `basic.zig` - Entity and component basics
-- `combination_iterator.zig` - Iterating over all unique pairs of entities (collision detection example)
-- `cross_product.zig` - Cross-product iteration between different entity types
-- `events.zig` - Event system demonstration with collision detection
-- `exclude_example.zig` - Exclude modifier for filtering entities
-- `movement_example.zig` - Simple movement system using groups
-- `multiple_groups.zig` - Multiple non-overlapping groups with validation
-- `optional_components.zig` - Optional components and tags demonstration
-- `plugin_architecture.zig` - Plugin-style architecture
-- `resources.zig` - Global resources and state management
-- `serialization.zig` - World state persistence with custom serializers
-- `commands_serialization.zig` - Save/load using Commands API only
-- `system_operations.zig` - System patterns and multi-query examples
-- `tag_components.zig` - Tag component usage and patterns
-
-Run all examples:
 ```bash
-zig build run-examples
-```
-
-Run a specific example:
-```bash
-zig build run-basic
-zig build run-combination_iterator
-zig build run-cross_product
-zig build run-events
-zig build run-exclude_example
-zig build run-movement_example
-zig build run-multiple_groups
-zig build run-optional_components
-zig build run-plugin_architecture
-zig build run-resources
-zig build run-serialization
-zig build run-commands_serialization
-zig build run-system_operations
-zig build run-tag_components
+zig build examples              # Build all examples
+zig build run-world_bootstrap   # Run specific example
 ```
 
 ## Building and Testing

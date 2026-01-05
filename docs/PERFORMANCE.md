@@ -369,20 +369,6 @@ fn startup(commands: anytype) !void {
 
 ## Benchmarking and Profiling
 
-### Benchmark Examples
-
-See `examples/benchmarks/` for performance tests:
-
-- `group_iteration.zig`: Group vs Query iteration
-- `sparse_vs_dense.zig`: Sparse vs dense entity allocation
-- `tag_storage.zig`: TagStorage vs SparseSet for markers
-
-**Run benchmarks**:
-```bash
-zig build run-benchmark-group_iteration
-zig build run-benchmark-sparse_vs_dense
-```
-
 ### Profiling Tips
 
 1. **Use ReleaseFast** for accurate measurements:

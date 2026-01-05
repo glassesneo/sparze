@@ -354,7 +354,7 @@ pub fn main() !void {
     defer world.deinit();
 
     // Setup
-    try world.setResource(DeltaTime, .{ .value = 0.016 });
+    world.setResource(DeltaTime, .{ .value = 0.016 });
 
     // Game loop
     while (gameRunning) {
