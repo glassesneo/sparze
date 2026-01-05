@@ -4,6 +4,7 @@ const examples = [_]Example{
     .{ .name = "world_bootstrap" },
     .{ .name = "commands_lifecycle" },
     .{ .name = "resources_init" },
+    .{ .name = "resource_lifecycle" },
     .{ .name = "queries_filters" },
     .{ .name = "tags_and_tagquery" },
     .{ .name = "groups_full_owning" },

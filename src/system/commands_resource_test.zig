@@ -5,7 +5,10 @@ const ResourceMut = @import("../query/filter.zig").ResourceMut;
 
 // Test: Commands.setResource() marks resource as initialized
 test "Commands.setResource marks resource as initialized" {
-    const GameConfig = struct { gravity: f32 };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
     const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -21,7 +24,7 @@ test "Commands.setResource marks resource as initialized" {
         }
     };
 
-    // Resource not initialized yet
+    // Opt-out resource not initialized yet
     try std.testing.expect(!world.isResourceInitialized(GameConfig));
 
     // Run system that sets resource
@@ -98,7 +101,10 @@ test "Commands.getResourcePtr and getResourcePtrMut" {
 
 // Test: Commands.tryGetResource() returns error when uninitialized
 test "Commands.tryGetResource returns error when uninitialized" {
-    const GameConfig = struct { gravity: f32 };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
     const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -145,7 +151,10 @@ test "Commands.tryGetResource succeeds when initialized" {
 
 // Test: Commands.tryGetResourceMut() error handling
 test "Commands.tryGetResourceMut error handling" {
-    const Score = struct { points: i32 };
+    const Score = struct {
+        points: i32,
+        pub const auto_init = false;
+    };
     const TestWorld = World(.{}, .{Score}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -183,9 +192,18 @@ test "Commands.tryGetResourceMut error handling" {
 
 // Test: Commands.initResources() bulk initialization
 test "Commands.initResources bulk initialization" {
-    const DeltaTime = struct { dt: f32 };
-    const Score = struct { points: i32 };
-    const GameConfig = struct { gravity: f32 };
+    const DeltaTime = struct {
+        dt: f32,
+        pub const auto_init = false;
+    };
+    const Score = struct {
+        points: i32,
+        pub const auto_init = false;
+    };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
 
     const TestWorld = World(.{}, .{ DeltaTime, Score, GameConfig }, .{}, .{});
 
@@ -206,7 +224,7 @@ test "Commands.initResources bulk initialization" {
         }
     };
 
-    // None initialized yet
+    // Opt-out resources not initialized yet
     try std.testing.expect(!world.isResourceInitialized(DeltaTime));
     try std.testing.expect(!world.isResourceInitialized(Score));
     try std.testing.expect(!world.isResourceInitialized(GameConfig));
@@ -227,7 +245,10 @@ test "Commands.initResources bulk initialization" {
 
 // Test: Commands.isResourceInitialized()
 test "Commands.isResourceInitialized check" {
-    const GameConfig = struct { gravity: f32 };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
     const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -239,7 +260,7 @@ test "Commands.isResourceInitialized check" {
 
     const CheckInitSystem = struct {
         fn system(commands: anytype) !void {
-            // Should not be initialized yet
+            // Opt-out resource should not be initialized yet
             try std.testing.expect(!commands.isResourceInitialized(GameConfig));
 
             // Initialize it
@@ -306,7 +327,10 @@ test "Commands and Resource parameters work together" {
 
 // Test: Commands resource operations are immediate (not deferred)
 test "Commands resource operations are immediate" {
-    const Score = struct { points: i32 };
+    const Score = struct {
+        points: i32,
+        pub const auto_init = false;
+    };
     const TestWorld = World(.{}, .{Score}, .{}, .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

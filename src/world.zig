@@ -246,8 +246,28 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
                     }
                     break :init pool;
                 },
-                .resource_pool = if (resource_pool_length == 0) .{} else std.mem.zeroes(ResourcePoolType),
-                .resource_initialized = if (resource_pool_length == 0) {} else std.StaticBitSet(resource_pool_length).initEmpty(),
+                .resource_pool = if (resource_pool_length == 0) .{} else init_resources: {
+                    var pool: ResourcePoolType = undefined;
+                    inline for (resource_fields, 0..) |field, i| {
+                        const R = @field(Resources, field.name);
+                        pool[i] = Self.initializeResource(R, allocator);
+                    }
+                    break :init_resources pool;
+                },
+                .resource_initialized = if (resource_pool_length == 0) {} else init_bitset: {
+                    var bitset = std.StaticBitSet(resource_pool_length).initEmpty();
+                    inline for (resource_fields, 0..) |field, i| {
+                        const R = @field(Resources, field.name);
+                        const resource_traits = @import("resource_traits.zig");
+                        const strategy = resource_traits.getInitStrategy(R);
+
+                        // Mark as initialized for custom_init and zeroes modes
+                        if (strategy != .opt_out) {
+                            bitset.set(i);
+                        }
+                    }
+                    break :init_bitset bitset;
+                },
                 .event_pool = init: {
                     var pool: EventPoolType = undefined;
                     inline for (event_fields, 0..) |field, i| {
@@ -270,6 +290,14 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
 
         /// Deinitialize the World, freeing all component storages, event storages, group metadata, and the command buffer.
         pub fn deinit(self: *Self) void {
+            // Deinit resources FIRST (they may hold allocations)
+            if (comptime resource_pool_length > 0) {
+                inline for (resource_fields, 0..) |field, i| {
+                    const R = @field(Resources, field.name);
+                    self.deinitResource(R, i);
+                }
+            }
+
             self.command_buffer.deinit();
             for (self.groups.items) |*group| {
                 self.allocator.free(group.owned_component_ids);
@@ -301,6 +329,42 @@ pub fn World(Components: anytype, Resources: anytype, Events: anytype, Groups: a
                 const ResourceType = @field(Resources, field.name);
                 if (R == ResourceType) break i;
             } else @compileError("Unknown resource type: " ++ @typeName(R));
+        }
+
+        /// Initialize a Resource based on its compile-time traits
+        fn initializeResource(comptime R: type, allocator: Allocator) R {
+            const resource_traits = @import("resource_traits.zig");
+
+            // Validate resource type at compile time
+            if (comptime resource_traits.validateResource(R)) |err_msg| {
+                @compileError(err_msg);
+            }
+
+            // Use comptime if-else to eliminate unreachable branches
+            if (comptime !resource_traits.shouldAutoInit(R)) {
+                // Opt-out: leave uninitialized
+                return undefined;
+            } else if (comptime resource_traits.hasInitMethod(R)) {
+                // Custom init method
+                return R.init(allocator);
+            } else {
+                // POD fallback: zero-initialize
+                return std.mem.zeroes(R);
+            }
+        }
+
+        /// Deinitialize a Resource if it has deinit() method and is initialized
+        fn deinitResource(self: *Self, comptime R: type, comptime id: usize) void {
+            const resource_traits = @import("resource_traits.zig");
+
+            // Only deinit if has deinit method (comptime check to eliminate branch)
+            if (comptime !resource_traits.hasDeinitMethod(R)) return;
+
+            // Only deinit if initialized (runtime check)
+            if (!self.resource_initialized.isSet(id)) return;
+
+            // Call deinit
+            self.resource_pool[id].deinit(self.allocator);
         }
 
         /// Map an event type to its compile-time index in the event pool; the position in the Events struct field list becomes the stable ID.
@@ -2080,7 +2144,10 @@ test "World recommended usage pattern - validate groups upfront" {
 test "Serialization fails for uninitialized resources" {
     const Position = struct { x: f32, y: f32 };
     const GameConfig = struct { gravity: f32 };
-    const Score = struct { points: i32 };
+    const Score = struct {
+        points: i32,
+        pub const auto_init = false;
+    };
 
     const TestWorld = World(.{Position}, .{ GameConfig, Score }, .{}, .{});
 
@@ -2095,9 +2162,7 @@ test "Serialization fails for uninitialized resources" {
     const entity = world.createEntity();
     try world.addComponent(entity, Position, .{ .x = 10.0, .y = 20.0 });
 
-    // Initialize only one resource, leaving the other uninitialized
-    world.setResource(GameConfig, .{ .gravity = 9.8 });
-
+    // GameConfig is auto-initialized (POD), Score is opt-out and uninitialized
     // Try to serialize - should fail because Score is not initialized
     var buffer: std.ArrayListUnmanaged(u8) = .{};
     defer buffer.deinit(allocator);
@@ -2139,8 +2204,14 @@ test "Serialization succeeds when all resources are initialized" {
 }
 
 test "Resource initialization tracking" {
-    const GameConfig = struct { gravity: f32 };
-    const Score = struct { points: i32 };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
+    const Score = struct {
+        points: i32,
+        pub const auto_init = false;
+    };
 
     const TestWorld = World(.{}, .{ GameConfig, Score }, .{}, .{});
 
@@ -2151,7 +2222,7 @@ test "Resource initialization tracking" {
     var world = TestWorld.init(allocator);
     defer world.deinit();
 
-    // Initially, no resources should be initialized
+    // Initially, opt-out resources should not be initialized
     try std.testing.expect(!world.isResourceInitialized(GameConfig));
     try std.testing.expect(!world.isResourceInitialized(Score));
 
@@ -2167,8 +2238,14 @@ test "Resource initialization tracking" {
 }
 
 test "getResourcePtrMut allows mutation after initialization" {
-    const GameConfig = struct { gravity: f32 };
-    const Score = struct { points: i32 };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
+    const Score = struct {
+        points: i32,
+        pub const auto_init = false;
+    };
 
     const TestWorld = World(.{}, .{ GameConfig, Score }, .{}, .{});
 
@@ -2207,7 +2284,10 @@ test "getResourcePtrMut allows mutation after initialization" {
 }
 
 test "markResourceInitialized for direct resource_pool access" {
-    const GameConfig = struct { gravity: f32 };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
 
     const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
 
@@ -2221,7 +2301,7 @@ test "markResourceInitialized for direct resource_pool access" {
     // Directly assign to resource_pool (not recommended but supported)
     world.resource_pool[0] = .{ .gravity = 9.8 };
 
-    // Resource is not yet marked as initialized
+    // Opt-out resource is not yet marked as initialized
     try std.testing.expect(!world.isResourceInitialized(GameConfig));
 
     // Mark it initialized

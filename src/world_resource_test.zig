@@ -68,6 +68,7 @@ test "tryGetResource returns error when uninitialized" {
     const GameConfig = struct {
         gravity: f32,
         max_speed: f32,
+        pub const auto_init = false;
     };
 
     const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
@@ -79,7 +80,7 @@ test "tryGetResource returns error when uninitialized" {
     var world = TestWorld.init(allocator);
     defer world.deinit();
 
-    // Should return error
+    // Opt-out resource should return error
     try std.testing.expectError(error.UninitializedResource, world.tryGetResource(GameConfig));
 }
 
@@ -113,6 +114,7 @@ test "tryGetResourceMut returns error when uninitialized" {
     const GameConfig = struct {
         gravity: f32,
         max_speed: f32,
+        pub const auto_init = false;
     };
 
     const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
@@ -163,6 +165,7 @@ test "getResourcePtrMut does not auto-mark as initialized" {
     const GameConfig = struct {
         gravity: f32,
         max_speed: f32,
+        pub const auto_init = false;
     };
 
     const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
@@ -196,6 +199,7 @@ test "setResource marks resource as initialized" {
     const GameConfig = struct {
         gravity: f32,
         max_speed: f32,
+        pub const auto_init = false;
     };
 
     const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
@@ -219,9 +223,18 @@ test "setResource marks resource as initialized" {
 
 // Test: initResources helper
 test "initResources initializes multiple resources" {
-    const DeltaTime = struct { dt: f32 };
-    const Score = struct { points: i32 };
-    const GameConfig = struct { gravity: f32 };
+    const DeltaTime = struct {
+        dt: f32,
+        pub const auto_init = false;
+    };
+    const Score = struct {
+        points: i32,
+        pub const auto_init = false;
+    };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
 
     const TestWorld = World(.{}, .{ DeltaTime, Score, GameConfig }, .{}, .{});
 
@@ -257,9 +270,18 @@ test "initResources initializes multiple resources" {
 
 // Test: initResources with partial initialization
 test "initResources can initialize subset of resources" {
-    const DeltaTime = struct { dt: f32 };
-    const Score = struct { points: i32 };
-    const GameConfig = struct { gravity: f32 };
+    const DeltaTime = struct {
+        dt: f32,
+        pub const auto_init = false;
+    };
+    const Score = struct {
+        points: i32,
+        pub const auto_init = false;
+    };
+    const GameConfig = struct {
+        gravity: f32,
+        pub const auto_init = false;
+    };
 
     const TestWorld = World(.{}, .{ DeltaTime, Score, GameConfig }, .{}, .{});
 
@@ -324,4 +346,235 @@ test "initialized resources work normally with assertions" {
 
     const final_state = world.getResource(GameState);
     try std.testing.expectEqual(@as(i32, 100), final_state.score);
+}
+
+// ============================================================================
+// Integration Tests: Smart Resource Initialization
+// ============================================================================
+
+// Test: Resource with custom init() is auto-initialized
+test "Resource with init() is auto-initialized" {
+    const Cache = struct {
+        items: std.ArrayList(u8),
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            _ = allocator;
+            return .{ .items = .{} };
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            self.items.deinit(allocator);
+        }
+    };
+
+    const TestWorld = World(.{}, .{Cache}, .{}, .{});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Resource should be auto-initialized
+    try std.testing.expect(world.isResourceInitialized(Cache));
+
+    // Should be usable immediately
+    const cache = world.getResourcePtrMut(Cache);
+    try cache.items.append(allocator, 42);
+    try std.testing.expectEqual(@as(usize, 1), cache.items.items.len);
+    try std.testing.expectEqual(@as(u8, 42), cache.items.items[0]);
+}
+
+// Test: Resource with auto_init=false remains uninitialized
+test "Resource with auto_init=false remains uninitialized" {
+    const AudioEngine = struct {
+        device_id: u32,
+        pub const auto_init = false;
+    };
+
+    const TestWorld = World(.{}, .{AudioEngine}, .{}, .{});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Resource should NOT be auto-initialized
+    try std.testing.expect(!world.isResourceInitialized(AudioEngine));
+
+    // Manual initialization required
+    world.setResource(AudioEngine, .{ .device_id = 42 });
+    try std.testing.expect(world.isResourceInitialized(AudioEngine));
+    try std.testing.expectEqual(@as(u32, 42), world.getResource(AudioEngine).device_id);
+}
+
+// Test: POD Resource is zero-initialized (backward compatibility)
+test "POD Resource is zero-initialized" {
+    const GameConfig = struct {
+        gravity: f32,
+        max_speed: f32,
+    };
+
+    const TestWorld = World(.{}, .{GameConfig}, .{}, .{});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // POD Resource should be auto-initialized with zeroes
+    try std.testing.expect(world.isResourceInitialized(GameConfig));
+
+    const config = world.getResource(GameConfig);
+    try std.testing.expectEqual(@as(f32, 0.0), config.gravity);
+    try std.testing.expectEqual(@as(f32, 0.0), config.max_speed);
+}
+
+// Test: Mixed Resource types initialize correctly
+test "Mixed Resource types initialize correctly" {
+    const Database = struct {
+        items: std.ArrayList(u32),
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            _ = allocator;
+            return .{ .items = .{} };
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            self.items.deinit(allocator);
+        }
+    };
+
+    const AudioEngine = struct {
+        device_id: u32,
+        pub const auto_init = false;
+    };
+
+    const GameConfig = struct {
+        gravity: f32,
+        max_speed: f32,
+    };
+
+    const TestWorld = World(.{}, .{ Database, AudioEngine, GameConfig }, .{}, .{});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Database: custom init - should be initialized
+    try std.testing.expect(world.isResourceInitialized(Database));
+    const db = world.getResourcePtrMut(Database);
+    try db.items.append(allocator, 123);
+    try std.testing.expectEqual(@as(usize, 1), db.items.items.len);
+
+    // AudioEngine: opt-out - should NOT be initialized
+    try std.testing.expect(!world.isResourceInitialized(AudioEngine));
+    world.setResource(AudioEngine, .{ .device_id = 42 });
+    try std.testing.expect(world.isResourceInitialized(AudioEngine));
+
+    // GameConfig: POD - should be zero-initialized
+    try std.testing.expect(world.isResourceInitialized(GameConfig));
+    try std.testing.expectEqual(@as(f32, 0.0), world.getResource(GameConfig).gravity);
+}
+
+// Test: Resource deinit() is called on World.deinit()
+test "Resource deinit() is called on World.deinit()" {
+    const ResourceWithDeinit = struct {
+        buffer: std.ArrayList(u8),
+        deinit_called: *bool,
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            _ = allocator;
+            // Note: We can't pass deinit_called here in init, so we'll set it via setResource
+            return .{
+                .buffer = .{},
+                .deinit_called = undefined,
+            };
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            self.deinit_called.* = true;
+            self.buffer.deinit(allocator);
+        }
+    };
+
+    const TestWorld = World(.{}, .{ResourceWithDeinit}, .{}, .{});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var deinit_called = false;
+
+    {
+        var world = TestWorld.init(allocator);
+
+        // Set the deinit_called pointer
+        const res = world.getResourcePtrMut(ResourceWithDeinit);
+        res.deinit_called = &deinit_called;
+
+        // deinit() should be called when world is destroyed
+        world.deinit();
+    }
+
+    try std.testing.expect(deinit_called);
+}
+
+// Test: Multiple Resources with init/deinit work correctly
+test "Multiple Resources with init/deinit work correctly" {
+    const ResourceA = struct {
+        data: std.ArrayList(u8),
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            _ = allocator;
+            return .{ .data = .{} };
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            self.data.deinit(allocator);
+        }
+    };
+
+    const ResourceB = struct {
+        items: std.ArrayList(u32),
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            _ = allocator;
+            return .{ .items = .{} };
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            self.items.deinit(allocator);
+        }
+    };
+
+    const TestWorld = World(.{}, .{ ResourceA, ResourceB }, .{}, .{});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var world = TestWorld.init(allocator);
+    defer world.deinit();
+
+    // Both should be initialized
+    try std.testing.expect(world.isResourceInitialized(ResourceA));
+    try std.testing.expect(world.isResourceInitialized(ResourceB));
+
+    // Both should be usable
+    const res_a = world.getResourcePtrMut(ResourceA);
+    try res_a.data.append(allocator, 1);
+    try std.testing.expectEqual(@as(usize, 1), res_a.data.items.len);
+
+    const res_b = world.getResourcePtrMut(ResourceB);
+    try res_b.items.append(allocator, 42);
+    try std.testing.expectEqual(@as(usize, 1), res_b.items.items.len);
 }
